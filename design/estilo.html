@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="es" data-tema="dia">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wawitas — Dirección de estilo v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..900,0..100,0..1;1,9..144,300..900,0..100,0..1&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════
+   WAWITAS RED DE APOYO · sistema de diseño v2
+   Construido sobre la identidad real: jade #31907A,
+   la huella-corazón, y "De la calle, a tu corazón".
+   ══════════════════════════════════════════════════════════ */
+:root{
+  --crema:#F6F1E7;      /* papel cálido — el fondo */
+  --crema-2:#EDE5D6;    /* superficie hundida */
+  --jade:#31907A;       /* ▲ muestreado del logo y la portada */
+  --jade-hondo:#12463B; /* texto, profundidad, superficies oscuras */
+  --jade-claro:#7FC4AE; /* detalles sobre fondo oscuro */
+  --coral:#F0532B;      /* la acción: ADÓPTAME */
+  --sol:#F5B72B;        /* cinta, subrayados, destaques */
+  --carbon:#1A0E08;     /* texto sobre coral y sol */
+  --linea:rgba(18,70,59,.16);
+  --sombra:0 1px 0 rgba(18,70,59,.08), 0 12px 26px -14px rgba(18,70,59,.45);
+  --display:"Fraunces",Georgia,serif;
+  --texto:"Instrument Sans",system-ui,sans-serif;
+  --w-suave:"SOFT" 40,"WONK" 1;
+}
+[data-tema="noche"]{
+  --crema:#0D1714; --crema-2:#142320; --jade-hondo:#EFE9DC;
+  --linea:rgba(239,233,220,.15);
+  --sombra:0 1px 0 rgba(0,0,0,.4), 0 14px 30px -16px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--crema); color:var(--jade-hondo);
+  font-family:var(--texto); font-size:16.5px; line-height:1.62;
+  -webkit-font-smoothing:antialiased; transition:background .5s,color .5s;
+}
+/* grano — la capa que convierte "color de fondo" en "papel" */
+body::after{
+  content:"";position:fixed;inset:0;z-index:9999;pointer-events:none;
+  opacity:.45;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='.3'/%3E%3C/svg%3E");
+}
+[data-tema="noche"] body::after{mix-blend-mode:screen;opacity:.2}
+
+.env{max-width:1180px;margin:0 auto;padding:0 28px}
+h1,h2,h3,h4{font-family:var(--display);font-variation-settings:var(--w-suave);line-height:1}
+.sec{padding:78px 0;border-top:1px solid var(--linea)}
+.eyebrow{
+  font-family:var(--texto);font-size:11px;font-weight:600;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--coral);margin-bottom:20px;
+  display:flex;align-items:center;gap:13px;
+}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--linea)}
+.nota{font-size:15.5px;line-height:1.68;max-width:64ch;opacity:.85}
+.nota+.nota{margin-top:13px}
+.h2{font-family:var(--display);font-variation-settings:var(--w-suave);font-weight:600;
+  font-size:clamp(27px,3.6vw,42px);line-height:1.04;letter-spacing:-.02em}
+
+/* ══ PORTADA ══ */
+.portada{background:var(--jade);color:var(--crema);position:relative;overflow:hidden;padding:52px 0 0}
+.portada::before{
+  content:"";position:absolute;inset:0;
+  background-image:radial-gradient(rgba(255,255,255,.11) 1.5px,transparent 1.6px);
+  background-size:14px 14px;
+}
+.cabecera{display:flex;align-items:center;gap:20px;position:relative}
+.cabecera .logo{width:78px;flex:none}
+.marca{
+  font-family:var(--display);font-weight:900;font-variation-settings:"SOFT" 70,"WONK" 1,"opsz" 144;
+  font-size:clamp(44px,7.4vw,90px);line-height:.9;letter-spacing:-.035em;text-transform:uppercase;
+}
+.marca small{display:block;font-size:.17em;letter-spacing:.42em;font-weight:600;
+  font-variation-settings:"SOFT" 40,"WONK" 0;opacity:.85;margin-top:.5em;text-transform:uppercase}
+.lema{
+  font-family:var(--display);font-weight:400;font-style:italic;
+  font-variation-settings:"SOFT" 60,"WONK" 1;
+  font-size:clamp(24px,4.6vw,54px);line-height:1.05;letter-spacing:-.02em;
+  margin:38px 0 10px;position:relative;max-width:14ch;
+}
+.lema b{font-weight:900;font-style:normal;color:var(--sol)}
+.credenciales{display:flex;flex-wrap:wrap;gap:7px 20px;font-size:13px;opacity:.82;
+  padding:14px 0 40px;position:relative;letter-spacing:.02em}
+
+/* banda de recortes — el recurso propio de Wawitas */
+.banda{position:relative;height:132px;display:flex;align-items:flex-end;
+  justify-content:center;gap:clamp(2px,1.4vw,20px);padding:0 20px;overflow:hidden}
+.banda svg{height:100%;width:auto;fill:var(--crema);opacity:.95;flex:none}
+.banda svg:nth-child(even){height:84%}
+.banda svg:nth-child(3n){height:92%}
+
+/* cinta corredera */
+.cinta{background:var(--sol);color:var(--carbon);overflow:hidden;white-space:nowrap;padding:10px 0}
+.cinta div{display:inline-block;animation:desliza 28s linear infinite}
+.cinta span{font-family:var(--texto);font-weight:700;font-size:13.5px;letter-spacing:.16em;
+  text-transform:uppercase;padding:0 18px}
+@keyframes desliza{to{transform:translateX(-50%)}}
+
+/* ══ TINTAS ══ */
+.tintas{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));gap:2px;margin-bottom:28px}
+.tinta{padding:22px 17px 16px;min-height:162px;display:flex;flex-direction:column;justify-content:flex-end}
+.tinta .n{font-family:var(--display);font-weight:700;font-variation-settings:var(--w-suave);font-size:19px}
+.tinta .h{font-size:11.5px;letter-spacing:.13em;opacity:.75;margin-top:5px;font-weight:600}
+.tinta .u{font-size:12.5px;line-height:1.45;margin-top:10px;opacity:.78}
+
+/* ══ TIPOGRAFÍA ══ */
+.esp{border-top:1px solid var(--linea);padding:26px 0;display:grid;grid-template-columns:122px 1fr;gap:26px}
+.esp .meta{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;opacity:.58;line-height:1.8;padding-top:9px;font-weight:600}
+.m-nombre{font-family:var(--display);font-weight:900;font-variation-settings:"SOFT" 70,"WONK" 1,"opsz" 144;
+  font-size:clamp(46px,8vw,92px);line-height:.88;letter-spacing:-.045em;text-transform:uppercase}
+.m-titulo{font-family:var(--display);font-weight:600;font-variation-settings:var(--w-suave);
+  font-size:clamp(25px,3.5vw,40px);line-height:1.05;letter-spacing:-.022em}
+.m-cita{font-family:var(--display);font-style:italic;font-weight:400;font-variation-settings:"SOFT" 60,"WONK" 1;
+  font-size:clamp(20px,2.6vw,29px);line-height:1.3;max-width:27ch}
+.m-etiqueta{font-family:var(--texto);font-weight:700;font-size:12px;letter-spacing:.19em;text-transform:uppercase}
+.m-cuerpo{font-size:17px;line-height:1.68;max-width:58ch}
+
+/* ══ MARCA ══ */
+.marcas{display:flex;flex-wrap:wrap;gap:34px;align-items:flex-end;margin-top:30px}
+.mk{display:flex;flex-direction:column;gap:11px;align-items:center}
+.mk svg{fill:var(--jade)}
+[data-tema="noche"] .mk svg{fill:var(--jade-claro)}
+.mk .cap{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;opacity:.55;font-weight:600}
+.mk.inv{background:var(--jade);padding:20px 26px;border-radius:3px}
+.mk.inv svg{fill:var(--crema)}
+.mk.inv .cap{color:var(--crema);opacity:.8}
+
+/* ══ MURO ══ */
+.muro{display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:32px 24px;margin-top:34px}
+.cartel{position:relative;background:var(--crema);border:1px solid var(--linea);box-shadow:var(--sombra);
+  cursor:pointer;display:block;text-decoration:none;color:inherit;
+  transition:transform .34s cubic-bezier(.2,.8,.3,1),box-shadow .34s}
+[data-tema="noche"] .cartel{background:var(--crema-2)}
+.cartel:nth-child(3n+1){transform:rotate(-1.1deg)}
+.cartel:nth-child(3n+2){transform:rotate(.7deg)}
+.cartel:nth-child(3n+3){transform:rotate(-.4deg)}
+.cartel:hover,.cartel:focus-visible{transform:rotate(0) translateY(-9px) scale(1.02);
+  box-shadow:0 1px 0 rgba(18,70,59,.1),0 28px 46px -20px rgba(18,70,59,.5);outline:none}
+.cartel::before{content:"";position:absolute;top:-11px;left:50%;translate:-50% 0;width:78px;height:23px;
+  background:var(--sol);opacity:.88;z-index:3;clip-path:polygon(3% 12%,97% 0,100% 88%,0 100%);
+  box-shadow:0 2px 5px rgba(18,70,59,.2)}
+.foto{aspect-ratio:4/5;position:relative;overflow:hidden;background:var(--jade);
+  display:flex;align-items:flex-end;justify-content:center}
+.foto svg{width:78%;height:78%;fill:rgba(255,255,255,.9)}
+.foto::after{content:"";position:absolute;inset:0;
+  background-image:radial-gradient(rgba(0,0,0,.42) 1px,transparent 1.1px);background-size:5px 5px;
+  mix-blend-mode:overlay;opacity:.55;transition:opacity .34s}
+.cartel:hover .foto::after{opacity:0}
+.marco{position:absolute;top:9px;left:9px;right:9px;display:flex;justify-content:space-between;z-index:2}
+.chip{font-family:var(--texto);font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  background:var(--crema);color:var(--jade-hondo);padding:4px 9px;border-radius:99px}
+.chip.urg{background:var(--coral);color:var(--carbon)}
+.pie{padding:14px 15px 16px;border-top:1px solid var(--linea)}
+.nombre{font-family:var(--display);font-weight:900;font-variation-settings:"SOFT" 70,"WONK" 1,"opsz" 144;
+  font-size:clamp(33px,3.7vw,46px);line-height:.86;letter-spacing:-.045em;text-transform:uppercase;color:var(--jade)}
+[data-tema="noche"] .nombre{color:var(--jade-claro)}
+.datos{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;opacity:.62;margin-top:10px;font-weight:600}
+.cartel .cta{font-family:var(--texto);font-size:11px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--coral);margin-top:12px;display:flex;align-items:center;gap:7px;
+  opacity:0;translate:0 5px;transition:opacity .3s,translate .3s}
+.cartel:hover .cta,.cartel:focus-visible .cta{opacity:1;translate:0 0}
+
+/* ══ BOTONES ══ */
+.fila{display:flex;flex-wrap:wrap;gap:13px;align-items:center;margin-top:26px}
+.btn{font-family:var(--texto);font-weight:700;font-size:13.5px;letter-spacing:.09em;text-transform:uppercase;
+  padding:15px 27px;border:2px solid var(--jade-hondo);cursor:pointer;display:inline-flex;align-items:center;gap:9px;
+  box-shadow:4px 4px 0 var(--jade-hondo);border-radius:3px;
+  transition:transform .16s cubic-bezier(.2,.8,.3,1),box-shadow .16s}
+.btn:hover{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--jade-hondo)}
+.btn-1{background:var(--coral);color:var(--carbon)}
+.btn-2{background:var(--jade);color:var(--crema)}
+.btn-3{background:transparent;color:var(--jade-hondo);box-shadow:none;border-color:var(--linea)}
+.btn-3:hover{box-shadow:none;background:var(--crema-2)}
+
+.etqs{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.etq{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  padding:6px 13px;border:1px solid var(--linea);border-radius:99px}
+.etq.on{background:var(--jade);color:var(--crema);border-color:var(--jade)}
+.etq.a{background:var(--sol);color:var(--carbon);border-color:var(--sol)}
+.etq.n{background:var(--coral);color:var(--carbon);border-color:var(--coral)}
+
+.cifras{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;
+  background:var(--linea);margin-top:30px;border:1px solid var(--linea)}
+.cifra{background:var(--crema);padding:25px 20px}
+.cifra .v{font-family:var(--display);font-weight:900;font-variation-settings:"SOFT" 70,"WONK" 1,"opsz" 144;
+  font-size:clamp(43px,6vw,66px);line-height:.86;letter-spacing:-.05em;color:var(--coral)}
+.cifra .k{font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;opacity:.65;margin-top:11px;font-weight:600}
+
+.reglas{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:23px;margin-top:28px}
+.regla{border-left:3px solid var(--coral);padding-left:17px}
+.regla h4{font-family:var(--texto);font-size:12.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:700;margin-bottom:9px}
+.regla p{font-size:14.5px;line-height:1.62;opacity:.82}
+code{font-family:ui-monospace,Menlo,monospace;font-size:.85em;background:var(--crema-2);padding:1px 6px;border-radius:3px}
+
+.tog{position:fixed;top:18px;right:18px;z-index:60;font-family:var(--texto);font-size:11px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;background:var(--jade-hondo);color:var(--crema);
+  border:none;padding:11px 18px;cursor:pointer;border-radius:99px;box-shadow:0 6px 18px -6px rgba(0,0,0,.5)}
+[data-tema="noche"] .tog{background:var(--sol);color:var(--carbon)}
+footer{padding:58px 0 90px;border-top:2px solid var(--linea)}
+.pie-l{font-size:11px;letter-spacing:.15em;text-transform:uppercase;opacity:.55;font-weight:600}
+@media (max-width:640px){.esp{grid-template-columns:1fr;gap:12px}.sec{padding:54px 0}.cabecera{flex-direction:column;align-items:flex-start;gap:14px}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<button class="tog" onclick="document.documentElement.dataset.tema=document.documentElement.dataset.tema==='dia'?'noche':'dia'">Modo noche</button>
+
+<!-- ═══ definiciones reutilizables ═══ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- LA MARCA: huella cuyo pulpejo es un corazón, con un perrito dentro -->
+  <symbol id="mk" viewBox="0 0 200 232">
+    <ellipse cx="41"  cy="47" rx="17.5" ry="25" transform="rotate(-20 41 47)"/>
+    <ellipse cx="80"  cy="29" rx="18"   ry="27"/>
+    <ellipse cx="120" cy="29" rx="18"   ry="27"/>
+    <ellipse cx="159" cy="47" rx="17.5" ry="25" transform="rotate(20 159 47)"/>
+    <path fill="none" stroke-width="17" stroke-linejoin="round"
+      d="M100 220C58 189 24 156 24 122c0-24 18-42 41-42 15 0 28 8 35 21 7-13 20-21 35-21 23 0 41 18 41 42 0 34-34 67-76 98Z"
+      style="stroke:inherit"/>
+    <path d="M62 190C55 175 55 155 63 143c5-10 13-17 22-21-4-11-6-21-1-26 6-4 14 1 18 11 5 6 10 11 15 14 10 3 21 8 29 15 6 5 4 12-3 13h-11c-4 7-11 12-19 14l-4 11c-3 10-11 16-20 16Z"/>
+  </symbol>
+  <!-- perritos asomando: marcadores para los recortes reales de Wawitas -->
+  <symbol id="d1" viewBox="0 0 120 150"><!-- orejas paradas -->
+    <path d="M6 150c2-28 15-47 34-55-7-9-11-20-11-31 0-8 2-15 5-22L23 10l25 21c8-4 16-6 25-6s17 2 25 6l24-21-10 32c3 7 5 14 5 22 0 11-4 22-11 31 19 8 32 27 34 55Z"/></symbol>
+  <symbol id="d2" viewBox="0 0 120 150"><!-- orejas caídas -->
+    <path d="M10 150c2-27 14-45 32-53-6-7-10-16-12-25-9-1-16-9-16-19 0-11 8-20 18-20 3 0 6 1 9 2 5-5 12-8 19-8s14 3 19 8c3-1 6-2 9-2 10 0 18 9 18 20 0 10-7 18-16 19-2 9-6 18-12 25 18 8 30 26 32 53Z"/></symbol>
+  <symbol id="d3" viewBox="0 0 120 150"><!-- una oreja arriba, una caída -->
+    <path d="M8 150c2-28 15-46 33-54-7-8-11-19-11-30 0-6 1-12 3-17L21 14l25 17c5-2 10-3 15-3 8 0 15 2 21 7 3-2 7-3 11-3 10 0 18 9 18 20 0 9-6 17-14 19-1 9-5 18-11 25 18 8 31 26 33 54Z"/></symbol>
+</defs></svg>
+
+<!-- ═══ PORTADA ═══ -->
+<header class="portada">
+  <div class="env">
+    <div class="cabecera">
+      <svg class="logo" viewBox="0 0 200 232" fill="#F6F1E7" style="stroke:#F6F1E7"><use href="#mk"/></svg>
+      <div class="marca">Wawitas<small>Red de Apoyo</small></div>
+    </div>
+    <p class="lema">De la calle,<br><b>a tu corazón.</b></p>
+    <div class="credenciales">
+      <span>Dirección de estilo · v2</span><span>Cochabamba, Bolivia</span>
+      <span>Construida sobre la identidad real de Wawitas</span>
+    </div>
+  </div>
+  <div class="banda" aria-hidden="true">
+    <svg viewBox="0 0 120 150"><use href="#d1"/></svg><svg viewBox="0 0 120 150"><use href="#d2"/></svg>
+    <svg viewBox="0 0 120 150"><use href="#d3"/></svg><svg viewBox="0 0 120 150"><use href="#d1"/></svg>
+    <svg viewBox="0 0 120 150"><use href="#d2"/></svg><svg viewBox="0 0 120 150"><use href="#d3"/></svg>
+    <svg viewBox="0 0 120 150"><use href="#d1"/></svg><svg viewBox="0 0 120 150"><use href="#d2"/></svg>
+  </div>
+</header>
+<div class="cinta"><div id="cinta"></div></div>
+
+<!-- ═══ 01 ═══ -->
+<section class="sec"><div class="env">
+  <div class="eyebrow">01 — La dirección</div>
+  <h2 class="h2" style="max-width:20ch;margin-bottom:22px">No inventamos una marca. Le damos estructura a la que ya existe.</h2>
+  <p class="nota">Wawitas ya tiene identidad: el <strong>jade</strong> de su portada, la <strong>huella-corazón</strong> con un perrito adentro, y una frase que ningún estudio de diseño habría escrito mejor — <em>"De la calle, a tu corazón"</em>. Ese es el título de la página de inicio. No hace falta buscar otro.</p>
+  <p class="nota">Sobre esa base, el sitio adopta el lenguaje que los refugios usan de verdad: <strong>el cartel pegado a mano</strong>. Papel cálido en vez de blanco clínico, tinta plana, grano visible, cinta amarilla, nombres enormes. Es una decisión estratégica: un sitio de refugio con estética de <em>app</em> de mascotas se lee como catálogo de productos. Este se lee como lo que es — gente real pidiendo ayuda para un perro concreto.</p>
+  <p class="nota"><strong>Y tomamos prestado su mejor recurso:</strong> la portada de Facebook pone perritos recortados, sin fondo, parados sobre una banda jade. Es un gesto propio, ya funciona, y se repite en el sitio como firma visual.</p>
+  <p class="nota" style="margin-top:22px"><strong>El momento que se recuerda:</strong> el <strong>Muro de Adopción</strong> — una grilla densa de carteles ligeramente torcidos, cada uno con el nombre del perrito en tipografía enorme. Un clic despega el cartel y abre su <em>expediente</em>, con un botón que abre WhatsApp con su nombre ya escrito.</p>
+</div></section>
+
+<!-- ═══ 02 ═══ -->
+<section class="sec"><div class="env">
+  <div class="eyebrow">02 — Las tintas · muestreadas del logo</div>
+  <p class="nota" style="margin-bottom:26px">El jade se tomó con cuentagotas de la portada y del logo de Facebook: <code>#31907A</code> en ambos. Lo demás se construye alrededor.</p>
+  <div class="tintas">
+    <div class="tinta" style="background:#31907A;color:#F6F1E7"><div class="n">Jade Wawitas</div><div class="h">#31907A · de la marca</div><div class="u">El color de la organización. Bandas, botones secundarios, nombres.</div></div>
+    <div class="tinta" style="background:#12463B;color:#F6F1E7"><div class="n">Jade hondo</div><div class="h">#12463B</div><div class="u">Todo el texto de lectura y las superficies oscuras. 9.5:1 sobre crema ✓</div></div>
+    <div class="tinta" style="background:#F6F1E7;color:#12463B;box-shadow:inset 0 0 0 1px rgba(18,70,59,.14)"><div class="n">Crema</div><div class="h">#F6F1E7</div><div class="u">El fondo. Papel cálido, nunca blanco puro — el blanco enfría el jade.</div></div>
+    <div class="tinta" style="background:#F0532B;color:#1A0E08"><div class="n">Coral</div><div class="h">#F0532B</div><div class="u">La acción, y solo la acción. ADÓPTAME y casos urgentes. Complementario exacto del jade.</div></div>
+    <div class="tinta" style="background:#F5B72B;color:#1A0E08"><div class="n">Sol</div><div class="h">#F5B72B</div><div class="u">Cinta adhesiva, subrayados, la cinta corredera.</div></div>
+    <div class="tinta" style="background:#7FC4AE;color:#12463B"><div class="n">Jade claro</div><div class="h">#7FC4AE</div><div class="u">Detalles y nombres en modo noche, donde el jade pleno se apaga.</div></div>
+  </div>
+  <div class="reglas">
+    <div class="regla"><h4>Jade y coral son rellenos, no texto</h4><p>Sobre crema el jade da 3.5:1 y el coral 3.1:1 — insuficiente para leer. Se usan como fondo o como texto solo a 32px+ en negrita. El texto va en jade hondo; sobre coral va carbón <code>#1A0E08</code> → 5.3:1 ✓</p></div>
+    <div class="regla"><h4>Un coral por pantalla</h4><p>El jade es la marca; el coral es la acción. Si el coral aparece dos veces, deja de significar "haz clic aquí". En cada vista hay exactamente uno: casi siempre <em>Adóptame</em>.</p></div>
+    <div class="regla"><h4>Modo noche real</h4><p>Buena parte de las visitas llegan de noche desde un teléfono. Sobre <code>#0D1714</code> el coral sube a 5.4:1 y el jade cede el protagonismo al jade claro.</p></div>
+  </div>
+</div></section>
+
+<!-- ═══ 03 ═══ -->
+<section class="sec"><div class="env">
+  <div class="eyebrow">03 — La marca gráfica</div>
+  <p class="nota">La huella-corazón se reconstruye como SVG: nítida a cualquier tamaño, coloreable, utilizable como favicon, viñeta de lista, separador de sección y marca de agua. Deja de ser un JPG de Facebook y pasa a ser un elemento del sistema.</p>
+  <div class="marcas">
+    <div class="mk"><svg width="104" viewBox="0 0 200 232" style="stroke:var(--jade)"><use href="#mk"/></svg><span class="cap">Principal</span></div>
+    <div class="mk"><svg width="52" viewBox="0 0 200 232" style="stroke:var(--jade)"><use href="#mk"/></svg><span class="cap">Compacta</span></div>
+    <div class="mk"><svg width="26" viewBox="0 0 200 232" style="stroke:var(--jade)"><use href="#mk"/></svg><span class="cap">Favicon</span></div>
+    <div class="mk inv"><svg width="72" viewBox="0 0 200 232" style="stroke:var(--crema)"><use href="#mk"/></svg><span class="cap">Sobre jade</span></div>
+    <div class="mk"><svg width="72" viewBox="0 0 200 232" style="stroke:var(--coral);fill:var(--coral)"><use href="#mk"/></svg><span class="cap">Acento</span></div>
+  </div>
+  <p class="nota" style="margin-top:22px;font-size:13.5px;opacity:.6">Reconstrucción de trabajo. Antes de publicar conviene pedir el archivo vectorial original a quien diseñó el logo — si existe, se usa ese.</p>
+</div></section>
+
+<!-- ═══ 04 ═══ -->
+<section class="sec"><div class="env">
+  <div class="eyebrow">04 — Tipografía</div>
+  <p class="nota" style="margin-bottom:8px">El logotipo está trazado con pincel: grueso, redondeado, hecho a mano. La tipografía del sitio tenía que ser cálida sin volverse infantil. <strong>Fraunces</strong> — con sus ejes <code>SOFT</code> y <code>WONK</code> activados — tiene esa imperfección deliberada que conversa con el pincel del logo. <strong>Instrument Sans</strong> aporta la claridad para leer. Ambas cubren los acentos del español por completo.</p>
+  <div class="esp"><div class="meta">Fraunces<br>900 · soft 70 · wonk<br>Nombres</div><div><div class="m-nombre">Mocca</div></div></div>
+  <div class="esp"><div class="meta">Fraunces<br>600<br>Títulos</div><div><div class="m-titulo">Adoptar no solo cambia una vida:<br>transforma dos.</div></div></div>
+  <div class="esp"><div class="meta">Fraunces<br>400 itálica<br>Citas e historias</div><div><div class="m-cita">Detrás de cada mirada hay una historia de abandono — y una enorme capacidad de volver a confiar.</div></div></div>
+  <div class="esp"><div class="meta">Instrument Sans<br>700 · 0.19em<br>Etiquetas y datos</div><div><div class="m-etiqueta">3 meses · macho · mediano · castración incluida</div></div></div>
+  <div class="esp"><div class="meta">Instrument Sans<br>400<br>Cuerpo</div><div><p class="m-cuerpo">Mocca llegó en marzo, escondido bajo un auto en la avenida Heroínas. Le tomó tres días aceptar comida de una mano humana. Hoy pesa nueve kilos, persigue pelotas y duerme boca arriba. Está listo para su familia definitiva.</p></div></div>
+</div></section>
+
+<!-- ═══ 05 ═══ -->
+<section class="sec"><div class="env">
+  <div class="eyebrow">05 — El muro de adopción</div>
+  <h2 class="h2" style="max-width:21ch">El corazón del sitio. Pasa el cursor por un cartel.</h2>
+  <p class="nota" style="margin-top:16px">Cada perrito es un cartel pegado: rotación de 1°, cinta amarilla, sombra de papel. En reposo la foto lleva una trama de semitono; al acercarte la trama desaparece y el perrito aparece a todo color — el gesto de mirarlo de cerca. Un clic abre su expediente sin perder la posición del muro.</p>
+  <div class="muro" id="muro"></div>
+  <p class="nota" style="margin-top:26px;font-size:13.5px;opacity:.6">Las siluetas son marcadores: aquí van las fotos reales de Wawitas, recortadas sobre jade como ya lo hacen en su portada.</p>
+</div></section>
+
+<!-- ═══ 06 ═══ -->
+<section class="sec"><div class="env">
+  <div class="eyebrow">06 — Acciones y estados</div>
+  <p class="nota">Botones de tinta plana con sombra sólida desplazada: se hunden al presionarlos, como un sello. La acción principal siempre termina en WhatsApp con el nombre del perrito ya escrito — <code>wa.me/59177903553?text=Hola,%20me%20interesa%20adoptar%20a%20Mocca</code></p>
+  <div class="fila">
+    <button class="btn btn-1">Adóptame ↗</button>
+    <button class="btn btn-2">Ver el muro</button>
+    <button class="btn btn-3">Cómo adoptar</button>
+  </div>
+  <div class="etqs">
+    <span class="etq on">Disponible</span><span class="etq n">Urgente</span><span class="etq a">En hogar de tránsito</span>
+    <span class="etq">Cachorro</span><span class="etq">Mediano</span><span class="etq">Castrado</span>
+    <span class="etq">Vacunado</span><span class="etq">Bueno con niños</span>
+  </div>
+  <div class="cifras">
+    <div class="cifra"><div class="v">248</div><div class="k">rescatados</div></div>
+    <div class="cifra"><div class="v">191</div><div class="k">adoptados</div></div>
+    <div class="cifra"><div class="v">34</div><div class="k">esperando hoy</div></div>
+    <div class="cifra"><div class="v">1.9K</div><div class="k">nos siguen</div></div>
+  </div>
+  <p class="nota" style="margin-top:14px;font-size:13.5px;opacity:.6">Cifras de ejemplo — reemplazar con los números reales de Wawitas.</p>
+</div></section>
+
+<!-- ═══ 07 ═══ -->
+<section class="sec"><div class="env">
+  <div class="eyebrow">07 — Movimiento y textura</div>
+  <div class="reglas">
+    <div class="regla"><h4>Una entrada, bien orquestada</h4><p>Los carteles del muro aparecen escalonados a 45&nbsp;ms. Una sola coreografía al cargar vale más que veinte micro-animaciones dispersas.</p></div>
+    <div class="regla"><h4>El grano nunca se va</h4><p>Ruido SVG en <code>multiply</code> sobre todo el sitio. Es lo que separa "papel impreso" de "div con color de fondo".</p></div>
+    <div class="regla"><h4>Semitono al reposo</h4><p>La trama sobre las fotos se desvanece al acercarse. Refuerza la metáfora de impresión y premia la curiosidad.</p></div>
+    <div class="regla"><h4>Respeto por el movimiento</h4><p><code>prefers-reduced-motion</code> desactiva la cinta corredera y todas las transiciones. Sin excepciones.</p></div>
+    <div class="regla"><h4>Rendimiento primero</h4><p>El público navega desde Android de gama media con datos móviles. AVIF/WebP, <em>srcset</em> y <em>blur-up</em>. El sitio es estático y no necesita JavaScript para mostrar un perrito.</p></div>
+    <div class="regla"><h4>Nada de cursores raros</h4><p>Se consideró un cursor de huella. Se descartó: encanta diez segundos y estorba para siempre.</p></div>
+  </div>
+</div></section>
+
+<footer><div class="env"><div class="pie-l">Wawitas Red de Apoyo · Cochabamba, Bolivia · 77903553 · @wawitas_2025</div></div></footer>
+
+<script>
+const frases=["De la calle, a tu corazón","Adopta, no compres","Adopta, ama, transforma","Ellos te están esperando"];
+let t="";for(let i=0;i<8;i++)t+=`<span>${frases[i%4]}</span><span>·</span>`;
+document.getElementById('cinta').innerHTML=t+t;
+
+const perros=[
+  {n:"Mocca",d:"3 meses · macho · mediano",e:"Disponible",s:"d1"},
+  {n:"Kuka", d:"10 años · hembra · pequeña",e:"Urgente",  s:"d2"},
+  {n:"Nube", d:"1 año · hembra · mediana",  e:"Disponible",s:"d3"},
+  {n:"Tito", d:"5 meses · macho · grande",  e:"Disponible",s:"d2"},
+];
+document.getElementById('muro').innerHTML=perros.map((p,i)=>`
+  <a class="cartel" tabindex="0">
+    <div class="foto"><svg viewBox="0 0 120 150"><use href="#${p.s}"/></svg>
+      <div class="marco"><span class="chip${p.e==='Urgente'?' urg':''}">${p.e}</span><span class="chip">${String(i+1).padStart(2,'0')}</span></div>
+    </div>
+    <div class="pie"><div class="nombre">${p.n}</div><div class="datos">${p.d}</div>
+      <div class="cta">Adóptame <span>↗</span></div></div>
+  </a>`).join('');
+</script>
+</body>
+</html>
