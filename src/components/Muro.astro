@@ -1,0 +1,279 @@
+---
+/**
+ * El Muro de Adopción — the core loop of the whole site.
+ *
+ * A dense grid of taped-up posters. Clicking one opens that dog's expediente.
+ * Dogs load client-side from Firestore, so the wall is always current without
+ * a rebuild.
+ */
+interface Props {
+  /** Cap the number of posters, e.g. on the homepage. */
+  limit?: number;
+  status?: string;
+  title?: string;
+}
+
+const { limit = 24, status = 'adopcion', title } = Astro.props;
+---
+
+<section class="muro-seccion">
+  <div class="env">
+    {title && <h2 class="t-titulo muro-seccion__titulo">{title}</h2>}
+
+    <div
+      class="muro"
+      id="muro"
+      data-limit={limit}
+      data-status={status}
+      aria-busy="true"
+      aria-live="polite"
+    >
+      {/* Skeletons hold the layout so the page does not lurch when data lands. */}
+      {
+        Array.from({ length: 4 }).map(() => (
+          <div class="cartel cartel--esqueleto" aria-hidden="true">
+            <div class="cartel__foto" />
+            <div class="cartel__pie">
+              <div class="cartel__barra" />
+              <div class="cartel__barra cartel__barra--corta" />
+            </div>
+          </div>
+        ))
+      }
+    </div>
+
+    <p class="muro-vacio" id="muro-vacio" hidden>
+      No hay perritos publicados en este momento.
+      <a href="https://www.facebook.com/profile.php?id=61563998952145">
+        Mira las últimas novedades en Facebook.
+      </a>
+    </p>
+  </div>
+</section>
+
+<script>
+  import { getWall, formatMeta } from '../lib/dogs';
+  import type { DogStatus } from '../lib/types';
+
+  const muro = document.getElementById('muro');
+  const vacio = document.getElementById('muro-vacio');
+  if (!muro) throw new Error('missing #muro');
+
+  const escape = (s: string) =>
+    s.replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!
+    );
+
+  try {
+    const dogs = await getWall({
+      status: (muro.dataset.status ?? 'adopcion') as DogStatus,
+      limit: Number(muro.dataset.limit ?? 24),
+    });
+
+    muro.setAttribute('aria-busy', 'false');
+
+    if (!dogs.length) {
+      muro.innerHTML = '';
+      vacio?.removeAttribute('hidden');
+    } else {
+      muro.innerHTML = dogs
+        .map((dog, i) => {
+          const urgente = dog.status === 'perdido';
+          const foto = dog.coverPhoto
+            ? `<img src="${escape(dog.coverPhoto)}" alt="${escape(dog.name)}"
+                 loading="${i < 4 ? 'eager' : 'lazy'}" decoding="async" width="480" height="600">`
+            : '';
+          return `
+            <a class="cartel" href="/adopta/${escape(dog.slug)}"
+               style="animation-delay:${Math.min(i, 11) * 45}ms">
+              <div class="cartel__foto">
+                ${foto}
+                <div class="cartel__marco">
+                  <span class="cartel__chip${urgente ? ' cartel__chip--urgente' : ''}">
+                    ${urgente ? 'Perdido' : 'Disponible'}
+                  </span>
+                </div>
+              </div>
+              <div class="cartel__pie">
+                <div class="t-nombre cartel__nombre">${escape(dog.name)}</div>
+                <div class="t-dato">${escape(formatMeta(dog))}</div>
+                <div class="cartel__cta">Adóptame <span aria-hidden="true">↗</span></div>
+              </div>
+            </a>`;
+        })
+        .join('');
+    }
+  } catch (err) {
+    // A failed read must not leave four grey rectangles pretending to load.
+    console.error('[muro] no se pudo cargar', err);
+    muro.setAttribute('aria-busy', 'false');
+    muro.innerHTML = '';
+    if (vacio) {
+      vacio.textContent = 'No pudimos cargar los perritos. Revisa tu conexión e intenta de nuevo.';
+      vacio.removeAttribute('hidden');
+    }
+  }
+</script>
+
+{/* Global, not scoped: the posters are injected at runtime and so never carry
+    Astro's build-time scoping attribute. Namespaced under .muro instead. */}
+<style is:global>
+  .muro-seccion {
+    padding-block: var(--paso-5);
+  }
+  .muro-seccion__titulo {
+    margin-bottom: var(--paso-3);
+    max-width: 20ch;
+  }
+
+  .muro {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+    gap: 32px 24px;
+  }
+
+  .muro .cartel {
+    position: relative;
+    background: var(--crema);
+    border: 1px solid var(--linea);
+    box-shadow: var(--sombra);
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    animation: cartel-entra 0.5s var(--sal) both;
+    transition: transform var(--dur) var(--sal), box-shadow var(--dur) ease;
+  }
+  .muro .cartel:nth-child(3n + 1) { transform: rotate(-1.1deg); }
+  .muro .cartel:nth-child(3n + 2) { transform: rotate(0.7deg); }
+  .muro .cartel:nth-child(3n + 3) { transform: rotate(-0.4deg); }
+
+  .muro .cartel:hover,
+  .muro .cartel:focus-visible {
+    transform: rotate(0deg) translateY(-9px) scale(1.02);
+    box-shadow: var(--sombra-alta);
+    z-index: 2;
+  }
+
+  /* the strip of tape holding the poster to the wall */
+  .muro .cartel::before {
+    content: '';
+    position: absolute;
+    top: -11px;
+    left: 50%;
+    translate: -50% 0;
+    width: 78px;
+    height: 23px;
+    background: var(--sol);
+    opacity: 0.88;
+    z-index: 3;
+    clip-path: polygon(3% 12%, 97% 0, 100% 88%, 0 100%);
+    box-shadow: 0 2px 5px rgba(18, 70, 59, 0.2);
+  }
+
+  .muro .cartel__foto {
+    aspect-ratio: 4 / 5;
+    position: relative;
+    overflow: hidden;
+    background: var(--jade);
+  }
+  .muro .cartel__foto img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* Halftone at rest, dissolving on approach — the gesture of looking closer. */
+  .muro .cartel__foto::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(0, 0, 0, 0.42) 1px, transparent 1.1px);
+    background-size: 5px 5px;
+    mix-blend-mode: overlay;
+    opacity: 0.55;
+    transition: opacity var(--dur) ease;
+  }
+  .muro .cartel:hover .cartel__foto::after { opacity: 0; }
+
+  .muro .cartel__marco {
+    position: absolute;
+    top: 9px;
+    left: 9px;
+    right: 9px;
+    display: flex;
+    justify-content: space-between;
+    z-index: 2;
+  }
+  .muro .cartel__chip {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    background: var(--crema);
+    color: var(--jade-hondo);
+    padding: 4px 9px;
+    border-radius: 99px;
+  }
+  .muro .cartel__chip--urgente {
+    background: var(--coral);
+    color: var(--carbon);
+  }
+
+  .muro .cartel__pie {
+    padding: 14px 15px 16px;
+    border-top: 1px solid var(--linea);
+  }
+  .muro .cartel__nombre { color: var(--jade); }
+  :root[data-tema='noche'] .muro .cartel__nombre { color: var(--jade-claro); }
+  .muro .cartel__pie .t-dato { margin-top: 10px; }
+
+  .muro .cartel__cta {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin-top: 12px;
+    opacity: 0;
+    translate: 0 5px;
+    transition: opacity 0.3s ease, translate 0.3s ease;
+  }
+  .muro .cartel:hover .cartel__cta,
+  .muro .cartel:focus-visible .cartel__cta {
+    opacity: 1;
+    translate: 0 0;
+  }
+
+  .muro .cartel--esqueleto {
+    animation: none;
+    pointer-events: none;
+  }
+  .muro .cartel--esqueleto .cartel__foto {
+    background: var(--crema-2);
+  }
+  .muro .cartel__barra {
+    height: 26px;
+    background: var(--crema-2);
+    border-radius: 2px;
+  }
+  .muro .cartel__barra--corta {
+    height: 11px;
+    width: 62%;
+    margin-top: 11px;
+  }
+
+  .muro-vacio {
+    padding: var(--paso-4) 0;
+    font-size: 15.5px;
+    opacity: 0.8;
+  }
+
+  @keyframes cartel-entra {
+    from { opacity: 0; translate: 0 18px; }
+    to { opacity: 1; translate: 0 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .muro .cartel { animation: none; }
+  }
+</style>

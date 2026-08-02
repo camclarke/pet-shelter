@@ -19,19 +19,29 @@ Everything else is secondary and must not compete with it.
 | Brand + design system | ✅ Defined — [`design/estilo.html`](design/estilo.html) |
 | Product plan | ✅ Written — [`PLAN.md`](PLAN.md) |
 | GitHub repo | ✅ Created (public, `camclarke/dog-shelter`) |
-| GCP project | ⛔ **Blocked** — see [Setup](#setup-required-from-you) |
+| Data model + security rules | ✅ Written — `src/lib/types.ts`, `firestore.rules`, `storage.rules` |
+| Design tokens + layout | ✅ Written — `src/styles/tokens.css`, `src/layouts/Base.astro` |
+| Muro de Adopción | ✅ Written — `src/components/Muro.astro`, `src/pages/index.astro` |
+| **Build verification** | ⛔ **Blocked on Node** — nothing below has compiled yet |
+| GCP project | ⛔ Blocked — gcloud re-auth needed |
 | Firebase init | ⬜ Not started |
-| Data model + rules | 🟡 Designed below, not implemented |
-| Frontend scaffold | ⬜ Not started |
+| Auth flows | ⬜ Not started |
+| Admin publishing UI | ⬜ Not started |
+| Maps + sightings | ⬜ Not started |
 | Cloud Functions | ⬜ Not started |
-| Maps integration | ⬜ Not started |
 | LLM vaccination-card parsing | ⬜ Stage 2 — deliberately deferred |
+
+> **The frontend code has never been built or run.** It is written against Astro 7
+> and Firebase 12 APIs but is unverified — expect real errors on first `npm run build`.
+> Treat everything under `src/` as a first draft until the Node upgrade lands.
 
 ### Progress log
 
 - **2026-08-02** — Read the Facebook page; catalogued the five recurring content types (adoption, lost pet, adoption fair, education, rescue appeal). Wrote `PLAN.md`.
 - **2026-08-02** — Sampled the real brand from their Facebook cover and logo. Jade is `#31907A` in both. Rebuilt the heart-paw mark as SVG. Adopted their own tagline, *"De la calle, a tu corazón"*, as the homepage headline. Style system in `design/estilo.html`.
 - **2026-08-02** — Architecture pivoted to GCP serverless + Firestore + Firebase Auth. Repo created. Data model and security model designed (below).
+- **2026-08-02** — Wrote the data model (`src/lib/types.ts`), security rules for Firestore and Storage, composite indexes, `firebase.json`, design tokens, base layout, and the Muro de Adopción. Decided against Tailwind: the design is a bespoke poster system already expressed as CSS custom properties, so Astro scoped styles plus `tokens.css` does the job with one less build dependency.
+- **2026-08-02** — **Hit a hard Node blocker.** Installed Node is v20.20.2. Astro ≤7.0.9 carries eight high-severity advisories (XSS via `define:vars`, spread attribute names, slot names, view-transition properties; plus vulnerable `esbuild` and `sharp`). The only patched line is Astro ≥7.1.6, which requires Node ≥22.12.0. Given this app handles user accounts and residential addresses, shipping a framework with known XSS holes is not an acceptable trade, so `package.json` targets Astro ^7.1.6 and the Node upgrade is a prerequisite rather than a nice-to-have.
 
 ---
 
@@ -136,18 +146,17 @@ Without all four, this collection is an open spam endpoint.
 
 ## Concerns worth a decision
 
-### 1. How much is public?
+### 1. How much is public? — **decided**
 
-The requirement is that users log in to see dog information and pictures. That conflicts directly with the stated primary objective: **content behind a login cannot be found by someone searching "adoptar perro Cochabamba," and every signup step loses potential adopters.**
-
-Proposed middle ground, already reflected in the data model above:
+**Public teaser, gated detail.** Login-gated content cannot be found by someone
+searching "adoptar perro Cochabamba," and every signup step loses adopters — so
+the split preserves discovery while keeping the substance behind an account:
 
 - **Public** — photo, name, age, breed, size, status. Indexable, shareable, enough to fall in love.
 - **Signed in** — full story, health notes, the whole photo set, contact route, location.
 
-This preserves discovery while keeping the substance gated. Implemented as `dogs/{id}` vs `dogs/{id}/detail/main`, so switching to fully-gated later is a one-line rules change, not a rewrite.
-
-**Default assumed:** the split above. Say the word and I'll gate everything instead.
+Implemented as `dogs/{id}` vs `dogs/{id}/detail/main`. Switching to fully gated
+later is a one-line rules change, not a rewrite.
 
 ### 2. Publishing dog locations means publishing people's home addresses
 
@@ -173,15 +182,29 @@ The tracking capability you asked for is fully intact. The difference is the *de
 
 ## Setup required from you
 
-**1. Re-authenticate gcloud.** Its tokens are expired and refresh needs an interactive prompt I can't answer:
+**1. Upgrade Node to 22 LTS or newer.** This blocks the build entirely — see the
+progress log for why downgrading Astro instead is not an option. Install from
+[nodejs.org](https://nodejs.org/) (22 LTS or 24), then:
+
+```bash
+node --version && rm -rf node_modules package-lock.json && npm install
+```
+
+**2. Re-authenticate gcloud.** Tokens are expired and refresh needs an interactive prompt:
 
 ```bash
 gcloud auth login
 ```
 
-**2. Confirm which GCP project.** The active one is `trustcert-ai-g` (work). The shelter needs its own — new project, own budget alert, own billing isolation. I'll create it once you can confirm a billing account is available to link (Firestore and Functions need Blaze, though real usage should stay inside the free tier).
+**3. Decided: a new dedicated GCP project.** Not `trustcert-ai-g` — that is a work
+project, and a nonprofit's infrastructure should not share quotas, billing, or an
+audit trail with it. Needs a Blaze billing account linked (Firestore and Functions
+require it, though real usage should stay inside the free tier). A budget alert at
+$5 goes up before anything is deployed.
 
-**3. Later, not now:** DNS for `wawitas.org`, the Maps API key with HTTP referrer restrictions, and the Google OAuth consent screen.
+**4. Later, not now:** DNS for `wawitas.org`, the Maps API key restricted by HTTP
+referrer, the Google OAuth consent screen, and the reCAPTCHA Enterprise key for
+App Check.
 
 ---
 
