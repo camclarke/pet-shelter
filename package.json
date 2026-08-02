@@ -2,21 +2,35 @@
   "name": "dog-shelter",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Adoption and rescue platform for Wawitas Red de Apoyo, Cochabamba, Bolivia",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "check": "astro check",
-    "emulators": "firebase emulators:start",
-    "rules:test": "firebase emulators:exec --only firestore \"node --test test/rules/*.test.js\""
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "emulators": "firebase emulators:start"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=20.9.0"
   },
   "dependencies": {
-    "astro": "^7.1.6",
-    "firebase": "^12.17.0"
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "firebase": "^12.17.0",
+    "firebase-admin": "^13.10.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4"
+  },
+  "overrides": {
+    "sharp": "^0.35.3",
+    "postcss": "^8.5.25",
+    "uuid": "^11.1.1"
   }
 }

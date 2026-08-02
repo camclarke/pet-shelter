@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (gitignored) and fill in for the current
+# environment. This is the file that changes wholesale when the project moves
+# to a new GCP tenant — everything else in terraform/ stays as-is.
+
+project_id      = "wawitas-org"
+region          = "us-central1"
+billing_account = "XXXXXX-XXXXXX-XXXXXX"
+
+budget_amount_usd  = 5
+budget_alert_email = "israel.rocha.rocha@live.com"
+
+app_name    = "wawitas-web"
+environment = "production"
+
+# Built and pushed separately (see Dockerfile). Terraform only ever points
+# Cloud Run at a tag that already exists — it does not build images itself.
+container_image = "us-central1-docker.pkg.dev/wawitas-org/wawitas-web/app:latest"
