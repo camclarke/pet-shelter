@@ -1,0 +1,282 @@
+---
+import '../styles/tokens.css';
+import Marca from '../components/Marca.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Suppress the ticker on dense interior pages like the admin console. */
+  cinta?: boolean;
+}
+
+const {
+  title,
+  description = 'Refugio transitorio en Cochabamba. Rescatamos, rehabilitamos y buscamos familia para toda la vida en adopción responsable.',
+  cinta = true,
+} = Astro.props;
+
+const titulo = title === 'Wawitas' ? 'Wawitas Red de Apoyo' : `${title} · Wawitas Red de Apoyo`;
+
+const nav = [
+  { href: '/adopta', label: 'Adopta' },
+  { href: '/perdidos', label: 'Perdidos' },
+  { href: '/ayuda', label: 'Ayuda' },
+  { href: '/nosotros', label: 'Nosotros' },
+];
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{titulo}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={titulo} />
+    <meta property="og:description" content={description} />
+    <meta property="og:locale" content="es_BO" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..900,0..100,0..1;1,9..144,300..900,0..100,0..1&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap"
+    />
+
+    {/* Resolve the theme before first paint so a night visitor never gets a
+        flash of cream. Inlined deliberately — a network round trip would defeat it. */}
+    <script is:inline>
+      (() => {
+        const guardado = localStorage.getItem('tema');
+        if (guardado) document.documentElement.dataset.tema = guardado;
+      })();
+    </script>
+  </head>
+
+  <body>
+    <a href="#principal" class="saltar">Saltar al contenido</a>
+
+    <header class="cabecera">
+      <div class="env cabecera__fila">
+        <a href="/" class="cabecera__marca">
+          <Marca size={40} color="var(--jade)" title="Wawitas Red de Apoyo" />
+          <span class="cabecera__nombre">
+            Wawitas
+            <small>Red de Apoyo</small>
+          </span>
+        </a>
+
+        <nav class="cabecera__nav" aria-label="Principal">
+          {nav.map((i) => <a href={i.href}>{i.label}</a>)}
+        </nav>
+
+        <div class="cabecera__acciones">
+          <button id="tema" class="icono" type="button" aria-pressed="false">
+            <span class="sr">Cambiar entre modo día y noche</span>
+            <span aria-hidden="true" data-icono>◐</span>
+          </button>
+          <a href="/cuenta" class="btn btn--tenue cabecera__cuenta">Mi cuenta</a>
+        </div>
+      </div>
+    </header>
+
+    {
+      cinta && (
+        <div class="cinta" aria-hidden="true">
+          <div class="cinta__pista">
+            {Array.from({ length: 8 }).map(() => (
+              <>
+                <span>De la calle, a tu corazón</span><span>·</span>
+                <span>Adopta, no compres</span><span>·</span>
+              </>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    <main id="principal">
+      <slot />
+    </main>
+
+    <footer class="pie">
+      <div class="env pie__fila">
+        <div>
+          <Marca size={54} color="var(--jade)" />
+          <p class="pie__lema">De la calle, a tu corazón.</p>
+        </div>
+        <div class="pie__datos">
+          <a href="https://wa.me/59177903553">WhatsApp 77903553</a>
+          <a href="https://www.instagram.com/wawitas_2025/">@wawitas_2025</a>
+          <a href="https://www.facebook.com/profile.php?id=61563998952145">Facebook</a>
+          <span>Cochabamba, Bolivia</span>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      const boton = document.getElementById('tema');
+      boton?.addEventListener('click', () => {
+        const raiz = document.documentElement;
+        const oscuro =
+          raiz.dataset.tema === 'noche' ||
+          (!raiz.dataset.tema && matchMedia('(prefers-color-scheme: dark)').matches);
+        const siguiente = oscuro ? 'dia' : 'noche';
+        raiz.dataset.tema = siguiente;
+        localStorage.setItem('tema', siguiente);
+        boton.setAttribute('aria-pressed', String(siguiente === 'noche'));
+      });
+    </script>
+
+    <style>
+      .saltar {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        background: var(--coral);
+        color: var(--carbon);
+        padding: 12px 20px;
+        z-index: 100;
+        font-weight: 700;
+      }
+      .saltar:focus {
+        left: 0;
+      }
+
+      .cabecera {
+        border-bottom: 1px solid var(--linea);
+        position: sticky;
+        top: 0;
+        background: var(--crema);
+        z-index: 50;
+      }
+      .cabecera__fila {
+        display: flex;
+        align-items: center;
+        gap: var(--paso-3);
+        padding-block: 14px;
+      }
+      .cabecera__marca {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        text-decoration: none;
+      }
+      .cabecera__nombre {
+        font-family: var(--display);
+        font-weight: 900;
+        font-variation-settings: 'SOFT' 70, 'WONK' 1;
+        font-size: 23px;
+        line-height: 0.9;
+        letter-spacing: -0.03em;
+        text-transform: uppercase;
+        color: var(--jade);
+      }
+      .cabecera__nombre small {
+        display: block;
+        font-size: 8.5px;
+        letter-spacing: 0.34em;
+        font-variation-settings: 'SOFT' 40, 'WONK' 0;
+        opacity: 0.75;
+        margin-top: 4px;
+      }
+      .cabecera__nav {
+        display: flex;
+        gap: var(--paso-3);
+        margin-left: auto;
+      }
+      .cabecera__nav a {
+        font-weight: 600;
+        font-size: 13px;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        text-decoration: none;
+        padding-block: 6px;
+        border-bottom: 2px solid transparent;
+      }
+      .cabecera__nav a:hover {
+        border-color: var(--coral);
+      }
+      .cabecera__acciones {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .icono {
+        background: none;
+        border: 1px solid var(--linea);
+        border-radius: 99px;
+        width: 38px;
+        height: 38px;
+        cursor: pointer;
+        font-size: 15px;
+      }
+      .cabecera__cuenta {
+        padding: 10px 17px;
+        font-size: 11.5px;
+      }
+
+      .cinta {
+        background: var(--sol);
+        color: var(--carbon);
+        overflow: hidden;
+        white-space: nowrap;
+        padding: 9px 0;
+      }
+      .cinta__pista {
+        display: inline-block;
+        animation: desliza 34s linear infinite;
+      }
+      .cinta__pista span {
+        font-weight: 700;
+        font-size: 12.5px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        padding: 0 16px;
+      }
+      @keyframes desliza {
+        to {
+          transform: translateX(-50%);
+        }
+      }
+
+      .pie {
+        border-top: 2px solid var(--linea);
+        margin-top: var(--paso-6);
+        padding-block: var(--paso-5) var(--paso-6);
+      }
+      .pie__fila {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--paso-4);
+        justify-content: space-between;
+        align-items: flex-end;
+      }
+      .pie__lema {
+        font-family: var(--display);
+        font-style: italic;
+        font-size: 21px;
+        margin-top: 14px;
+      }
+      .pie__datos {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        font-size: 13.5px;
+      }
+
+      @media (max-width: 760px) {
+        .cabecera__nav {
+          display: none;
+        }
+        .cabecera__cuenta {
+          display: none;
+        }
+      }
+    </style>
+  </body>
+</html>

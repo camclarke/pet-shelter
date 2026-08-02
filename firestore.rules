@@ -1,0 +1,146 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// dog-shelter — Firestore security rules
+//
+// These rules ARE the authorization layer. Clients read Firestore directly;
+// no Cloud Function sits in front of reads, because rules evaluation is free
+// and a function invocation is not. Everything below is therefore load-bearing.
+//
+// Two principles:
+//   1. Visibility tiers are documents, not fields. Rules cannot protect a field.
+//   2. Admin is a custom auth claim, never a Firestore field. Reading a field
+//      inside a rule costs a document read on every evaluation.
+// ═══════════════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── helpers ────────────────────────────────────────────────────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    // Does the signed-in user own this dog? One document read, and only on the
+    // restricted-location path where it is unavoidable.
+    function ownsDog(dogId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/adoptions/$(dogId))
+        && get(/databases/$(database)/documents/adoptions/$(dogId)).data.ownerUid == request.auth.uid;
+    }
+
+    // Clamp coordinates to the Cochabamba region. Keeps a spammer from
+    // scattering fake sightings across the planet.
+    function withinCochabamba(geo) {
+      return geo.latitude  >= -17.75 && geo.latitude  <= -17.15
+          && geo.longitude >= -66.45 && geo.longitude <= -65.85;
+    }
+
+    // ── dogs/{dogId} ───────────────────────────────────────────────────────
+    // Public teaser. Indexable and shareable: this is how an adopter finds
+    // the dog in the first place. Contains nothing about physical location.
+    match /dogs/{dogId} {
+      allow read: if true;
+      allow write: if isAdmin();
+
+      // ── detail — everything of substance, behind a login ─────────────────
+      match /detail/{docId} {
+        allow read: if signedIn();
+        allow write: if isAdmin();
+      }
+
+      // ── location — the sharpest edge in the whole schema ─────────────────
+      // For a fostered dog this is a volunteer's home address. For an adopted
+      // dog it is the adopter's. Admins and the current owner, nobody else.
+      match /location/{docId} {
+        allow read: if isAdmin() || ownsDog(dogId);
+        allow write: if isAdmin();
+      }
+
+      // ── sightings — public read AND public create, by design ─────────────
+      // Someone who spots a lost dog must be able to report it in seconds,
+      // with no account. That openness is the feature, so every constraint
+      // below is doing real work. App Check is enforced separately and is
+      // what stops writes from outside our own origin.
+      match /sightings/{sightingId} {
+        allow read: if true;
+
+        allow create: if
+          // exact field whitelist — nothing unexpected gets stored
+          request.resource.data.keys().hasOnly([
+            'geo', 'note', 'photoUrl', 'contact', 'reportedAt', 'status', 'reviewedBy'
+          ])
+          && request.resource.data.keys().hasAll(['geo', 'note', 'reportedAt', 'status'])
+
+          && request.resource.data.geo is latlng
+          && withinCochabamba(request.resource.data.geo)
+
+          && request.resource.data.note is string
+          && request.resource.data.note.size() > 0
+          && request.resource.data.note.size() <= 500
+
+          && (!('contact' in request.resource.data.keys())
+              || request.resource.data.contact == null
+              || (request.resource.data.contact is string
+                  && request.resource.data.contact.size() <= 40))
+
+          && (!('photoUrl' in request.resource.data.keys())
+              || request.resource.data.photoUrl == null
+              || (request.resource.data.photoUrl is string
+                  && request.resource.data.photoUrl.size() <= 500))
+
+          // an anonymous reporter cannot self-confirm a sighting
+          && request.resource.data.status == 'pending'
+          && request.resource.data.reviewedBy == null
+
+          // no backdating or postdating
+          && request.resource.data.reportedAt == request.time;
+
+        // Triage is an admin job. Reports are immutable to their reporter —
+        // there is no identity to authenticate an edit against.
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // ── users/{uid} ────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+
+      // A user may create and maintain their own profile, but may not invent
+      // privileges. Admin lives in a custom claim set server-side; should a
+      // stray `role` field ever appear here, it must never be self-assigned.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(
+             ['uid', 'email', 'displayName', 'photoURL', 'createdAt'])
+        && request.resource.data.uid == uid;
+
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName', 'photoURL']);
+
+      allow delete: if isAdmin();
+    }
+
+    // ── adoptions/{dogId} ──────────────────────────────────────────────────
+    // Keyed by dogId so ownsDog() resolves in a single get(). Establishes who
+    // may read a dog's exact location, so only an admin may write it.
+    match /adoptions/{dogId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ── default deny ───────────────────────────────────────────────────────
+    // Anything not matched above is inaccessible. New collections must opt in
+    // deliberately rather than inherit access by accident.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

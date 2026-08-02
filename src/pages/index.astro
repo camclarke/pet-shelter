@@ -1,0 +1,197 @@
+---
+import Base from '../layouts/Base.astro';
+import Muro from '../components/Muro.astro';
+
+const pasos = [
+  {
+    n: '01',
+    t: 'Encuéntralo',
+    d: 'Mira el muro. Cada perrito tiene su historia, su edad y su carácter. Alguno te va a mirar distinto.',
+  },
+  {
+    n: '02',
+    t: 'Escríbenos',
+    d: 'Un mensaje de WhatsApp con su nombre. Te contamos todo lo que sabemos de él, sin adornos.',
+  },
+  {
+    n: '03',
+    t: 'Conócelo',
+    d: 'Se coordina un encuentro en un punto seguro. Sin compromiso: queremos que estén seguros los dos.',
+  },
+  {
+    n: '04',
+    t: 'Llévalo a casa',
+    d: 'Castración gratuita a los 6 o 7 meses y seguimiento de la adopción. No desaparecemos después.',
+  },
+];
+---
+
+<Base title="Wawitas">
+  <section class="portada">
+    <div class="env">
+      <p class="portada__intro">Refugio transitorio · Cochabamba, Bolivia</p>
+      <h1 class="portada__lema">De la calle,<br /><b>a tu corazón.</b></h1>
+      <p class="portada__texto">
+        Rescatamos perritos abandonados y maltratados, los rehabilitamos física y emocionalmente,
+        y les buscamos una familia para toda la vida en adopción responsable.
+      </p>
+      <div class="portada__acciones">
+        <a href="/adopta" class="btn btn--accion">Conoce a los perritos ↓</a>
+        <a href="/ayuda" class="btn btn--tenue">Quiero ayudar</a>
+      </div>
+    </div>
+  </section>
+
+  <Muro limit={8} title="Están esperando una familia." />
+
+  <div class="env">
+    <a href="/adopta" class="btn btn--marca ver-todos">Ver todos los perritos</a>
+  </div>
+
+  <section class="pasos">
+    <div class="env">
+      <h2 class="t-titulo pasos__titulo">Adoptar no solo cambia una vida: transforma dos.</h2>
+      <ol class="pasos__lista">
+        {
+          pasos.map((p) => (
+            <li class="paso">
+              <span class="paso__n">{p.n}</span>
+              <h3 class="paso__t">{p.t}</h3>
+              <p class="paso__d">{p.d}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="cita-seccion">
+    <div class="env">
+      <blockquote class="t-cita cita">
+        Detrás de cada mirada hay una historia de abandono, de sufrimiento y supervivencia —
+        pero también una enorme capacidad de volver a confiar.
+      </blockquote>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .portada {
+    background: var(--jade);
+    color: var(--crema);
+    padding-block: var(--paso-5) var(--paso-5);
+    position: relative;
+    overflow: hidden;
+  }
+  /* halftone wash, the printed-poster tell */
+  .portada::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.11) 1.5px, transparent 1.6px);
+    background-size: 14px 14px;
+  }
+  .portada > * {
+    position: relative;
+  }
+  .portada__intro {
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+  .portada__lema {
+    font-family: var(--display);
+    font-weight: 400;
+    font-style: italic;
+    font-variation-settings: 'SOFT' 60, 'WONK' 1;
+    font-size: clamp(38px, 7.5vw, 86px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    margin: var(--paso-2) 0 var(--paso-3);
+  }
+  .portada__lema b {
+    font-weight: 900;
+    font-style: normal;
+    color: var(--sol);
+  }
+  .portada__texto {
+    max-width: 46ch;
+    font-size: 17px;
+    line-height: 1.6;
+    opacity: 0.94;
+  }
+  .portada__acciones {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 13px;
+    margin-top: var(--paso-4);
+  }
+  .portada__acciones .btn {
+    border-color: var(--carbon);
+    box-shadow: 4px 4px 0 var(--carbon);
+  }
+  .portada__acciones .btn--tenue {
+    border-color: rgba(246, 241, 231, 0.5);
+    color: var(--crema);
+    box-shadow: none;
+  }
+  .portada__acciones .btn--tenue:hover {
+    background: rgba(246, 241, 231, 0.12);
+  }
+
+  .ver-todos {
+    margin-bottom: var(--paso-5);
+  }
+
+  .pasos {
+    border-top: 1px solid var(--linea);
+    padding-block: var(--paso-5);
+  }
+  .pasos__titulo {
+    max-width: 18ch;
+    margin-bottom: var(--paso-4);
+  }
+  .pasos__lista {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+    gap: var(--paso-3);
+    list-style: none;
+  }
+  .paso {
+    border-left: 3px solid var(--coral);
+    padding-left: 17px;
+  }
+  .paso__n {
+    font-family: var(--display);
+    font-weight: 900;
+    font-variation-settings: 'SOFT' 70, 'WONK' 1;
+    font-size: 34px;
+    line-height: 1;
+    color: var(--coral);
+  }
+  .paso__t {
+    font-family: var(--texto);
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin: 11px 0 8px;
+  }
+  .paso__d {
+    font-size: 14.5px;
+    line-height: 1.6;
+    opacity: 0.82;
+  }
+
+  .cita-seccion {
+    border-top: 1px solid var(--linea);
+    padding-block: var(--paso-5);
+  }
+  .cita {
+    max-width: 28ch;
+    border-left: 3px solid var(--sol);
+    padding-left: var(--paso-3);
+  }
+</style>
