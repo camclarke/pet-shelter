@@ -1,7 +1,8 @@
 node_modules/
-dist/
-.astro/
-.output/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
 
 # env & secrets
 .env
@@ -16,6 +17,18 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 .firebaserc.local
+
+# terraform
+# .terraform.lock.hcl is intentionally NOT ignored — committing it pins
+# provider versions across the team and across the eventual tenant move.
+terraform/**/.terraform/
+terraform/**/*.tfstate
+terraform/**/*.tfstate.*
+terraform/**/*.tfvars
+!terraform/**/*.tfvars.example
+terraform/**/backend.hcl
+!terraform/**/backend.hcl.example
+terraform/**/crash.log
 
 # os / editor
 .DS_Store

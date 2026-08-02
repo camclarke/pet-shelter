@@ -1,0 +1,740 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Wawitas Red de Apoyo — design tokens
+   "Cartel de Barrio": riso print, flat ink, warm paper.
+
+   The palette is not invented. Jade was eyedropped from the organisation's own
+   Facebook cover and profile logo — #31907A in both. Everything else is built
+   around it. See design/estilo.html for the rendered system.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── ink ──────────────────────────────────────────────────────────────── */
+  --crema: #f6f1e7;       /* the page. Warm paper — pure white chills the jade */
+  --crema-2: #ede5d6;     /* recessed surfaces */
+  --jade: #31907a;        /* the brand. Sampled from their logo */
+  --jade-hondo: #12463b;  /* all reading text. 9.5:1 on crema */
+  --jade-claro: #7fc4ae;  /* detail on dark surfaces */
+  --coral: #f0532b;       /* the action, and only the action */
+  --sol: #f5b72b;         /* tape, underlines, the ticker */
+  --carbon: #1a0e08;      /* text on coral and sol */
+
+  --linea: rgba(18, 70, 59, 0.16);
+  --sombra: 0 1px 0 rgba(18, 70, 59, 0.08), 0 12px 26px -14px rgba(18, 70, 59, 0.45);
+  --sombra-alta: 0 1px 0 rgba(18, 70, 59, 0.1), 0 28px 46px -20px rgba(18, 70, 59, 0.5);
+
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  /* Fraunces carries the poster voice; its SOFT and WONK axes give the
+     deliberate imperfection that converses with the brush-drawn logotype.
+     Instrument Sans carries the reading. Both cover Spanish accents fully. */
+  --display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --texto: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+  --wonk: 'SOFT' 40, 'WONK' 1;
+  --wonk-fuerte: 'SOFT' 70, 'WONK' 1, 'opsz' 144;
+
+  /* ── rhythm ───────────────────────────────────────────────────────────── */
+  --paso-1: 0.5rem;
+  --paso-2: 1rem;
+  --paso-3: 1.5rem;
+  --paso-4: 2.5rem;
+  --paso-5: 4rem;
+  --paso-6: 6rem;
+  --ancho: 1180px;
+  --radio: 3px;
+
+  /* ── motion ───────────────────────────────────────────────────────────── */
+  --sal: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --dur: 0.34s;
+}
+
+/* Night. Roughly half of all visits arrive after dark from a phone. On this
+   base coral reaches 5.4:1 and becomes usable as text; jade recedes and hands
+   emphasis to jade-claro. */
+:root[data-tema='noche'] {
+  --crema: #0d1714;
+  --crema-2: #142320;
+  --jade-hondo: #efe9dc;
+  --linea: rgba(239, 233, 220, 0.15);
+  --sombra: 0 1px 0 rgba(0, 0, 0, 0.4), 0 14px 30px -16px rgba(0, 0, 0, 0.9);
+  --sombra-alta: 0 1px 0 rgba(0, 0, 0, 0.4), 0 30px 50px -20px rgba(0, 0, 0, 0.95);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema='dia']) {
+    --crema: #0d1714;
+    --crema-2: #142320;
+    --jade-hondo: #efe9dc;
+    --linea: rgba(239, 233, 220, 0.15);
+    --sombra: 0 1px 0 rgba(0, 0, 0, 0.4), 0 14px 30px -16px rgba(0, 0, 0, 0.9);
+    --sombra-alta: 0 1px 0 rgba(0, 0, 0, 0.4), 0 30px 50px -20px rgba(0, 0, 0, 0.95);
+  }
+}
+
+/* ── reset ──────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--crema);
+  color: var(--jade-hondo);
+  font-family: var(--texto);
+  font-size: 16.5px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.5s ease, color 0.5s ease;
+}
+
+/* The grain. This single layer is what separates "printed paper" from
+   "a div with a background colour" — it never goes away. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.45;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='.3'/%3E%3C/svg%3E");
+}
+
+:root[data-tema='noche'] body::after {
+  mix-blend-mode: screen;
+  opacity: 0.2;
+}
+
+img,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--coral);
+  outline-offset: 2px;
+}
+
+/* ── type scale ─────────────────────────────────────────────────────────── */
+.t-nombre {
+  font-family: var(--display);
+  font-weight: 900;
+  font-variation-settings: var(--wonk-fuerte);
+  font-size: clamp(33px, 3.7vw, 46px);
+  line-height: 0.86;
+  letter-spacing: -0.045em;
+  text-transform: uppercase;
+}
+
+.t-titulo {
+  font-family: var(--display);
+  font-weight: 600;
+  font-variation-settings: var(--wonk);
+  font-size: clamp(25px, 3.5vw, 40px);
+  line-height: 1.05;
+  letter-spacing: -0.022em;
+}
+
+.t-cita {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 400;
+  font-variation-settings: 'SOFT' 60, 'WONK' 1;
+  font-size: clamp(20px, 2.6vw, 29px);
+  line-height: 1.3;
+}
+
+.t-etiqueta {
+  font-family: var(--texto);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.t-dato {
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  font-weight: 600;
+  opacity: 0.62;
+}
+
+/* ── layout ─────────────────────────────────────────────────────────────── */
+.env {
+  max-width: var(--ancho);
+  margin-inline: auto;
+  padding-inline: var(--paso-3);
+}
+
+/* Screen-reader-only, for the label text that makes icon controls speak. */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Contrast rule, enforced by convention:
+   jade (3.5:1) and coral (3.1:1) on crema are FILLS, never body text.
+   Reading text is jade-hondo. Text sitting on coral is carbon (5.3:1). */
+.btn {
+  font-family: var(--texto);
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 15px 27px;
+  border: 2px solid var(--jade-hondo);
+  border-radius: var(--radio);
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  box-shadow: 4px 4px 0 var(--jade-hondo);
+  transition: transform 0.16s var(--sal), box-shadow 0.16s ease;
+}
+
+.btn:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--jade-hondo);
+}
+
+/* The single loudest thing on any given screen. If a second one appears,
+   it stops meaning "click here". */
+.btn--accion {
+  background: var(--coral);
+  color: var(--carbon);
+}
+
+.btn--marca {
+  background: var(--jade);
+  color: var(--crema);
+}
+
+.btn--tenue {
+  border-color: var(--linea);
+  box-shadow: none;
+}
+
+.btn--tenue:hover {
+  box-shadow: none;
+  background: var(--crema-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Site chrome — header, ticker, footer (components/SiteChrome.tsx)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.saltar {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--coral);
+  color: var(--carbon);
+  padding: 12px 20px;
+  z-index: 100;
+  font-weight: 700;
+}
+.saltar:focus {
+  left: 0;
+}
+
+.cabecera {
+  border-bottom: 1px solid var(--linea);
+  position: sticky;
+  top: 0;
+  background: var(--crema);
+  z-index: 50;
+}
+.cabecera__fila {
+  display: flex;
+  align-items: center;
+  gap: var(--paso-3);
+  padding-block: 14px;
+}
+.cabecera__marca {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  text-decoration: none;
+}
+.cabecera__nombre {
+  font-family: var(--display);
+  font-weight: 900;
+  font-variation-settings: 'SOFT' 70, 'WONK' 1;
+  font-size: 23px;
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  color: var(--jade);
+}
+.cabecera__nombre small {
+  display: block;
+  font-size: 8.5px;
+  letter-spacing: 0.34em;
+  font-variation-settings: 'SOFT' 40, 'WONK' 0;
+  opacity: 0.75;
+  margin-top: 4px;
+}
+.cabecera__nav {
+  display: flex;
+  gap: var(--paso-3);
+  margin-left: auto;
+}
+.cabecera__nav a {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  text-decoration: none;
+  padding-block: 6px;
+  border-bottom: 2px solid transparent;
+}
+.cabecera__nav a:hover {
+  border-color: var(--coral);
+}
+.cabecera__acciones {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.icono {
+  background: none;
+  border: 1px solid var(--linea);
+  border-radius: 99px;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+  font-size: 15px;
+}
+.cabecera__cuenta {
+  padding: 10px 17px;
+  font-size: 11.5px;
+}
+
+.cinta {
+  background: var(--sol);
+  color: var(--carbon);
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 9px 0;
+}
+.cinta__pista {
+  display: inline-block;
+  animation: desliza 34s linear infinite;
+}
+.cinta__pista span {
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 0 16px;
+}
+@keyframes desliza {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.pie {
+  border-top: 2px solid var(--linea);
+  margin-top: var(--paso-6);
+  padding-block: var(--paso-5) var(--paso-6);
+}
+.pie__fila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--paso-4);
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.pie__lema {
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 21px;
+  margin-top: 14px;
+}
+.pie__datos {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 13.5px;
+}
+
+@media (max-width: 760px) {
+  .cabecera__nav {
+    display: none;
+  }
+  .cabecera__cuenta {
+    display: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   El Muro de Adopción (components/Muro.tsx) — a wall of taped-up posters.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.muro-seccion {
+  padding-block: var(--paso-5);
+}
+.muro-seccion__titulo {
+  margin-bottom: var(--paso-3);
+  max-width: 20ch;
+}
+
+.muro {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(236px, 1fr));
+  gap: 32px 24px;
+}
+
+.cartel {
+  position: relative;
+  background: var(--crema);
+  border: 1px solid var(--linea);
+  box-shadow: var(--sombra);
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  animation: cartel-entra 0.5s var(--sal) both;
+  transition: transform var(--dur) var(--sal), box-shadow var(--dur) ease;
+}
+.cartel:nth-child(3n + 1) { transform: rotate(-1.1deg); }
+.cartel:nth-child(3n + 2) { transform: rotate(0.7deg); }
+.cartel:nth-child(3n + 3) { transform: rotate(-0.4deg); }
+
+.cartel:hover,
+.cartel:focus-visible {
+  transform: rotate(0deg) translateY(-9px) scale(1.02);
+  box-shadow: var(--sombra-alta);
+  z-index: 2;
+}
+
+/* the strip of tape holding the poster to the wall */
+.cartel::before {
+  content: '';
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  translate: -50% 0;
+  width: 78px;
+  height: 23px;
+  background: var(--sol);
+  opacity: 0.88;
+  z-index: 3;
+  clip-path: polygon(3% 12%, 97% 0, 100% 88%, 0 100%);
+  box-shadow: 0 2px 5px rgba(18, 70, 59, 0.2);
+}
+
+.cartel__foto {
+  aspect-ratio: 4 / 5;
+  position: relative;
+  overflow: hidden;
+  background: var(--jade);
+}
+.cartel__foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Halftone at rest, dissolving on approach — the gesture of looking closer. */
+.cartel__foto::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.42) 1px, transparent 1.1px);
+  background-size: 5px 5px;
+  mix-blend-mode: overlay;
+  opacity: 0.55;
+  transition: opacity var(--dur) ease;
+}
+.cartel:hover .cartel__foto::after { opacity: 0; }
+
+.cartel__marco {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  right: 9px;
+  display: flex;
+  justify-content: space-between;
+  z-index: 2;
+}
+.cartel__chip {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: var(--crema);
+  color: var(--jade-hondo);
+  padding: 4px 9px;
+  border-radius: 99px;
+}
+.cartel__chip--urgente {
+  background: var(--coral);
+  color: var(--carbon);
+}
+
+.cartel__pie {
+  padding: 14px 15px 16px;
+  border-top: 1px solid var(--linea);
+}
+.cartel__nombre { color: var(--jade); }
+:root[data-tema='noche'] .cartel__nombre { color: var(--jade-claro); }
+.cartel__pie .t-dato { margin-top: 10px; }
+
+.cartel__cta {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--coral);
+  margin-top: 12px;
+  opacity: 0;
+  translate: 0 5px;
+  transition: opacity 0.3s ease, translate 0.3s ease;
+}
+.cartel:hover .cartel__cta,
+.cartel:focus-visible .cartel__cta {
+  opacity: 1;
+  translate: 0 0;
+}
+
+.muro-vacio {
+  padding: var(--paso-4) 0;
+  font-size: 15.5px;
+  opacity: 0.8;
+}
+
+@keyframes cartel-entra {
+  from { opacity: 0; translate: 0 18px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cartel { animation: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Home page (app/page.tsx)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.portada {
+  background: var(--jade);
+  color: var(--crema);
+  padding-block: var(--paso-5);
+  position: relative;
+  overflow: hidden;
+}
+.portada::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.11) 1.5px, transparent 1.6px);
+  background-size: 14px 14px;
+}
+.portada > * {
+  position: relative;
+}
+.portada__intro {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 600;
+  opacity: 0.85;
+}
+.portada__lema {
+  font-family: var(--display);
+  font-weight: 400;
+  font-style: italic;
+  font-variation-settings: 'SOFT' 60, 'WONK' 1;
+  font-size: clamp(38px, 7.5vw, 86px);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  margin: var(--paso-2) 0 var(--paso-3);
+}
+.portada__lema b {
+  font-weight: 900;
+  font-style: normal;
+  color: var(--sol);
+}
+.portada__texto {
+  max-width: 46ch;
+  font-size: 17px;
+  line-height: 1.6;
+  opacity: 0.94;
+}
+.portada__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 13px;
+  margin-top: var(--paso-4);
+}
+.portada__acciones .btn {
+  border-color: var(--carbon);
+  box-shadow: 4px 4px 0 var(--carbon);
+}
+.portada__acciones .btn--tenue {
+  border-color: rgba(246, 241, 231, 0.5);
+  color: var(--crema);
+  box-shadow: none;
+}
+.portada__acciones .btn--tenue:hover {
+  background: rgba(246, 241, 231, 0.12);
+}
+
+.ver-todos {
+  margin-bottom: var(--paso-5);
+  display: inline-flex;
+}
+
+.pasos {
+  border-top: 1px solid var(--linea);
+  padding-block: var(--paso-5);
+}
+.pasos__titulo {
+  max-width: 18ch;
+  margin-bottom: var(--paso-4);
+}
+.pasos__lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+  gap: var(--paso-3);
+  list-style: none;
+}
+.paso {
+  border-left: 3px solid var(--coral);
+  padding-left: 17px;
+}
+.paso__n {
+  font-family: var(--display);
+  font-weight: 900;
+  font-variation-settings: 'SOFT' 70, 'WONK' 1;
+  font-size: 34px;
+  line-height: 1;
+  color: var(--coral);
+}
+.paso__t {
+  font-family: var(--texto);
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin: 11px 0 8px;
+}
+.paso__d {
+  font-size: 14.5px;
+  line-height: 1.6;
+  opacity: 0.82;
+}
+
+.cita-seccion {
+  border-top: 1px solid var(--linea);
+  padding-block: var(--paso-5);
+}
+.cita {
+  max-width: 28ch;
+  border-left: 3px solid var(--sol);
+  padding-left: var(--paso-3);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   El expediente (app/adopta/[slug]/page.tsx) — a dog's own page.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.expediente {
+  padding-block: var(--paso-5);
+}
+.expediente__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--paso-4);
+}
+.expediente__foto {
+  aspect-ratio: 4 / 5;
+  background: var(--jade);
+  overflow: hidden;
+  box-shadow: var(--sombra);
+}
+.expediente__foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.expediente__nombre {
+  color: var(--jade);
+}
+:root[data-tema='noche'] .expediente__nombre {
+  color: var(--jade-claro);
+}
+.expediente__antes {
+  font-style: italic;
+  opacity: 0.7;
+  margin-top: 6px;
+  font-size: 14px;
+}
+.expediente__meta {
+  margin-top: var(--paso-2);
+  opacity: 0.8;
+}
+.expediente__cta {
+  margin-top: var(--paso-3);
+}
+.expediente__gated {
+  margin-top: var(--paso-4);
+  padding-top: var(--paso-3);
+  border-top: 1px solid var(--linea);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  font-size: 14.5px;
+  opacity: 0.85;
+  max-width: 42ch;
+}
+
+@media (max-width: 760px) {
+  .expediente__grid {
+    grid-template-columns: 1fr;
+  }
+}

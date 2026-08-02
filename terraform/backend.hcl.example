@@ -1,0 +1,9 @@
+# Copy to backend.hcl (gitignored) and fill in, then:
+#   terraform init -backend-config=backend.hcl
+#
+# Kept out of versions.tf on purpose: this is the one file that changes when
+# the project moves to a new GCP tenant. A fresh bucket in the new tenant plus
+# a re-init is the entire migration step for state storage.
+
+bucket = "wawitas-terraform-state"
+prefix = "dog-shelter"
