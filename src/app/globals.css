@@ -679,7 +679,7 @@ textarea {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   El expediente (app/adopta/[slug]/page.tsx) — a dog's own page.
+   El expediente (app/adopta/[slug]/page.tsx) — a pet's own page.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .expediente {
@@ -720,6 +720,16 @@ textarea {
 .expediente__cta {
   margin-top: var(--paso-3);
 }
+.expediente__chip-nota {
+  margin-top: var(--paso-2);
+  padding: 11px 14px;
+  background: var(--crema-2);
+  border-left: 3px solid var(--jade);
+  font-size: 13.5px;
+  line-height: 1.55;
+  max-width: 46ch;
+}
+
 .expediente__gated {
   margin-top: var(--paso-4);
   padding-top: var(--paso-3);

@@ -10,7 +10,7 @@ locals {
     "firestore.googleapis.com",          # the database
     "firebase.googleapis.com",           # Firebase project linkage (Hosting, Auth)
     "identitytoolkit.googleapis.com",    # Firebase Authentication
-    "storage.googleapis.com",            # Cloud Storage (dog photos, sighting photos)
+    "storage.googleapis.com",            # Cloud Storage (pet photos, sighting photos)
     "secretmanager.googleapis.com",      # runtime secrets for Cloud Run
     "cloudbilling.googleapis.com",       # required to read/manage the budget alert
     "billingbudgets.googleapis.com",     # the budget alert itself

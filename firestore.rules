@@ -1,16 +1,19 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// dog-shelter — Firestore security rules
+// pet-shelter — Firestore security rules
 //
 // These rules ARE the authorization layer. Clients read Firestore directly;
 // no Cloud Function sits in front of reads, because rules evaluation is free
 // and a function invocation is not. Everything below is therefore load-bearing.
 //
-// Two principles:
+// Three principles:
 //   1. Visibility tiers are documents, not fields. Rules cannot protect a field.
 //   2. Admin is a custom auth claim, never a Firestore field. Reading a field
 //      inside a rule costs a document read on every evaluation.
+//   3. A microchip number and a scan trail are identifying data about the
+//      HUMAN as much as the animal. They sit in the restricted tier, not the
+//      merely-authenticated one.
 // ═══════════════════════════════════════════════════════════════════════════
 
 service cloud.firestore {
@@ -25,25 +28,33 @@ service cloud.firestore {
       return signedIn() && request.auth.token.admin == true;
     }
 
-    // Does the signed-in user own this dog? One document read, and only on the
-    // restricted-location path where it is unavoidable.
-    function ownsDog(dogId) {
+    // Does the signed-in user own this pet? One document read, and only on the
+    // restricted paths where it is unavoidable. `adoptions` is keyed by petId
+    // precisely so this resolves in a single get().
+    function ownsPet(petId) {
       return signedIn()
-        && exists(/databases/$(database)/documents/adoptions/$(dogId))
-        && get(/databases/$(database)/documents/adoptions/$(dogId)).data.ownerUid == request.auth.uid;
+        && exists(/databases/$(database)/documents/adoptions/$(petId))
+        && get(/databases/$(database)/documents/adoptions/$(petId)).data.ownerUid == request.auth.uid;
     }
 
-    // Clamp coordinates to the Cochabamba region. Keeps a spammer from
-    // scattering fake sightings across the planet.
-    function withinCochabamba(geo) {
+    function adminOrOwner(petId) {
+      return isAdmin() || ownsPet(petId);
+    }
+
+    // Clamp coordinates to the service area. Keeps a spammer from scattering
+    // fake sightings across the planet. Mirrors SHELTER.bounds in
+    // src/config/shelter.ts — update both together; this copy is the one that
+    // is actually enforced.
+    function withinServiceArea(geo) {
       return geo.latitude  >= -17.75 && geo.latitude  <= -17.15
           && geo.longitude >= -66.45 && geo.longitude <= -65.85;
     }
 
-    // ── dogs/{dogId} ───────────────────────────────────────────────────────
-    // Public teaser. Indexable and shareable: this is how an adopter finds
-    // the dog in the first place. Contains nothing about physical location.
-    match /dogs/{dogId} {
+    // ── pets/{petId} ───────────────────────────────────────────────────────
+    // Public teaser. Indexable and shareable: this is how an adopter finds the
+    // pet in the first place. Carries `hasMicrochip` as a boolean but never
+    // the number itself.
+    match /pets/{petId} {
       allow read: if true;
       allow write: if isAdmin();
 
@@ -53,16 +64,69 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // ── identity — the microchip number ──────────────────────────────────
+      // Deliberately NOT in the authenticated tier. The chip number is the
+      // credential by which ownership gets asserted to registries and vets;
+      // anyone who can read it can claim the animal is theirs. Creating an
+      // account is not a reason to learn every chipped animal's number.
+      //
+      // Lookup in the other direction — "I scanned a chip, whose pet is
+      // this?" — deliberately does not happen here. That runs server-side
+      // (findPetByMicrochip) and returns only the public record, so a finder
+      // gets a name and a way to make contact without the ability to
+      // enumerate the registry.
+      match /identity/{docId} {
+        allow read: if adminOrOwner(petId);
+        allow write: if isAdmin();
+      }
+
       // ── location — the sharpest edge in the whole schema ─────────────────
-      // For a fostered dog this is a volunteer's home address. For an adopted
-      // dog it is the adopter's. Admins and the current owner, nobody else.
+      // For a fostered pet this is a volunteer's home address. For an adopted
+      // pet it is the adopter's. Admins and the current owner, nobody else.
       match /location/{docId} {
-        allow read: if isAdmin() || ownsDog(dogId);
+        allow read: if adminOrOwner(petId);
+        allow write: if isAdmin();
+      }
+
+      // ── scans — the last-known-location ledger ───────────────────────────
+      // Restricted for the same reason as `location`, and arguably more so: a
+      // single location is one address, whereas a scan history is a pattern of
+      // movement over time. For an adopted pet that is a trail of its owner's
+      // vet, neighbourhood, and routine.
+      //
+      // Writes are admin-only: a scan record asserts "this animal was here",
+      // and an unauthenticated public that could forge those could plant false
+      // recovery trails. Members of the public report through `sightings`,
+      // which is moderated.
+      match /scans/{scanId} {
+        allow read: if adminOrOwner(petId);
+        allow write: if isAdmin();
+      }
+
+      // ── custody — the chain of responsibility ────────────────────────────
+      match /custody/{custodyId} {
+        allow read: if adminOrOwner(petId);
+        allow write: if isAdmin();
+      }
+
+      // ── medical history ──────────────────────────────────────────────────
+      // Gated, not public: publishing "FIV positive" or "reactive to men"
+      // openly harms the animal's chances more than it helps. An adopter who
+      // has signed in gets the full picture before committing.
+      match /medical/{recordId} {
+        allow read: if signedIn();
+        allow write: if isAdmin();
+      }
+
+      // ── care: feeding plan ───────────────────────────────────────────────
+      // Travels with the animal so an adopter can avoid an abrupt diet change.
+      match /care/{docId} {
+        allow read: if signedIn();
         allow write: if isAdmin();
       }
 
       // ── sightings — public read AND public create, by design ─────────────
-      // Someone who spots a lost dog must be able to report it in seconds,
+      // Someone who spots a lost pet must be able to report it in seconds,
       // with no account. That openness is the feature, so every constraint
       // below is doing real work. App Check is enforced separately and is
       // what stops writes from outside our own origin.
@@ -77,7 +141,7 @@ service cloud.firestore {
           && request.resource.data.keys().hasAll(['geo', 'note', 'reportedAt', 'status'])
 
           && request.resource.data.geo is latlng
-          && withinCochabamba(request.resource.data.geo)
+          && withinServiceArea(request.resource.data.geo)
 
           && request.resource.data.note is string
           && request.resource.data.note.size() > 0
@@ -106,6 +170,24 @@ service cloud.firestore {
       }
     }
 
+    // ── collection-group reads ─────────────────────────────────────────────
+    // A collectionGroup query is evaluated against these rules, not the
+    // nested ones above, so each group that gets queried needs an explicit
+    // decision. `identity` is queried by microchip code on the server via the
+    // Admin SDK (which bypasses rules entirely); from a client it stays shut.
+    match /{path=**}/identity/{docId} {
+      allow read: if isAdmin();
+    }
+
+    match /{path=**}/scans/{scanId} {
+      allow read: if isAdmin();
+    }
+
+    // The admin moderation queue spans every pet's sightings.
+    match /{path=**}/sightings/{sightingId} {
+      allow read: if true;
+    }
+
     // ── users/{uid} ────────────────────────────────────────────────────────
     match /users/{uid} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
@@ -127,10 +209,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── adoptions/{dogId} ──────────────────────────────────────────────────
-    // Keyed by dogId so ownsDog() resolves in a single get(). Establishes who
-    // may read a dog's exact location, so only an admin may write it.
-    match /adoptions/{dogId} {
+    // ── adoptions/{petId} ──────────────────────────────────────────────────
+    // Keyed by petId so ownsPet() resolves in a single get(). Establishes who
+    // may read a pet's microchip, location, and scan history — so only an
+    // admin may write it.
+    match /adoptions/{petId} {
       allow read: if isAdmin()
         || (signedIn() && resource.data.ownerUid == request.auth.uid);
       allow write: if isAdmin();

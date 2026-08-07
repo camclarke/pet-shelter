@@ -23,7 +23,7 @@ Reading the live page, the content falls into five repeating shapes. The website
 
 Two things stand out and shape the whole design:
 
-1. **Adoption posts are already structured.** Name, approximate age, temperament, commitments, contact reference. That is a database record wearing a caption. It maps cleanly onto a `Dog` schema, which is what makes the Facebook→website sync realistic rather than wishful.
+1. **Adoption posts are already structured.** Name, approximate age, temperament, commitments, contact reference. That is a database record wearing a caption. It maps cleanly onto the `Pet` schema, which is what makes the Facebook→website sync realistic rather than wishful.
 2. **The contact channel is a Bolivian phone number, not a form.** Every conversion on this site should end in **WhatsApp**, pre-filled with the dog's name — not in a contact form nobody checks. This is the single highest-leverage decision in the plan.
 
 ---
@@ -116,14 +116,14 @@ Everything reads from **one interface**, `getDogs()`. What sits behind it can ch
 
 **Superseded — see [`CLAUDE.md`](CLAUDE.md) for the current architecture.** The project moved to GCP serverless (Firebase Hosting + Auth, Firestore, Cloud Functions 2nd gen, Cloud Storage, Maps JS API).
 
-What that changes for the sync: the destination is no longer a markdown file in the repo but a **Firestore document**. A scheduled Cloud Function pulls new Page posts, re-hosts images to Cloud Storage, parses what it can, and writes `dogs/{id}` with `status: draft`. An admin confirms it in the admin UI. The staged approach and the review step are unchanged — only the storage layer moved.
+What that changes for the sync: the destination is no longer a markdown file in the repo but a **Firestore document**. A scheduled Cloud Function pulls new Page posts, re-hosts images to Cloud Storage, parses what it can, and writes `pets/{id}` with `status: draft`. An admin confirms it in the admin UI. The staged approach and the review step are unchanged — only the storage layer moved.
 
 ---
 
 ## 6. Build order
 
 1. Design system — tokens, type, the SVG heart-paw, grain/halftone textures, base components
-2. `Dog` schema + 6–8 real dogs from the Facebook page as seed content
+2. `Pet` schema + 6–8 real animals from the Facebook page as seed content
 3. The **Muro de Adopción** and the expediente overlay — the core loop, built first
 4. Home page around the wall
 5. `/adopta` with filters, `/adopta/[slug]`

@@ -5,7 +5,7 @@
       {
         "source": "**",
         "run": {
-          "serviceId": "wawitas-web",
+          "serviceId": "pet-shelter-web",
           "region": "us-central1"
         }
       }

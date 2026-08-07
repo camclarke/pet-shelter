@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Marca } from './Marca';
 import { TemaToggle } from './TemaToggle';
+import { SHELTER } from '@/config/shelter';
 
 const NAV = [
   { href: '/adopta', label: 'Adopta' },
@@ -9,17 +10,17 @@ const NAV = [
   { href: '/nosotros', label: 'Nosotros' },
 ];
 
-const FRASES = ['De la calle, a tu corazón', 'Adopta, no compres'];
-
 export function Header() {
+  const [first, ...rest] = SHELTER.name.split(' ');
+
   return (
     <header className="cabecera">
       <div className="env cabecera__fila">
         <Link href="/" className="cabecera__marca">
-          <Marca size={40} color="var(--jade)" title="Wawitas Red de Apoyo" />
+          <Marca size={40} color="var(--jade)" title={SHELTER.name} />
           <span className="cabecera__nombre">
-            Wawitas
-            <small>Red de Apoyo</small>
+            {first}
+            {rest.length > 0 && <small>{rest.join(' ')}</small>}
           </span>
         </Link>
 
@@ -43,10 +44,12 @@ export function Header() {
 }
 
 export function Cinta() {
+  const frases = [SHELTER.tagline, 'Adopta, no compres'];
+
   const tira = Array.from({ length: 8 }).flatMap((_, i) => [
-    <span key={`${i}-a`}>{FRASES[0]}</span>,
+    <span key={`${i}-a`}>{frases[0]}</span>,
     <span key={`${i}-dot1`}>·</span>,
-    <span key={`${i}-b`}>{FRASES[1]}</span>,
+    <span key={`${i}-b`}>{frases[1]}</span>,
     <span key={`${i}-dot2`}>·</span>,
   ]);
 
@@ -63,13 +66,15 @@ export function Footer() {
       <div className="env pie__fila">
         <div>
           <Marca size={54} color="var(--jade)" />
-          <p className="pie__lema">De la calle, a tu corazón.</p>
+          <p className="pie__lema">{SHELTER.tagline}</p>
         </div>
         <div className="pie__datos">
-          <a href="https://wa.me/59177903553">WhatsApp 77903553</a>
-          <a href="https://www.instagram.com/wawitas_2025/">@wawitas_2025</a>
-          <a href="https://www.facebook.com/profile.php?id=61563998952145">Facebook</a>
-          <span>Cochabamba, Bolivia</span>
+          <a href={`https://wa.me/${SHELTER.whatsapp}`}>WhatsApp {SHELTER.whatsappDisplay}</a>
+          {SHELTER.instagram && <a href={SHELTER.instagram}>Instagram</a>}
+          {SHELTER.facebook && <a href={SHELTER.facebook}>Facebook</a>}
+          <span>
+            {SHELTER.city}, {SHELTER.country}
+          </span>
         </div>
       </div>
     </footer>

@@ -1,8 +1,8 @@
 {
   "indexes": [
     {
-      "//": "The adoption wall: available dogs, newest first.",
-      "collectionGroup": "dogs",
+      "//": "The adoption wall: available pets, newest first.",
+      "collectionGroup": "pets",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
@@ -10,8 +10,18 @@
       ]
     },
     {
+      "//": "Wall filtered by species — a shelter taking dogs and cats needs both tabs.",
+      "collectionGroup": "pets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "species", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "//": "Wall filters: status plus size, newest first.",
-      "collectionGroup": "dogs",
+      "collectionGroup": "pets",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
@@ -21,7 +31,7 @@
     },
     {
       "//": "Wall filters: status plus sex, newest first.",
-      "collectionGroup": "dogs",
+      "collectionGroup": "pets",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
@@ -30,7 +40,55 @@
       ]
     },
     {
-      "//": "Admin moderation queue: pending sightings across all dogs, oldest first.",
+      "//": "Resolve a scanned microchip back to a pet. The single most important query in the system: it is what turns a number off a scanner into a name and a phone call.",
+      "collectionGroup": "identity",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [{ "fieldPath": "code", "order": "ASCENDING" }]
+    },
+    {
+      "//": "A pet's scan history, most recent first — the last-known-location ledger.",
+      "collectionGroup": "scans",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "scannedAt", "order": "DESCENDING" }]
+    },
+    {
+      "//": "Scans across all pets by context, for admin reporting on intakes and transfers.",
+      "collectionGroup": "scans",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "context", "order": "ASCENDING" },
+        { "fieldPath": "scannedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Open custody: who currently holds this animal.",
+      "collectionGroup": "custody",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "endedAt", "order": "ASCENDING" },
+        { "fieldPath": "startedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Medical history in chronological order.",
+      "collectionGroup": "medical",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kind", "order": "ASCENDING" },
+        { "fieldPath": "performedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "//": "Vaccinations and treatments coming due, for the admin reminder queue.",
+      "collectionGroup": "medical",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "kind", "order": "ASCENDING" },
+        { "fieldPath": "nextDueAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Admin moderation queue: pending sightings across all pets, oldest first.",
       "collectionGroup": "sightings",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -39,7 +97,7 @@
       ]
     },
     {
-      "//": "A lost dog's confirmed sightings, most recent first.",
+      "//": "A lost pet's confirmed sightings, most recent first.",
       "collectionGroup": "sightings",
       "queryScope": "COLLECTION",
       "fields": [

@@ -14,7 +14,7 @@ resource "google_firestore_database" "default" {
   # Two independent safety nets, deliberately redundant: `deletion_policy`
   # controls what Terraform itself will do; `delete_protection_state` controls
   # what the Firestore API will allow regardless of who's asking. A shelter's
-  # dog and adopter records should not disappear because of a `terraform
+  # pet and adopter records should not disappear because of a `terraform
   # destroy` run against the wrong workspace.
   deletion_policy         = "ABANDON"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"

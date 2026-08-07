@@ -10,7 +10,7 @@ resource "google_service_account" "cloud_run" {
 
 # Firestore access, via the Admin SDK inside the Next.js server. Not
 # "roles/editor", not "roles/datastore.owner" — just read/write to documents,
-# which is all dogs-server.ts ever does.
+# which is all pets-server.ts ever does.
 resource "google_project_iam_member" "cloud_run_datastore" {
   project = var.project_id
   role    = "roles/datastore.user"

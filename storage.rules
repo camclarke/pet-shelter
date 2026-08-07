@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// dog-shelter — Cloud Storage security rules
+// pet-shelter — Cloud Storage security rules
 //
 // Storage is the one place where an unbounded upload turns directly into a
 // bill, so every writable path caps size and content type.
@@ -18,12 +18,12 @@ service firebase.storage {
       return request.resource.contentType.matches('image/(jpeg|png|webp|avif)');
     }
 
-    // ── dog photos ─────────────────────────────────────────────────────────
+    // ── pet photos ─────────────────────────────────────────────────────────
     // Readable by anyone: the cover image appears on the public wall, and
     // gating images behind auth would mean proxying them through a function.
     // Access control for *which* photos a visitor learns about lives in
     // Firestore — an unguessable URL is not a secret, but the gallery list is.
-    match /dogs/{dogId}/{fileName} {
+    match /pets/{petId}/{fileName} {
       allow read: if true;
       allow write: if isAdmin() && isImage() && request.resource.size < 8 * 1024 * 1024;
     }
@@ -38,11 +38,12 @@ service firebase.storage {
       allow update, delete: if isAdmin();
     }
 
-    // ── vaccination cards (Stage 2) ────────────────────────────────────────
-    // Never public. These are scans that carry a veterinarian's details and,
-    // often, the owner's. Only admins, and only the LLM parser via the
-    // Admin SDK, which bypasses these rules.
-    match /vaccination-cards/{dogId}/{fileName} {
+    // ── medical documents: vaccination cards, lab results ──────────────────
+    // Never public, and never in the merely-authenticated tier either. These
+    // scans carry a veterinarian's details and, very often, the owner's name,
+    // address, and phone number printed on the card. Admins only; the Stage 2
+    // LLM parser reads them through the Admin SDK, which bypasses these rules.
+    match /medical/{petId}/{fileName} {
       allow read, write: if isAdmin();
     }
 

@@ -37,7 +37,7 @@ variable "budget_alert_email" {
 variable "app_name" {
   description = "Short name used to derive resource names (Cloud Run service, Artifact Registry repo, service accounts)."
   type        = string
-  default     = "wawitas-web"
+  default     = "pet-shelter-web"
 }
 
 variable "environment" {
@@ -49,7 +49,7 @@ variable "environment" {
 variable "container_image" {
   description = <<-EOT
     Full Artifact Registry image reference to deploy, e.g.
-    us-central1-docker.pkg.dev/PROJECT/wawitas-web/app:TAG. Left as a variable
+    us-central1-docker.pkg.dev/PROJECT/pet-shelter-web/app:TAG. Left as a variable
     rather than built by Terraform itself — the image is built and pushed by
     CI (or manually via the Dockerfile at the repo root), and Terraform only
     ever points Cloud Run at a tag that already exists. Building images is a

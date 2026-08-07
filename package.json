@@ -1,32 +1,34 @@
 {
-  "name": "dog-shelter",
+  "name": "pet-shelter",
   "version": "0.1.0",
   "private": true,
-  "description": "Adoption and rescue platform for Wawitas Red de Apoyo, Cochabamba, Bolivia",
+  "description": "Open-source adoption and rescue platform for animal shelters, with ISO 11784/11785 microchip identity tracking",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "emulators": "firebase emulators:start"
+    "emulators": "firebase emulators:start",
+    "test": "node --test --import tsx src/lib/__tests__/microchip.test.ts"
   },
   "engines": {
     "node": ">=20.9.0"
   },
   "dependencies": {
+    "firebase": "^12.17.0",
+    "firebase-admin": "^13.10.0",
     "next": "^16.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "firebase": "^12.17.0",
-    "firebase-admin": "^13.10.0",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
     "@types/node": "^22.15.0",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4"
+    "@types/react-dom": "^19.2.4",
+    "tsx": "^4.23.11",
+    "typescript": "^5.9.3"
   },
   "overrides": {
     "sharp": "^0.35.3",

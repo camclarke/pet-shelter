@@ -1,18 +1,18 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Header, Cinta, Footer } from '@/components/SiteChrome';
+import { SHELTER } from '@/config/shelter';
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://wawitas.org'),
+  metadataBase: new URL(SHELTER.siteUrl),
   title: {
-    default: 'Wawitas Red de Apoyo',
-    template: '%s · Wawitas Red de Apoyo',
+    default: SHELTER.name,
+    template: `%s · ${SHELTER.name}`,
   },
-  description:
-    'Refugio transitorio en Cochabamba. Rescatamos, rehabilitamos y buscamos familia para toda la vida en adopción responsable.',
+  description: SHELTER.mission,
   openGraph: {
     type: 'website',
-    locale: 'es_BO',
+    locale: SHELTER.locale.replace('-', '_'),
   },
   twitter: {
     card: 'summary_large_image',
@@ -28,7 +28,7 @@ const TEMA_SCRIPT = `(() => {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es">
+    <html lang={SHELTER.locale.split('-')[0]}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
