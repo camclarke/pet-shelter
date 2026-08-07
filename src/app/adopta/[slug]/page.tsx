@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import { notFound } from 'next/navigation';
-import { getDogBySlug } from '@/lib/dogs-server';
-import { formatAge, whatsappLink, sizeLabel } from '@/lib/dogs';
+import { getPetBySlug } from '@/lib/pets-server';
+import { formatAge, whatsappLink, sizeLabel, speciesNoun, article } from '@/lib/pets';
+import { SHELTER } from '@/config/shelter';
 
 export const revalidate = 300;
 
@@ -12,64 +13,84 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const dog = await getDogBySlug(slug);
-  if (!dog) return {};
+  const pet = await getPetBySlug(slug);
+  if (!pet) return {};
 
-  const title = dog.name;
-  const description = `${dog.breed} · ${formatAge(dog.ageMonths)} · ${dog.sex === 'hembra' ? 'hembra' : 'macho'}. Conoce a ${dog.name} en Wawitas Red de Apoyo.`;
+  const noun = speciesNoun(pet.species, pet.sex);
+  const description = `${noun} · ${pet.breed} · ${formatAge(pet.ageMonths)}. Conoce a ${pet.name} en ${SHELTER.name}.`;
 
   return {
-    title,
+    title: pet.name,
     description,
     openGraph: {
-      title,
+      title: pet.name,
       description,
-      images: dog.coverPhoto ? [{ url: dog.coverPhoto }] : undefined,
+      images: pet.coverPhoto ? [{ url: pet.coverPhoto }] : undefined,
     },
   };
 }
 
 /**
  * The expediente: the page every WhatsApp click and every "adoptar perro
- * Cochabamba" search should land on. Everything here is from the PUBLIC
- * `dogs/{id}` document — the gated story, health notes, and full photo set
- * live in `dogs/{id}/detail/main` and land on this page once auth (task #5)
- * is wired up. Until then the sign-in prompt below is a placeholder, not a
- * working gate.
+ * Cochabamba" search should land on. Everything here comes from the PUBLIC
+ * `pets/{id}` document.
+ *
+ * Note what is deliberately absent: the microchip number. `hasMicrochip` is
+ * shown because a finder benefits from knowing the animal is chipped, but the
+ * number itself lives in the restricted `identity` tier — it is the credential
+ * by which ownership gets asserted, and publishing it would let anyone claim
+ * the animal.
+ *
+ * The gated story, medical history, and feeding plan land here once auth is
+ * wired up; the prompt below is a placeholder, not a working gate.
  */
-export default async function DogPage({ params }: Props) {
+export default async function PetPage({ params }: Props) {
   const { slug } = await params;
-  const dog = await getDogBySlug(slug);
-  if (!dog) notFound();
-
-  const size = sizeLabel(dog.size, dog.sex);
+  const pet = await getPetBySlug(slug);
+  if (!pet) notFound();
 
   return (
     <article className="expediente">
       <div className="env expediente__grid">
         <div className="expediente__foto">
-          {dog.coverPhoto && (
-            <Image src={dog.coverPhoto} alt={dog.name} width={640} height={800} priority />
+          {pet.coverPhoto && (
+            <Image src={pet.coverPhoto} alt={pet.name} width={640} height={800} priority />
           )}
         </div>
 
         <div className="expediente__info">
-          <h1 className="t-nombre expediente__nombre">{dog.name}</h1>
-          {dog.formerNames.length > 0 && (
-            <p className="expediente__antes">Antes conocido como {dog.formerNames.join(', ')}</p>
+          <h1 className="t-nombre expediente__nombre">{pet.name}</h1>
+          {pet.formerNames.length > 0 && (
+            <p className="expediente__antes">
+              Antes {pet.sex === 'hembra' ? 'conocida' : 'conocido'} como{' '}
+              {pet.formerNames.join(', ')}
+            </p>
           )}
           <p className="t-dato expediente__meta">
-            {dog.breed} · {formatAge(dog.ageMonths)} · {dog.sex} · {size}
+            {speciesNoun(pet.species, pet.sex)} · {pet.breed} · {formatAge(pet.ageMonths)} ·{' '}
+            {sizeLabel(pet.size, pet.sex)}
           </p>
 
-          <a href={whatsappLink(dog.name)} className="btn btn--accion expediente__cta">
+          {pet.hasMicrochip && (
+            <p className="expediente__chip-nota">
+              <span aria-hidden="true">🔒</span> {article(pet.sex) === 'la' ? 'Está' : 'Está'}{' '}
+              {pet.sex === 'hembra' ? 'identificada' : 'identificado'} con microchip. Si{' '}
+              {article(pet.sex)} encuentras perdid{pet.sex === 'hembra' ? 'a' : 'o'}, cualquier
+              veterinaria puede leerlo y avisarnos.
+            </p>
+          )}
+
+          <a
+            href={whatsappLink(pet.name, SHELTER.whatsapp)}
+            className="btn btn--accion expediente__cta"
+          >
             Adóptame ↗
           </a>
 
           <div className="expediente__gated">
             <p>
-              La historia completa de {dog.name}, sus fotos y su estado de salud están
-              disponibles al iniciar sesión.
+              La historia completa de {pet.name}, sus fotos, su historial médico y su plan de
+              alimentación están disponibles al iniciar sesión.
             </p>
             <a href="/cuenta" className="btn btn--tenue">
               Iniciar sesión

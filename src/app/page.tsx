@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { Muro } from '@/components/Muro';
+import { SHELTER } from '@/config/shelter';
 
 const PASOS = [
   {
     n: '01',
     t: 'Encuéntralo',
-    d: 'Mira el muro. Cada perrito tiene su historia, su edad y su carácter. Alguno te va a mirar distinto.',
+    d: 'Mira el muro. Cada animalito tiene su historia, su edad y su carácter. Alguno te va a mirar distinto.',
   },
   {
     n: '02',
@@ -20,28 +21,29 @@ const PASOS = [
   {
     n: '04',
     t: 'Llévalo a casa',
-    d: 'Castración gratuita a los 6 o 7 meses y seguimiento de la adopción. No desaparecemos después.',
+    d: 'Se va identificado con microchip, con su historial médico y su plan de alimentación. No desaparecemos después.',
   },
 ];
 
 export default function HomePage() {
+  const [antes, despues] = SHELTER.tagline.split(',');
+
   return (
     <>
       <section className="portada">
         <div className="env">
-          <p className="portada__intro">Refugio transitorio · Cochabamba, Bolivia</p>
-          <h1 className="portada__lema">
-            De la calle,
-            <br />
-            <b>a tu corazón.</b>
-          </h1>
-          <p className="portada__texto">
-            Rescatamos perritos abandonados y maltratados, los rehabilitamos física y
-            emocionalmente, y les buscamos una familia para toda la vida en adopción responsable.
+          <p className="portada__intro">
+            Refugio transitorio · {SHELTER.city}, {SHELTER.country}
           </p>
+          <h1 className="portada__lema">
+            {antes},
+            <br />
+            <b>{despues?.trim()}</b>
+          </h1>
+          <p className="portada__texto">{SHELTER.mission}</p>
           <div className="portada__acciones">
             <Link href="/adopta" className="btn btn--accion">
-              Conoce a los perritos ↓
+              Conoce a los animalitos ↓
             </Link>
             <Link href="/ayuda" className="btn btn--tenue">
               Quiero ayudar
@@ -54,7 +56,7 @@ export default function HomePage() {
 
       <div className="env">
         <Link href="/adopta" className="btn btn--marca ver-todos">
-          Ver todos los perritos
+          Ver todos los animalitos
         </Link>
       </div>
 

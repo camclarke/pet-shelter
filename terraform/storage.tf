@@ -1,7 +1,7 @@
-# One bucket for everything Storage-facing: dog photos, sighting photos, and
+# One bucket for everything Storage-facing: pet photos, sighting photos, and
 # (Stage 2) vaccination card scans. storage.rules — deployed via the Firebase
 # CLI, same division of responsibility as Firestore above — already
-# partitions access by path prefix (dogs/, sightings/, vaccination-cards/),
+# partitions access by path prefix (pets/, sightings/, medical/),
 # so a single bucket is simpler than three and costs nothing extra.
 
 resource "google_storage_bucket" "app" {

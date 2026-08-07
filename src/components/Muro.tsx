@@ -1,27 +1,28 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { getWall, type WallFilters } from '@/lib/dogs-server';
-import { formatMeta } from '@/lib/dogs';
-import type { Dog } from '@/lib/types';
+import { getWall, type WallFilters } from '@/lib/pets-server';
+import { formatMeta } from '@/lib/pets';
+import { SHELTER } from '@/config/shelter';
+import type { Pet } from '@/lib/types';
 
 interface MuroProps extends WallFilters {
   title?: string;
 }
 
 /**
- * El Muro de Adopción — the core loop of the whole site, and now a Server
- * Component: dogs are fetched with the Admin SDK at request time and rendered
+ * El Muro de Adopción — the core loop of the whole site, and a Server
+ * Component: pets are fetched with the Admin SDK at request time and rendered
  * to real HTML before it leaves the server. That is the whole reason this
- * moved off the old client-side Firestore fetch — a search engine, or a
- * WhatsApp link preview, sees a dog's name and photo on the very first
- * response instead of an empty shell that fills in after hydration.
+ * moved off a client-side Firestore fetch — a search engine, or a WhatsApp
+ * link preview, sees a pet's name and photo on the very first response
+ * instead of an empty shell that fills in after hydration.
  */
 export async function Muro({ title, ...filters }: MuroProps) {
-  let dogs: Dog[] = [];
+  let pets: Pet[] = [];
   let fallo = false;
 
   try {
-    dogs = await getWall(filters);
+    pets = await getWall(filters);
   } catch (err) {
     console.error('[muro] no se pudo cargar', err);
     fallo = true;
@@ -34,23 +35,23 @@ export async function Muro({ title, ...filters }: MuroProps) {
 
         {fallo && (
           <p className="muro-vacio">
-            No pudimos cargar los perritos en este momento. Intenta de nuevo en un rato.
+            No pudimos cargar los animalitos en este momento. Intenta de nuevo en un rato.
           </p>
         )}
 
-        {!fallo && dogs.length === 0 && (
+        {!fallo && pets.length === 0 && (
           <p className="muro-vacio">
-            No hay perritos publicados en este momento.{' '}
-            <a href="https://www.facebook.com/profile.php?id=61563998952145">
-              Mira las últimas novedades en Facebook.
-            </a>
+            No hay animalitos publicados en este momento.{' '}
+            {SHELTER.facebook && (
+              <a href={SHELTER.facebook}>Mira las últimas novedades en Facebook.</a>
+            )}
           </p>
         )}
 
-        {!fallo && dogs.length > 0 && (
+        {!fallo && pets.length > 0 && (
           <div className="muro">
-            {dogs.map((dog, i) => (
-              <Cartel key={dog.id} dog={dog} index={i} />
+            {pets.map((pet, i) => (
+              <Cartel key={pet.id} pet={pet} index={i} />
             ))}
           </div>
         )}
@@ -59,20 +60,20 @@ export async function Muro({ title, ...filters }: MuroProps) {
   );
 }
 
-function Cartel({ dog, index }: { dog: Dog; index: number }) {
-  const urgente = dog.status === 'perdido';
+function Cartel({ pet, index }: { pet: Pet; index: number }) {
+  const urgente = pet.status === 'perdido';
 
   return (
     <Link
-      href={`/adopta/${dog.slug}`}
+      href={`/adopta/${pet.slug}`}
       className="cartel"
       style={{ animationDelay: `${Math.min(index, 11) * 45}ms` }}
     >
       <div className="cartel__foto">
-        {dog.coverPhoto && (
+        {pet.coverPhoto && (
           <Image
-            src={dog.coverPhoto}
-            alt={dog.name}
+            src={pet.coverPhoto}
+            alt={pet.name}
             width={480}
             height={600}
             priority={index < 4}
@@ -86,8 +87,8 @@ function Cartel({ dog, index }: { dog: Dog; index: number }) {
         </div>
       </div>
       <div className="cartel__pie">
-        <div className="t-nombre cartel__nombre">{dog.name}</div>
-        <div className="t-dato">{formatMeta(dog)}</div>
+        <div className="t-nombre cartel__nombre">{pet.name}</div>
+        <div className="t-dato">{formatMeta(pet)}</div>
         <div className="cartel__cta">
           Adóptame <span aria-hidden="true">↗</span>
         </div>
