@@ -61,7 +61,7 @@ deployed.** No GCP project exists, no container image has been built, and
 in production" is entirely unexplored, and that is where the remaining risk
 lives.
 
-### Verified state, as of 2026-08-07
+### Verified state, as of 2026-08-08
 
 | Check | Command | Result |
 |---|---|---|
