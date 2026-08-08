@@ -30,9 +30,9 @@ scanned chip resolves to a name and a phone call.
 | Pet identity (RFID microchip) | ✅ Modelled + validated, 10/10 unit tests — `src/lib/microchip.ts` |
 | Medical history + feeding | ✅ Modelled — not yet surfaced in any UI |
 | Template config for other shelters | ✅ `src/config/shelter.ts`, `README.md`, MIT licensed |
-| Dockerfile + Cloud Run target | ✅ Written, unverified — no image has been built or deployed yet |
-| Terraform | ✅ Written, validated (`plan` clean) — not yet applied to a real project |
-| GCP project | ⛔ Blocked — gcloud re-auth needed |
+| Dockerfile + Cloud Run target | 🟡 Written, **never built** — no `docker build` has been run |
+| Terraform | 🟡 Written, `validate` + `plan` clean (24 resources) — **never applied** |
+| GCP project | ⛔ **Blocked** — no dedicated project exists yet; `gcloud auth login` needed |
 | Firebase init (Auth/Firestore/Storage) | ⬜ Not started — no live project to init against |
 | Auth flows | ⬜ Not started |
 | Admin publishing UI | ⬜ Not started |
@@ -47,9 +47,91 @@ scanned chip resolves to a name and a phone call.
 - **2026-08-02** — Wrote the data model (`src/lib/types.ts`), security rules for Firestore and Storage, composite indexes, `firebase.json`, design tokens, base layout, and the Muro de Adopción — originally on **Astro**, static output. Hit a hard Node blocker: Astro ≤7.0.9 carries eight high-severity advisories, and the only patched line (≥7.1.6) requires Node ≥22.12.0 while the machine had 20.20.2.
 - **2026-08-02** — **Pivoted to Next.js**, at the user's direction, for scalability and to standardize on Terraform for IaC. This turned out to also resolve the Node blocker: Next 16 only requires Node ≥20.9.0. Rebuilt the frontend as Next.js App Router with `output: 'standalone'` for Cloud Run. The wall and dog pages moved from a client-side Firestore fetch to **Server Components reading via the Admin SDK** (`dogs-server.ts`) — this is a genuine improvement, not just a port: the public teaser is now real HTML in the first response, closing an SEO gap the static-Astro version had (client-fetched data is invisible to a first-pass crawl). `npm run build` was run and succeeds; `npm audit` was run and forced three transitive advisories (`sharp`, `postcss`, `uuid`, all pulled in by Next/firebase-admin's own dependency trees) to patched versions via `overrides` — 0 vulnerabilities. This is the first framework in this project to actually compile.
 - **2026-08-02** — Pinned `firebase-admin` to `^13.10.0` rather than the latest `14.x`, which requires Node ≥22 — the dev machine is on 20.20.2 and Next.js itself doesn't need the upgrade, so there was no reason to force it. The Cloud Run image builds on Node 22 regardless (see `Dockerfile`), so this only affects local development.
+- **2026-08-02** — Wrote `terraform/`: enabled APIs, Firestore database (with both `deletion_policy` and `delete_protection_state` set — redundant on purpose), a Storage bucket linked to Firebase, Artifact Registry with a cleanup policy, a Cloud Run v2 service with its own least-privilege service account (not the Compute Engine default), and a budget alert with email notification at 50/90/100%. `project_id`, `region`, and `billing_account` are variables; the GCS backend is configured via `-backend-config` rather than hardcoded, so moving to the new tenant is a new `backend.hcl` and re-init, not an edit to any `.tf` file. Validated with `terraform validate` and a full `terraform plan` against a placeholder project — both clean, 24 resources, 0 errors — rather than just written and assumed correct.
 - **2026-08-07** — **Renamed `dog-shelter` → `pet-shelter`** and generalized the model so the project works for any species and can be forked by other shelters. `Dog` → `Pet` with a `species` dimension; Spanish gender agreement is now computed (`sizeLabel`, `speciesNoun`) rather than hardcoded masculine, because "la gata pequeña" vs "el gato pequeño" reads as carelessness to the entire target audience otherwise. All organisation-specific content moved to `src/config/shelter.ts` — the one file a forking shelter edits. Added `README.md`, MIT `LICENSE`.
 - **2026-08-07** — **Added RFID microchip identity, scan ledger, medical history, and feeding plans.** Researched the international regulatory picture first (`docs/rfid-microchips.md`) because it constrains the schema. Three findings changed the design: (1) a microchip is a *passive* transponder with no GPS and centimetre read range — AVMA states it "cannot track your animal" — so the ledger records the **scanner's** location at scan time and is named `ScanEvent`, never `currentLocation`, to make live tracking impossible to misread into the schema; (2) the code must be stored as a **string** because ISO 3166 country prefixes below 100 have leading zeros (Bolivia is `068`) and integer parsing silently corrupts every such chip; (3) EU 576/2013 requires the chip be implanted **before** the rabies vaccination or the vaccination is void, which is a validatable business rule (`rabiesVaccinationIsValid`). The microchip number sits in the **restricted** tier, not the authenticated one — it is the credential by which ownership is asserted, and an account is not a reason to learn every chipped animal's number. Scan history is restricted for a stronger reason: one location is an address, a scan trail is a pattern of an owner's movements. 10 unit tests cover the validation boundaries, including the exact 38-bit national-ID ceiling.
-- **2026-08-02** — Wrote `terraform/`: enabled APIs, Firestore database (with both `deletion_policy` and `delete_protection_state` set — redundant on purpose), a Storage bucket linked to Firebase, Artifact Registry with a cleanup policy, a Cloud Run v2 service with its own least-privilege service account (not the Compute Engine default), and a budget alert with email notification at 50/90/100%. `project_id`, `region`, and `billing_account` are variables; the GCS backend is configured via `-backend-config` rather than hardcoded, so moving to the new tenant is a new `backend.hcl` and re-init, not an edit to any `.tf` file. Validated with `terraform validate` and a full `terraform plan` against a placeholder project — both clean, 24 resources, 0 errors — rather than just written and assumed correct.
+
+---
+
+## Next session — start here
+
+**Everything written so far compiles, tests, and validates. Nothing has been
+deployed.** No GCP project exists, no container image has been built, and
+`terraform apply` has never run. The gap between "validates cleanly" and "works
+in production" is entirely unexplored, and that is where the remaining risk
+lives.
+
+### Verified state, as of 2026-08-07
+
+| Check | Command | Result |
+|---|---|---|
+| Build | `npm run build` | ✅ 8 routes compile and prerender |
+| Types | `npx tsc --noEmit` | ✅ clean |
+| Tests | `npm test` | ✅ 10/10 (microchip validation) |
+| Dependencies | `npm audit --omit=dev` | ✅ 0 vulnerabilities |
+| Infra | `terraform validate` + `plan` | ✅ clean, 24 resources |
+
+### ⚠️ Read before running anything locally
+
+`gcloud` CLI auth and **Application Default Credentials are separate**, and they
+are currently in different states:
+
+- The **gcloud CLI** needs an interactive `gcloud auth login` — `gcloud projects
+  list` fails with a reauth error.
+- **ADC is still valid**, and the credentials file carries
+  `quota_project_id: trustcert-ai-g` — the *work* project.
+  (`%APPDATA%/gcloud/application_default_credentials.json` on Windows;
+  `~/.config/gcloud/` elsewhere.)
+
+That combination is the dangerous one. `firebase-admin` uses ADC, not the CLI
+credential, so a plain `npm run build` **silently authenticates against the work
+project**. This already happened once: a build reached real Firestore in
+`trustcert-ai-g` and only failed because a composite index was missing.
+
+**Always set the emulator host for local work:**
+
+```bash
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 npm run build
+```
+
+Or run `npm run emulators` first. Verified: with that variable set, the Admin
+SDK connects to localhost and never touches a real project.
+
+### The next three things, in order
+
+1. **Stand up the GCP project.** `gcloud auth login`, create a dedicated project
+   (never `trustcert-ai-g`), link Blaze billing, then
+   `terraform init -backend-config=backend.hcl && terraform apply`. Deploy rules
+   and indexes with the Firebase CLI — Terraform deliberately does not own them.
+   The composite index on `identity.code` matters most: it is what makes
+   `findPetByMicrochip()` work.
+2. **Auth flows** (task: email + Google). Everything gated is currently a
+   placeholder — `/cuenta` renders static text and the expediente's sign-in
+   prompt is not a working gate. The `detail`, `medical`, and `care/feeding`
+   tiers have rules written but no UI can reach them yet.
+3. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
+   `MICROCHIP_ERROR_ES` are built and tested, ready to wire into a form.
+
+### Two open questions awaiting a decision
+
+- **Scan-history retention.** Currently indefinite — because nothing deletes it,
+  not because anyone chose that. A rolling 24-month window (keeping intake and
+  adoption permanently as `custody` records) would preserve every recovery use
+  case while shrinking the surveillance surface. See concern #3.
+- **The `LICENSE` copyright line** reads "pet-shelter contributors" rather than a
+  named person or company, deliberately. Change it if a specific holder is wanted.
+
+### Things that will bite whoever picks this up
+
+- **The service-area bounds live in two places** — `src/config/shelter.ts` and
+  `firestore.rules`. The rules copy is the enforced one. Change both together.
+- **`pets-server.ts` bypasses all security rules** (Admin SDK). It must never be
+  imported from a Client Component, and its exports deliberately return only
+  public-tier data so a Server Component cannot leak a restricted tier by accident.
+- **`node --test` globs do not work on Node 20** — the `test` script names the
+  test file explicitly. Revisit when the machine moves to Node 22.
+- **Facebook sync (`PLAN.md` §5) was never built.** It predates the GCP pivot;
+  the destination is now a Firestore document, not a markdown file.
 
 ---
 
@@ -340,26 +422,30 @@ it.
 
 ## Setup required from you
 
-**1. Re-authenticate gcloud.** Tokens are expired and refresh needs an interactive prompt:
+**1. Re-authenticate the gcloud CLI.** Its tokens are expired and refresh needs
+an interactive prompt:
 
 ```bash
 gcloud auth login
 ```
 
-This is the only hard blocker left on the frontend side — Node is no longer an
-issue; the current Node 20.20.2 satisfies both Next.js and TypeScript.
+Note this is *separate* from Application Default Credentials, which are still
+valid and currently pinned to the work project — see
+[Next session](#next-session--start-here) before running a local build.
+
+Node is no longer a blocker: the current Node 20.20.2 satisfies Next.js,
+TypeScript, and `firebase-admin` 13.x.
 
 **2. Decided: a new dedicated GCP project**, and it will later move to a **new
-tenant entirely** once the project is complete — Terraform is being written
-with that move in mind (see [Terraform](#terraform)). Not `trustcert-ai-g` for
-the interim either way — that is a work project, and a nonprofit's
-infrastructure should not share quotas, billing, or an audit trail with it.
-Needs a Blaze billing account linked (Firestore and Cloud Run require it,
-though real usage should stay inside the free tier). A budget alert at $5 goes
-up before anything is deployed.
+tenant entirely** once the project is complete — Terraform is written with that
+move in mind (see [Terraform](#terraform)). Not `trustcert-ai-g` for the interim
+either way — that is a work project, and a nonprofit's infrastructure should not
+share quotas, billing, or an audit trail with it. Needs a Blaze billing account
+linked (Firestore and Cloud Run require it, though real usage should stay inside
+the free tier). A budget alert at $5 is in the Terraform and goes up with
+everything else.
 
-**3. Install Terraform**, if it isn't already, once the Terraform task lands —
-`terraform >= 1.9` is assumed.
+**3. Terraform is installed** (v1.14.8 verified). `terraform >= 1.9` is assumed.
 
 **4. Later, not now:** DNS for `wawitas.org`, the Maps API key restricted by HTTP
 referrer, the Google OAuth consent screen, and the reCAPTCHA Enterprise key for
