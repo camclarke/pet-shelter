@@ -56,6 +56,21 @@ variable "environment" {
   default     = "production"
 }
 
+variable "github_repository" {
+  description = <<-EOT
+    The GitHub repository allowed to authenticate via Workload Identity
+    Federation, as "owner/repo".
+
+    This is a security boundary, not a label. It is interpolated into the
+    provider's attribute_condition, and every GitHub Actions workflow in the
+    world presents a token from the same issuer — so this string is the only
+    thing distinguishing this repository from any other. Changing it changes
+    who can deploy.
+  EOT
+  type        = string
+  default     = "camclarke/pet-shelter"
+}
+
 variable "container_image" {
   description = <<-EOT
     Full Artifact Registry image reference to deploy, e.g.

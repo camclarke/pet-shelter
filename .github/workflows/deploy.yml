@@ -1,0 +1,176 @@
+# Build the container, push it to Artifact Registry, roll a Cloud Run
+# revision, and then prove the site still answers.
+#
+# ── Credentials ──────────────────────────────────────────────────────────────
+# There is no service-account key. Authentication is Workload Identity
+# Federation: GitHub mints a short-lived OIDC token for this run, GCP's STS
+# exchanges it for an access token, and the pool provider only accepts tokens
+# whose `repository` claim matches this repo. See terraform/cicd.tf.
+#
+# ── Ownership ────────────────────────────────────────────────────────────────
+# This workflow owns exactly one thing about the Cloud Run service: the image
+# tag. Everything else — env vars, scaling, service account, IAM — is
+# Terraform's, and `terraform/cloud_run.tf` has a matching
+# `lifecycle { ignore_changes }` so the two do not fight over the image.
+#
+# Do NOT add `--set-env-vars` / `--update-env-vars` here. Terraform owns the
+# service's whole env list; a CI-injected var it does not declare gets planned
+# for deletion on every apply, and a plain env silently overrides a Secret
+# Manager binding of the same name. That cost the sibling stack a recurring
+# outage (docs/gcp-lessons-from-trustcert.md §6).
+#
+# NEXT_PUBLIC_* values are the exception and they are NOT env vars — Next
+# inlines them into the browser bundle at `next build`, so they must be build
+# args. Setting them on Cloud Run instead does nothing at all.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'design/**'
+      - 'terraform/**' # infrastructure is applied deliberately, by a human
+      - 'LICENSE'
+  workflow_dispatch:
+
+# One deploy at a time. Two overlapping runs would race on the same service and
+# the loser would silently win — `traffic` is pinned to LATEST, so whichever
+# revision finishes last takes production, not whichever commit is newer.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  # These mirror terraform/terraform.tfvars. They are hardcoded rather than
+  # read from GitHub variables so a change to either is visible in a diff.
+  # SERVICE is Terraform's "${app_name}-${environment}".
+  PROJECT_ID: wawitas
+  REGION: us-east1
+  SERVICE: pet-shelter-web-production
+  AR_REPOSITORY: pet-shelter-web
+
+jobs:
+  # Nothing deploys that has not passed typecheck, tests, and a clean build.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Build, push, deploy
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      id-token: write # required to mint the OIDC token WIF exchanges
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image reference
+        run: echo "IMAGE=${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/app" >> "$GITHUB_ENV"
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          # Not secrets. They are resource identifiers, useless without an
+          # OIDC token carrying this repository's claim — so they are stored
+          # as repository variables, which means a failed auth step prints
+          # what it tried instead of `***`. Both are `terraform output`s.
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Logging in with the access token from the step above, rather than via
+      # `gcloud auth configure-docker`, keeps buildx from depending on the
+      # gcloud credential helper being resolvable inside the builder.
+      - name: Log in to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # An immutable commit-SHA tag, never `:latest`. What is running is
+          # then always traceable to a commit, and Artifact Registry's cleanup
+          # policy (keep 10, delete >30d) can do its job.
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Empty today — the Firebase web app is not registered yet, so these
+          # repository variables do not exist and each arg resolves to "".
+          # That is the same state the currently-deployed image was built in.
+          # Fill the variables in and the next deploy picks them up; nothing
+          # here needs to change.
+          build-args: |
+            NEXT_PUBLIC_FIREBASE_API_KEY=${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+            NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+            NEXT_PUBLIC_FIREBASE_PROJECT_ID=${{ env.PROJECT_ID }}
+            NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ vars.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+            NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ vars.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+            NEXT_PUBLIC_FIREBASE_APP_ID=${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
+            NEXT_PUBLIC_APP_CHECK_SITE_KEY=${{ vars.NEXT_PUBLIC_APP_CHECK_SITE_KEY }}
+
+      - name: Deploy revision
+        run: |
+          gcloud run services update "$SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --image="${IMAGE}:${GITHUB_SHA}" \
+            --quiet
+
+      # A green deploy step means the API accepted the request. It does not
+      # mean the container starts, and it does not mean the site serves — a
+      # Next.js standalone image that binds to the wrong host passes the push
+      # and fails the startup probe. So: assert the running image is the one
+      # just built, then assert the URL returns 200.
+      - name: Verify the deployment
+        run: |
+          set -euo pipefail
+
+          DEPLOYED=$(gcloud run services describe "$SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --format='value(spec.template.spec.containers[0].image)')
+
+          if [ "$DEPLOYED" != "${IMAGE}:${GITHUB_SHA}" ]; then
+            echo "::error::Cloud Run is serving $DEPLOYED, expected ${IMAGE}:${GITHUB_SHA}"
+            exit 1
+          fi
+
+          URL=$(gcloud run services describe "$SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --format='value(status.url)')
+
+          # Retries cover cold start on the new revision, not flakiness. A
+          # scale-to-zero service has no warm instance the moment it rolls.
+          for attempt in 1 2 3 4 5; do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 "$URL" || echo 000)
+            echo "attempt $attempt: HTTP $CODE"
+            [ "$CODE" = "200" ] && break
+            [ "$attempt" = "5" ] && { echo "::error::$URL never returned 200"; exit 1; }
+            sleep 10
+          done
+
+          {
+            echo "### Deployed"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| URL | $URL |"
+            echo "| Image | \`${IMAGE}:${GITHUB_SHA}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

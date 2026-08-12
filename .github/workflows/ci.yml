@@ -1,0 +1,55 @@
+# Typecheck, test, and build. Runs on every pull request, and is called by
+# deploy.yml so nothing reaches Cloud Run without passing it first.
+#
+# Deliberately needs no GCP credentials. `npm run build` prerenders the
+# homepage and /adopta, which read Firestore through the Admin SDK — with no
+# credentials those reads fail and the pages fall back to their error state,
+# exactly as they already do in Cloud Build. The build succeeds either way, and
+# because both pages carry `revalidate = 300` the real data arrives at runtime.
+# (That fallback is the whole reason `revalidate` is not optional here — see
+# CLAUDE.md, 2026-08-12.)
+
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 to match the Dockerfile, not the 20.20.2 on the dev machine.
+      # CI should exercise the runtime that actually ships.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Not a gate. A new advisory published against a transitive dependency
+      # is not a reason to block an unrelated pull request — but it is
+      # absolutely a reason to show a warning on the run. The `overrides` block
+      # in package.json is what actually holds this at zero.
+      - name: Audit production dependencies
+        continue-on-error: true
+        run: npm audit --omit=dev
