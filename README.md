@@ -135,8 +135,39 @@ trustworthy source of truth for a security-critical file:
 firebase deploy --only firestore:rules,firestore:indexes,storage:rules
 ```
 
-Then build and push the container, and point the Cloud Run service at the new
-tag via the `container_image` variable.
+### Continuous deployment
+
+After the first `terraform apply`, application deploys are automatic. Every push
+to `main` that touches application code runs
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml): typecheck, tests
+and build, then a container build, a push to Artifact Registry under an
+immutable commit-SHA tag, a Cloud Run revision, and a check that the live URL
+answers `200`.
+
+Authentication is **Workload Identity Federation — there is no service-account
+key anywhere.** GitHub's own OIDC token is exchanged for a short-lived GCP
+token, and `terraform/cicd.tf` pins the pool to a single repository, so no other
+repo can mint one. Wiring it up in a fork is two `terraform output` values
+pasted into GitHub repository variables:
+
+```bash
+gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER --body "$(terraform -chdir=terraform output -raw workload_identity_provider)"
+```
+
+```bash
+gh variable set GCP_CI_SERVICE_ACCOUNT --body "$(terraform -chdir=terraform output -raw ci_service_account)"
+```
+
+**CI owns the image tag and nothing else.** `terraform/cloud_run.tf` carries a
+matching `lifecycle { ignore_changes }` so a later `terraform apply` does not
+roll production back to the stale tag in `terraform.tfvars`. Everything else
+about the service — env vars, scaling, IAM — stays Terraform's. Infrastructure
+changes are still applied deliberately by a person; `terraform/**` is in the
+workflow's `paths-ignore`.
+
+Security rules and indexes are deliberately **not** in the pipeline. An
+unreviewed automatic rules deploy is worse than a manual one; that changes when
+there is a rules test to put in front of it.
 
 ---
 

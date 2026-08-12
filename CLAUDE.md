@@ -32,7 +32,8 @@ scanned chip resolves to a name and a phone call.
 | Medical history + feeding | ✅ Modelled — not yet surfaced in any UI |
 | Template config for other shelters | ✅ `src/config/shelter.ts`, `README.md`, MIT licensed |
 | Dockerfile + Cloud Run target | ✅ **Built and deployed 2026-08-12.** Built by **Cloud Build** — there is no local Docker on this machine. `ENV HOSTNAME=0.0.0.0` is proven, not assumed: Cloud Run's startup probe passed |
-| Terraform | ✅ **APPLIED — 30 resources live.** GCS backend in `gs://wawitas-terraform-state`. One known-benign perpetual diff on `cloud_run scaling`, documented in `cloud_run.tf` |
+| Terraform | ✅ **APPLIED — 40 resources live.** GCS backend in `gs://wawitas-terraform-state`. One known-benign perpetual diff on `cloud_run scaling`, documented in `cloud_run.tf` |
+| **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf` |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
 | **Live site** | ✅ **https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app** — HTTP 200, real Spanish HTML, wall reading live Firestore. No custom domain yet |
 | GCP project | ✅ **`wawitas`** (`181094228409`), region **`us-east1`**, personal account `israel.rocha.clarke@gmail.com`. **No org parent.** Replaces `wawitas-pet-shelter` (employer's org, deleted same day) — see log |
@@ -296,9 +297,11 @@ Known from the sibling stack, not yet hit here (full list:
 - **`terraform apply` will fail on APIs that `plan` never checks** —
   `monitoring`, `firebasestorage`, and `cloudresourcemanager` are all used by
   resources in `terraform/` but absent from `apis.tf`.
-- **The moment CI deploys images, Cloud Run needs `lifecycle {
-  ignore_changes }`** or the next `terraform apply` rolls production back to
-  the tag in tfvars.
+- ~~**The moment CI deploys images, Cloud Run needs `lifecycle {
+  ignore_changes }`**~~ — **done 2026-08-12**, in the same commit as the
+  pipeline, as that lesson instructed. `cloud_run.tf` ignores `image`,
+  `client`, and `client_version`. It deliberately does *not* ignore
+  `template[0].scaling`, so the benign diff above stays visible.
 
 ### Emulator leftovers still in the repo
 
