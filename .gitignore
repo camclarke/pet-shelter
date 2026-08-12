@@ -35,3 +35,4 @@ terraform/**/crash.log
 Thumbs.db
 .vscode/
 .idea/
+.claude/
