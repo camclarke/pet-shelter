@@ -76,6 +76,36 @@ resource "google_cloud_run_v2_service" "app" {
     percent = 100
   }
 
+  # ⚠️ ADDED WITH THE CI PIPELINE — do not remove while .github/workflows/
+  # deploy.yml exists.
+  #
+  # Ownership of the running image moved to CI the moment that workflow
+  # landed. Terraform still declares `var.container_image` because Cloud Run
+  # cannot be created without an image, but from the second deploy onward the
+  # tag in terraform.tfvars is stale by design — CI pushes a commit-SHA tag
+  # and rolls the revision itself.
+  #
+  # Without this block the next `terraform apply` would quietly roll
+  # production back to whatever tag tfvars still names. That is the sibling
+  # stack's §3 lesson, and the instruction there was explicit: add it in the
+  # same commit as the pipeline, not after.
+  #
+  # `client` / `client_version` are here because `gcloud run services update`
+  # stamps them ("gcloud", a version string) and Terraform would otherwise
+  # plan to clear them on every apply.
+  #
+  # NOT ignored: `template[0].scaling`. The sibling stack suppresses it, but
+  # the comment above explains why this project deliberately does not — the
+  # only expression broad enough to hide the benign diff would also hide a
+  # real change to max_instance_count.
+  lifecycle {
+    ignore_changes = [
+      client,
+      client_version,
+      template[0].containers[0].image,
+    ]
+  }
+
   depends_on = [
     google_project_service.required,
     google_project_iam_member.cloud_run_datastore,
