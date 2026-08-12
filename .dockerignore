@@ -1,9 +1,49 @@
+# Keeps `gcloud builds submit` uploads small and, more importantly, keeps
+# local-only files out of the image. The Dockerfile does `COPY . .` in the
+# builder stage, so anything not listed here ends up in a layer — including
+# files that are gitignored and therefore easy to forget about.
+
+# Dependencies and build output — reinstalled/rebuilt inside the image.
 node_modules
 .next
-.git
-.env
-.env.*
-!.env.example
-design
+out
+build
+
+# Local credentials and config. NOT secrets today (project ids, a billing
+# account id), but they have no business in a container image and this is the
+# file that stops them getting there.
+#
+# `.env*` deliberately, not an enumerated list: the Dockerfile passes every
+# NEXT_PUBLIC_* value as a build ARG, so no .env file is ever needed inside the
+# image, and a glob cannot be outgrown by a new .env.<something> later.
+.env*
+
+# Terraform state, variables, and backend config. terraform.tfvars carries the
+# billing account id; backend.hcl names the state bucket.
 terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+backend.hcl
+
+# VCS and tooling.
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+
+# Docs and design assets — not needed at runtime or build time.
+docs
+design
 *.md
+
+# Firebase CLI local artefacts.
+.firebase
+firebase-debug.log
+firestore-debug.log
+
+# OS noise.
+.DS_Store
+Thumbs.db

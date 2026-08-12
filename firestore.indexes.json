@@ -40,18 +40,6 @@
       ]
     },
     {
-      "//": "Resolve a scanned microchip back to a pet. The single most important query in the system: it is what turns a number off a scanner into a name and a phone call.",
-      "collectionGroup": "identity",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [{ "fieldPath": "code", "order": "ASCENDING" }]
-    },
-    {
-      "//": "A pet's scan history, most recent first — the last-known-location ledger.",
-      "collectionGroup": "scans",
-      "queryScope": "COLLECTION",
-      "fields": [{ "fieldPath": "scannedAt", "order": "DESCENDING" }]
-    },
-    {
       "//": "Scans across all pets by context, for admin reporting on intakes and transfers.",
       "collectionGroup": "scans",
       "queryScope": "COLLECTION_GROUP",
@@ -106,5 +94,17 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "//": "THE MICROCHIP LOOKUP. findPetByMicrochip() runs a collectionGroup('identity').where('code','==',…) query, and a collection-group scope on a SINGLE field is a field-level setting, not an index. It was declared in `indexes` above until 2026-08-12, when the first-ever deploy rejected it: 'this index is not necessary, configure using single field index controls'.",
+      "collectionGroup": "identity",
+      "fieldPath": "code",
+      "//2": "A fieldOverride REPLACES the automatic single-field indexing for this field — it does not merge with it. The two COLLECTION entries below are Firestore's defaults and are re-listed deliberately; dropping them would silently disable ordinary per-pet queries on `code`. Only the COLLECTION_GROUP entry is new. arrayConfig is omitted on purpose: `code` is always a string (leading zeros are significant — see docs/rfid-microchips.md), never an array.",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
 }

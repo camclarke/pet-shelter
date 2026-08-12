@@ -19,5 +19,43 @@ resource "google_firestore_database" "default" {
   deletion_policy         = "ABANDON"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"
 
+  # Added 2026-08-12. Delete protection stops the database being *removed*; it
+  # does nothing about a bad write or a retention sweep that deletes the wrong
+  # documents. PITR gives a 7-day rewind window for exactly that case. The
+  # argument is the sibling stack's 2026-07-12 incident: data that is correct
+  # but unrecoverable is one bug away from wrong and unrecoverable.
+  point_in_time_recovery_enablement = "POINT_IN_TIME_RECOVERY_ENABLED"
+
   depends_on = [google_project_service.required]
+}
+
+# PITR covers the last 7 days. Scheduled backups cover everything older, and
+# survive the database itself. Two schedules because they answer different
+# questions: "undo yesterday's mistake" and "what did this look like a month
+# ago, when the vet says the record was different."
+#
+# Cost note, against this project's $0 target: PITR and backups both bill for
+# storage (backups ~$0.03/GiB/month). At a few thousand pet documents this
+# rounds to nothing, but it is not literally free — it is the first deliberate
+# non-zero line item, and it buys recoverability for a shelter's only copy of
+# its adoption and medical records.
+
+resource "google_firestore_backup_schedule" "daily" {
+  project  = var.project_id
+  database = google_firestore_database.default.name
+
+  retention = "1209600s" # 14 days
+
+  daily_recurrence {}
+}
+
+resource "google_firestore_backup_schedule" "weekly" {
+  project  = var.project_id
+  database = google_firestore_database.default.name
+
+  retention = "8467200s" # 14 weeks — the documented maximum
+
+  weekly_recurrence {
+    day = "SUNDAY"
+  }
 }

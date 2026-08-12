@@ -96,7 +96,6 @@ Requires **Node ≥ 20.9**.
 ```bash
 npm install
 cp .env.example .env.local   # fill in from the Firebase console
-npm run emulators            # Firestore, Auth, Storage on localhost
 npm run dev
 ```
 
@@ -105,10 +104,16 @@ npm test        # microchip validation suite
 npm run build   # production build
 ```
 
-> Point the app at the **Firebase emulators** for local development. Without
-> `FIRESTORE_EMULATOR_HOST` set, the Admin SDK resolves Application Default
-> Credentials and will connect to whatever real GCP project your `gcloud` is
-> currently pointed at.
+> **Local development runs against a real Firestore project.** Set
+> `GOOGLE_CLOUD_PROJECT` in `.env.local` to your own project id *before* you run
+> `gcloud auth application-default login`. Left unset, the Admin SDK resolves
+> Application Default Credentials and connects to whatever real GCP project your
+> `gcloud` happens to be pointed at — which is silent, and is how shelter data
+> ends up in an unrelated project.
+>
+> Use a **dedicated project** for the shelter, not one shared with other work.
+> `src/lib/pets-server.ts` uses the Admin SDK, which bypasses `firestore.rules`
+> entirely, so a misconfigured project id is not caught by your security rules.
 
 ---
 

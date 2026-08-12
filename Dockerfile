@@ -35,6 +35,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 
+# Do not remove. `output: 'standalone'` generates a server.js that binds to
+# process.env.HOSTNAME, and container runtimes set HOSTNAME to the container
+# id — so without this the server binds to a non-routable name, Cloud Run's
+# startup probe never succeeds, and the error blames the container rather than
+# this line. Cost the sibling stack a debugging cycle.
+ENV HOSTNAME=0.0.0.0
+
 # Cloud Run runs containers as a non-root user by convention.
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 USER nextjs

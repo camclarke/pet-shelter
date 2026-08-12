@@ -46,4 +46,11 @@ resource "google_firebase_storage_bucket" "app" {
   provider  = google-beta
   project   = var.project_id
   bucket_id = google_storage_bucket.app.name
+
+  # Added 2026-08-12. This needs both `firebasestorage.googleapis.com` and
+  # `firebase.googleapis.com`, neither of which is enabled by default on a new
+  # project. The reference to google_storage_bucket.app orders it after the
+  # bucket but says nothing about the APIs — so without this it races the
+  # enablement and fails at apply, invisibly to `plan`.
+  depends_on = [google_project_service.required]
 }
