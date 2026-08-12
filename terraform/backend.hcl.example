@@ -6,4 +6,4 @@
 # a re-init is the entire migration step for state storage.
 
 bucket = "wawitas-terraform-state"
-prefix = "dog-shelter"
+prefix = "pet-shelter"

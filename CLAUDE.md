@@ -26,17 +26,28 @@ scanned chip resolves to a name and a phone call.
 | GitHub repo | ✅ Created (public, `camclarke/pet-shelter`) |
 | Data model + security rules | ✅ Written — `src/lib/types.ts`, `firestore.rules`, `storage.rules` |
 | **Frontend** | ✅ **Next.js — builds clean, 0 vulnerabilities.** See below |
-| Muro de Adopción | ✅ Server-rendered — `src/components/Muro.tsx`, fetched via `pets-server.ts` |
+| Local dev server | ✅ **Runs and renders** — all 5 routes verified in a browser 2026-08-08 |
+| Muro de Adopción | ✅ **Live in production, reading real Firestore** — renders its empty state from an actual query. Still **never shown a real pet**, because no pet document exists |
 | Pet identity (RFID microchip) | ✅ Modelled + validated, 10/10 unit tests — `src/lib/microchip.ts` |
 | Medical history + feeding | ✅ Modelled — not yet surfaced in any UI |
 | Template config for other shelters | ✅ `src/config/shelter.ts`, `README.md`, MIT licensed |
-| Dockerfile + Cloud Run target | 🟡 Written, **never built** — no `docker build` has been run |
-| Terraform | 🟡 Written, `validate` + `plan` clean (24 resources) — **never applied** |
-| GCP project | ⛔ **Blocked** — no dedicated project exists yet; `gcloud auth login` needed |
-| Firebase init (Auth/Firestore/Storage) | ⬜ Not started — no live project to init against |
+| Dockerfile + Cloud Run target | ✅ **Built and deployed 2026-08-12.** Built by **Cloud Build** — there is no local Docker on this machine. `ENV HOSTNAME=0.0.0.0` is proven, not assumed: Cloud Run's startup probe passed |
+| Terraform | ✅ **APPLIED — 30 resources live.** GCS backend in `gs://wawitas-terraform-state`. One known-benign perpetual diff on `cloud_run scaling`, documented in `cloud_run.tf` |
+| GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
+| **Live site** | ✅ **https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app** — HTTP 200, real Spanish HTML, wall reading live Firestore. No custom domain yet |
+| GCP project | ✅ **`wawitas`** (`181094228409`), region **`us-east1`**, personal account `israel.rocha.clarke@gmail.com`. **No org parent.** Replaces `wawitas-pet-shelter` (employer's org, deleted same day) — see log |
+| Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial ($300 / 90 days). **Trial expires ~2026-11-10; upgrade to a paid account before then or services stop** |
+| ADC | ✅ Verified reaching `wawitas`. One global file, **two identities** — see the switch ritual below |
+| Firestore | ✅ **Live** — `(default)`, `us-east1`, PITR on, daily + weekly backups, delete protection |
+| **Firestore rules** | ✅ **Deployed 2026-08-12** — `firestore.rules` compiled and released. Enforcement itself is still **untested**: no client can reach Firestore yet |
+| Firestore indexes | ✅ **Deployed** — 10 composite + the `identity.code` collection-group field override that `findPetByMicrochip()` needs |
+| Storage rules | 🟡 **Not deployed** — needs a Firebase *default* bucket (console-only "Get Started"). **Not an exposure:** `wawitas-app` has no `allUsers` binding and uniform access is on |
+| Firebase emulator suite | ❌ **Not used — decided 2026-08-08.** Also cannot run here (no Java) |
+| Firebase web app | ⬜ Not registered — the four empty `NEXT_PUBLIC_FIREBASE_*` values need it |
 | Auth flows | ⬜ Not started |
 | Admin publishing UI | ⬜ Not started |
 | Maps + sightings | ⬜ Not started |
+| Reporting (BigQuery mirror) | ⬜ **Decided 2026-08-09, deliberately not built** — add when a real report is asked for |
 | LLM vaccination-card parsing | ⬜ Stage 2 — deliberately deferred |
 
 ### Progress log
@@ -50,66 +61,186 @@ scanned chip resolves to a name and a phone call.
 - **2026-08-02** — Wrote `terraform/`: enabled APIs, Firestore database (with both `deletion_policy` and `delete_protection_state` set — redundant on purpose), a Storage bucket linked to Firebase, Artifact Registry with a cleanup policy, a Cloud Run v2 service with its own least-privilege service account (not the Compute Engine default), and a budget alert with email notification at 50/90/100%. `project_id`, `region`, and `billing_account` are variables; the GCS backend is configured via `-backend-config` rather than hardcoded, so moving to the new tenant is a new `backend.hcl` and re-init, not an edit to any `.tf` file. Validated with `terraform validate` and a full `terraform plan` against a placeholder project — both clean, 24 resources, 0 errors — rather than just written and assumed correct.
 - **2026-08-07** — **Renamed `dog-shelter` → `pet-shelter`** and generalized the model so the project works for any species and can be forked by other shelters. `Dog` → `Pet` with a `species` dimension; Spanish gender agreement is now computed (`sizeLabel`, `speciesNoun`) rather than hardcoded masculine, because "la gata pequeña" vs "el gato pequeño" reads as carelessness to the entire target audience otherwise. All organisation-specific content moved to `src/config/shelter.ts` — the one file a forking shelter edits. Added `README.md`, MIT `LICENSE`.
 - **2026-08-07** — **Added RFID microchip identity, scan ledger, medical history, and feeding plans.** Researched the international regulatory picture first (`docs/rfid-microchips.md`) because it constrains the schema. Three findings changed the design: (1) a microchip is a *passive* transponder with no GPS and centimetre read range — AVMA states it "cannot track your animal" — so the ledger records the **scanner's** location at scan time and is named `ScanEvent`, never `currentLocation`, to make live tracking impossible to misread into the schema; (2) the code must be stored as a **string** because ISO 3166 country prefixes below 100 have leading zeros (Bolivia is `068`) and integer parsing silently corrupts every such chip; (3) EU 576/2013 requires the chip be implanted **before** the rabies vaccination or the vaccination is void, which is a validatable business rule (`rabiesVaccinationIsValid`). The microchip number sits in the **restricted** tier, not the authenticated one — it is the credential by which ownership is asserted, and an account is not a reason to learn every chipped animal's number. Scan history is restricted for a stronger reason: one location is an address, a scan trail is a pattern of an owner's movements. 10 unit tests cover the validation boundaries, including the exact 38-bit national-ID ceiling.
+- **2026-08-08** — **Ran the app in a browser for the first time.** Everything before this was compile-and-validate; the dev server had never been started. It works: all five routes (`/`, `/adopta`, `/ayuda`, `/nosotros`, `/cuenta`) render with correct Spanish copy, branding, nav, dark-mode toggle and footer. The Muro degrades to *"No pudimos cargar los animalitos"* rather than crashing when Firestore is unreachable — the error path is real, not theoretical. **No source file needed changing to get this far.** Four traps surfaced, none previously documented: (1) a stale `.next` cache serves `404` on every route while still logging `200`, and makes `tsc --noEmit` report phantom syntax errors inside `.next/dev/types/` — `rm -rf .next` and restart; (2) a Firestore endpoint that accepts no connection hangs the SSR render 12–40 s on gRPC retries, so the browser times out before the server answers, though the request still ends `200`; (3) `next.config.ts` `images.remotePatterns` allows **only** `firebasestorage.googleapis.com`, so any `coverPhoto` on another host throws `E231 Invalid src prop` and 500s the page — a real constraint on how seed data is written; (4) `.env.local` did not exist, and was created this session with placeholders (gitignored).
+- **2026-08-08** — **Decided: real Firestore, no emulator suite, ever.** The emulator cannot start on this machine regardless — `firebase emulators:start` dies with "Could not spawn `java -version`" and no JRE/JDK is installed — but the decision is independent of that: a second source of truth for rules and composite-index behaviour is not wanted. Removed the emulator instructions from `CLAUDE.md`, `.env.example`, and `README.md`. The safety net they provided is replaced by **pinning `GOOGLE_CLOUD_PROJECT` explicitly** rather than redirecting to localhost. The `README` warning was rewritten to be true for forking shelters too — it now argues from "the Admin SDK bypasses `firestore.rules`, so a wrong project id is not caught by your security rules," which holds on any machine, instead of from this machine's credential situation.
+- **2026-08-08** — **Mined the sibling `trustcert-ai-g` repo for GCP experience and wrote it up as [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md).** Same architecture as this project (Next.js on Cloud Run + Firestore + Firebase Auth + Terraform + GitHub Actions), except live for months, so its 43 gotchas, three blameless postmortems, and `infra/*.tf` are a record of what this stack actually does wrong. Nothing operational was copied — no project ids, billing ids, keys, or data; the employer-project boundary is unchanged. The concrete output is §4: ten gaps between that stack and `terraform/` here, three of which (`monitoring`, `firebasestorage`, `cloudresourcemanager` APIs not enabled) are apply-time-only failures that `validate` and `plan` are structurally blind to — which is itself their most-repeated lesson, that *a clean plan is not proof of a valid config*. Also carried over: `lifecycle { ignore_changes }` on the Cloud Run image (needed the day CI exists, or `apply` rolls prod back), `user_project_override`/`billing_project` on the providers (directly relevant to the ADC hazard here), Firestore PITR + backups, the diff-aware `users/{uid}` rule that closed their privesc incident, the `fieldOverrides`-replace-not-merge index outage, and `ENV HOSTNAME=0.0.0.0` in the Dockerfile runner stage — without which a Next.js standalone container binds to the container id and never passes Cloud Run's startup probe.
+- **2026-08-08** — **Corrected a stale and dangerous claim in this file.** It previously said ADC was still valid and pinned to `trustcert-ai-g`. ADC has since expired: the Admin SDK now fails with `2 UNKNOWN: Getting metadata from plugin failed ... {"error_subtype":"invalid_rapt"}`, a reauth demand. Both the gcloud CLI **and** ADC now need re-authenticating. That is temporarily the *safe* state — nothing can silently reach the work project — and the hazard returns the moment either is refreshed.
+- **2026-08-09** — **Confirmed the database choice: Firestore as system of record, BigQuery for reporting later.** Revisited because the model is genuinely relational and it was worth checking the NoSQL assumption before any data existed rather than after. Firestore holds, but on *cost and integration*, not fit: Cloud SQL cannot scale to zero and so fails the project's first constraint at ~$9–25/mo forever, and Firebase Auth + Storage + App Check + Rules are one system this design leans on in four places. Supabase RLS was the only alternative preserving that property and it costs the GCP tenant plan and the written Terraform. Five weaknesses are now named in `## Architecture` rather than left to be rediscovered — reporting queries, the retention sweep, no referential integrity, tier-as-subcollection being a workaround rather than a good design, and no `ALTER TABLE`. BigQuery via the Firestore streaming extension fixes the first (and the analysis half of the second) at $0, and is **deliberately not built yet**: it is a second copy of personal data, so it should arrive with a named report justifying it and with the restricted tiers considered rather than mirrored by default. Also recorded a correction to the cost principle itself — the Next.js pivot moved the wall and pet pages to the Admin SDK, which bypasses Rules, so "Rules do authorization for free" currently applies to no path at all; it starts paying off when auth flows land and the expediente and admin console read client-side.
+- **2026-08-12** — **The GCP project exists.** `wawitas-pet-shelter`, number `236546422205`. The user re-authenticated the gcloud CLI, and the project was created and `core/project` pinned to it. **It is inside the employer's `trustcertllc.com` org (`162969569100`), which reverses the constraint this file had asserted since 2026-08-02** — the user was shown the tradeoff (inherited org policies, shared billing and audit trail, a tenant move that becomes a migration instead of a re-init) and chose the work account anyway. Only the narrower rule survives: never `trustcert-ai-g` itself. Ordering mattered and CLAUDE.md's own instruction was not literally followable — it said to pin `GOOGLE_CLOUD_PROJECT` *before* both logins, but the project id does not exist until after `gcloud auth login`. The order actually used preserves the same property: CLI login → create project → pin `.env.local` and `gcloud config` → *then* ADC login, because ADC is the credential `firebase-admin` and Terraform consult, and it stayed dead throughout. **Billing is blocked and is now the critical path:** `israel.rocha@` has only `roles/billing.costsManager` on `014C58-4F2EB7-670697`, which cannot run `billing.resourceAssociations.create`; `danibuzolin@` holds `roles/billing.admin`. Two things could not be checked at all: org policies (permission denied at the org level — so whether Domain Restricted Sharing will block `allUsers` on Cloud Run is unknown until apply) and `terraform plan` (needs ADC). Also landed all five pre-apply Terraform/Docker fixes — three API enablements, `user_project_override` + `billing_project` on both providers, Firestore PITR + daily/weekly backup schedules, and `ENV HOSTNAME=0.0.0.0` — `terraform validate` clean, which is the weakest of the three claims and is all that was earned.
+- **2026-08-12** — **ADC refreshed, and for the first time a credential in this project actually reached a live Google API.** The user ran `gcloud auth application-default login` while thinking about the *other* project, which surfaced the thing worth writing down: **ADC is one machine-global file, not one per project.** It takes its quota project from whatever `gcloud config` holds at the moment it runs — which was `wawitas-pet-shelter`, because that had been pinned first. So the ordering used earlier in the day paid off exactly as intended. Verified with a read-only `google-auth-library` probe run with **no `.env.local` loaded**, so it tests ADC alone rather than testing the env var: it resolved `wawitas-pet-shelter` for both projectId and quotaProjectId and returned the live project record. **The hazard has now reversed** — local `trustcert-ai-g` work that leans on ADC for its project id will resolve *here* until `set-quota-project` is run the other way; it fails loudly only because no Firestore database exists yet, and that protection ends at the first `terraform apply`. The probe also **empirically confirmed a gap that had been inherited rather than measured**: it failed first with *"Cloud Resource Manager API has not been used in project wawitas-pet-shelter"*. Enumerating the project's default APIs then corrected the sibling stack's claim — of the three "missing" enablements, `monitoring` was already on by default and only `cloudresourcemanager` and `firebasestorage` were genuinely absent. `cloudresourcemanager` was enabled manually via `gcloud services enable` because the Terraform provider needs it to bootstrap; `serviceusage` was already on, so Terraform can do the rest. With ADC live, **`terraform plan` ran against the real project for the first time: 29 to add, 0 to change, 0 to destroy, no warnings** — 24 as previously documented plus the 3 API entries and 2 backup schedules. It needed a temporary `backend_override.tf` to use local state, because the GCS backend needs a state bucket and that needs billing; the override was deleted afterwards and no `.tfstate` was written, so the GCS backend path is still unexercised. `terraform.tfvars` now holds the real project id, billing account, and image path (gitignored).
+- **2026-08-12** — **DEPLOYED. The site is live and serving from real Firestore.** Region moved to **`us-east1`** at the user's direction — which forced a check of an inherited claim in this file that `us-east1` is not a valid Firestore location. **It is.** `gcloud firestore locations list` lists it alongside ~45 others; that was the *second* claim inherited from the sibling stack to fail verification in one day (the first being "three missing APIs," which was two). us-east1 is also the better choice here: inside the GCS Always Free tier and ~1,200 km closer to Cochabamba than Iowa. Applied in **three stages**, because the user correctly pushed back on deploying a placeholder image: Artifact Registry cannot exist before Terraform creates it, and Cloud Build cannot push before it exists — so stage 1 was `-target` on the APIs + registry, stage 2 was `gcloud builds submit` (**no local Docker on this machine; the Dockerfile had never once been built**), stage 3 was the full apply with a real image. **Three things that had been unfalsifiable since they were written all came back green at once:** the Firestore backup retention values passed server-side validation, `allUsers` on `run.invoker` succeeded (no org parent, so no Domain Restricted Sharing), and `ENV HOSTNAME=0.0.0.0` proved itself — Cloud Run's startup probe passed and the container logged `Network: http://0.0.0.0:8080`. Then the wall showed its **error** state rather than its empty state, and chasing that found **two real defects**. First, the composite index on `pets(status, createdAt desc)` was declared but never deployed — Firestore demands it even against an empty collection, and the symptom is indistinguishable from "no data," which is precisely the sibling stack's *"data gone is usually query broken"* lesson happening live. Second and worse: **`src/app/page.tsx` had no `revalidate`**, so Next.js prerendered the homepage at *build* time — inside Cloud Build, where Firestore is unreachable — and froze the Muro's error state into static HTML permanently. `/adopta` and `/adopta/[slug]` both carried `revalidate = 300` and self-healed on their own; the homepage, the single most important page for the primary objective, would never have recovered and nothing would have appeared in any log. Fixed with `revalidate = 300` (not `force-dynamic`, which would cost one Firestore query per visitor). Also found and fixed before they could bite: **no `.dockerignore`** existed, so `COPY . .` would have baked `.env.local` and `terraform.tfvars` — including the billing account id — into the image layers; `firebase.json` pointed the Hosting rewrite at the wrong service name *and* the wrong region; and two **perpetual Terraform diffs** were eliminated or documented rather than left to train everyone to skim plans. Rules were **still not deployed** at that point — the Firebase CLI turns out to be a *third* credential store, authed as the expired work account, and it ignores `GOOGLE_APPLICATION_CREDENTIALS`.
+- **2026-08-12** — **Firestore rules and indexes deployed.** After `firebase logout` / `firebase login` as the personal account, the first-ever deploy of `firestore.indexes.json` **rejected the file**, which found two bugs that had sat undetected precisely because the file had never been deployed and nothing else validates it. Both were single-field entries declared as composite indexes, which Firestore refuses with *"this index is not necessary, configure using single field index controls"*: `scans`/`scannedAt` was already automatic and was deleted outright, and `identity`/`code` — **the microchip lookup, the single most important query in the system** — had to move to `fieldOverrides`, because a COLLECTION_GROUP scope on a *single* field is a field-level setting, not an index. That fix ran straight into this file's own inherited warning that **a `fieldOverride` replaces rather than merges**: the default COLLECTION ASC and DESC entries are now re-listed explicitly, since dropping them would have silently disabled ordinary per-pet queries on `code`. Deployed result verified by API, not by the CLI's success message: 10 composite indexes plus the `code` field override. **Rules compiled and released, but their enforcement remains completely untested** — no Firebase web app exists, so no client can reach Firestore at all. `storage.rules` is still undeployed: the CLI demands a Firebase *default* bucket while this project deliberately uses a Terraform-managed named one, and setting `storage.bucket` in `firebase.json` did not satisfy it. Confirmed that is not an exposure — `wawitas-app` carries no `allUsers` binding, has uniform bucket-level access, and grants `objectAdmin` only to the Cloud Run service account.
+- **2026-08-12** — **Moved off the employer's org entirely, onto a personal free-trial account, and billing finally works.** The user judged the trustcertllc.com arrangement too complex — a fair call, since it had already cost a blocked billing link, an unreadable org policy, and a dependency on a colleague. `wawitas-pet-shelter` was shut down. **Two project IDs are now permanently burned:** Google never releases an ID for reuse after deletion, so `wawitas-pet-shelter` is gone forever, and `pet-shelter` turned out to be already taken globally by someone else. The project is **`wawitas`** (`181094228409`) on `israel.rocha.clarke@gmail.com`, with **no organization parent** — `gcloud projects create` without `--organization` leaves the project outside the org Google auto-provisioned for the account. That kills the single largest unknown in the apply: there is no org policy to inherit, so the Domain Restricted Sharing risk to `allUsers` on Cloud Run is gone. Billing linked in one command (`billingEnabled: true`) because the user holds `billing.admin` on their own account. **The trial is $300 over 90 days, not 90 months as first understood — it expires around 2026-11-10, and services stop unless the account is upgraded to paid.** The new structural fact is that **two Google identities now share one machine**, and ADC is a single file that cannot hold both. This bit immediately: an `application-default login` run as the work account kept `quota_project_id: wawitas-pet-shelter`, a project deleted minutes earlier, leaving a credential useless to both projects. Offered per-project `CLOUDSDK_CONFIG` directories versus manual re-login; **the user chose manual switching.** Worth recording from that investigation: `google-auth-library` *does* honour `CLOUDSDK_CONFIG` (verified in `node_modules/.../util.js:162`), but Terraform's Go provider does not, so the config-dir approach needs `GOOGLE_APPLICATION_CREDENTIALS` alongside it — which is why it was judged more machinery than it is worth. One consolation in the split: the two accounts share no access, so a forgotten switch now fails with a permission error instead of silently writing to the wrong project. The 2026-08-07 class of incident is structurally impossible now.
 
 ---
 
 ## Next session — start here
 
-**Everything written so far compiles, tests, and validates. Nothing has been
-deployed.** No GCP project exists, no container image has been built, and
-`terraform apply` has never run. The gap between "validates cleanly" and "works
-in production" is entirely unexplored, and that is where the remaining risk
-lives.
+**IT IS DEPLOYED AND IT SERVES.** As of 2026-08-12 this project crossed the line
+it had been sitting on since it started: infrastructure applied, image built,
+Cloud Run live, and the Muro rendering a real Firestore query in production.
 
-### Verified state, as of 2026-08-08
+**https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app**
+
+Every ✅ below was *executed*, not inferred. The remaining gaps are narrow and
+named: **no security rules deployed, 11 of 12 indexes missing, and no pet
+documents.**
+
+### Verified state, as of 2026-08-12
 
 | Check | Command | Result |
 |---|---|---|
-| Build | `npm run build` | ✅ 8 routes compile and prerender |
-| Types | `npx tsc --noEmit` | ✅ clean |
+| **Live site** | `GET /` | ✅ **HTTP 200**, correct Spanish copy, wall shows its empty state from a live query |
+| **Live site** | `GET /adopta` | ✅ HTTP 200, empty state correct |
+| Container image | `gcloud builds submit` | ✅ **built + pushed**, tag `20260812-2`. First build in this project's history |
+| Infra | `terraform apply` | ✅ **30 resources live**, GCS backend |
+| Infra | `terraform plan` | 🟡 one **known-benign** diff on `cloud_run` `scaling` — see `cloud_run.tf`. Anything else is real |
+| Firestore | live query via Admin SDK | ✅ connects, returns 0 docs |
+| GCP project | `gcloud projects describe wawitas` | ✅ `ACTIVE`, `us-east1`, **no org parent** |
+| Billing | `gcloud billing projects describe wawitas` | ✅ `billingEnabled: true` — trial expires ~2026-11-10 |
+| ADC | `google-auth-library` probe | ✅ resolves `wawitas` with no `.env.local` help |
+| Build | `npm run build` | ✅ 8 routes *(last local run 2026-08-08; Cloud Build has since built it twice)* |
 | Tests | `npm test` | ✅ 10/10 (microchip validation) |
 | Dependencies | `npm audit --omit=dev` | ✅ 0 vulnerabilities |
-| Infra | `terraform validate` + `plan` | ✅ clean, 24 resources |
+| **Firestore rules** | `firebase deploy` | ✅ **compiled + released** — but enforcement never exercised (no client) |
+| **Indexes** | `gcloud firestore indexes composite list` | ✅ **10 composite + 1 field override** |
+| Storage rules | `firebase deploy --only storage` | ❌ blocked on a Firebase default bucket; bucket is private regardless |
+| Real data | any pet document | ❌ none exists |
+
+Still not covered by any green check: server-side validation at apply (retention
+bounds, immutable locations) and `docker build`. Org policy has dropped off this
+list entirely — the personal project has no org parent, so there is none.
 
 ### ⚠️ Read before running anything locally
 
-`gcloud` CLI auth and **Application Default Credentials are separate**, and they
-are currently in different states:
+**Decided 2026-08-08: this project uses real Firestore. The emulator suite is
+not used.** It cannot start on this machine anyway — `firebase emulators:start`
+dies with "Could not spawn `java -version`" and no JRE/JDK is installed — and a
+second source of truth for rules and composite-index behaviour is not wanted.
+`FIRESTORE_EMULATOR_HOST` should not appear in any config.
 
-- The **gcloud CLI** needs an interactive `gcloud auth login` — `gcloud projects
-  list` fails with a reauth error.
-- **ADC is still valid**, and the credentials file carries
-  `quota_project_id: trustcert-ai-g` — the *work* project.
-  (`%APPDATA%/gcloud/application_default_credentials.json` on Windows;
-  `~/.config/gcloud/` elsewhere.)
+That removes the old safety net, so the credential situation has to be handled
+directly. `gcloud` CLI auth and **Application Default Credentials are separate**,
+they expire independently, and `firebase-admin` and Terraform consult **ADC
+only**.
 
-That combination is the dangerous one. `firebase-admin` uses ADC, not the CLI
-credential, so a plain `npm run build` **silently authenticates against the work
-project**. This already happened once: a build reached real Firestore in
-`trustcert-ai-g` and only failed because a composite index was missing.
+### ⚠️ Two Google identities share this machine
 
-**Always set the emulator host for local work:**
+This is the thing to understand before running anything:
+
+| Project | Google account |
+|---|---|
+| `wawitas` (this project) | `israel.rocha.clarke@gmail.com` — personal, free trial |
+| `trustcert-ai-g` (work) | `israel.rocha@trustcertllc.com` — employer |
+
+**There is exactly one ADC file per Windows profile**
+(`%APPDATA%\gcloud\application_default_credentials.json`). It cannot hold both
+accounts. `gcloud auth application-default login` does not create a per-project
+credential — it *replaces* that single file.
+
+**The user chose manual switching over per-project config directories**
+(2026-08-12), having been shown both. `CLOUDSDK_CONFIG` pointed at separate
+directories would isolate account, project, and ADC per project — and it is
+honoured by `google-auth-library` (verified in
+`node_modules/google-auth-library/build/src/util.js`) — but it is *not* read by
+Terraform's Go provider, so it needs `GOOGLE_APPLICATION_CREDENTIALS` alongside
+it. That was judged more machinery than it is worth. Revisit if switching starts
+getting forgotten.
+
+**The full switch ritual, when moving between projects:**
 
 ```bash
-FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 npm run build
+gcloud config set account israel.rocha.clarke@gmail.com
 ```
 
-Or run `npm run emulators` first. Verified: with that variable set, the Admin
-SDK connects to localhost and never touches a real project.
+```bash
+gcloud config set project wawitas
+```
 
-### The next three things, in order
+```bash
+gcloud auth application-default login
+```
 
-1. **Stand up the GCP project.** `gcloud auth login`, create a dedicated project
-   (never `trustcert-ai-g`), link Blaze billing, then
-   `terraform init -backend-config=backend.hcl && terraform apply`. Deploy rules
-   and indexes with the Firebase CLI — Terraform deliberately does not own them.
-   The composite index on `identity.code` matters most: it is what makes
-   `findPetByMicrochip()` work.
-2. **Auth flows** (task: email + Google). Everything gated is currently a
-   placeholder — `/cuenta` renders static text and the expediente's sign-in
-   prompt is not a working gate. The `detail`, `medical`, and `care/feeding`
-   tiers have rules written but no UI can reach them yet.
-3. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
+All three. Setting the account without redoing ADC leaves the *previous*
+identity in the credential file — which is exactly what happened on 2026-08-12,
+producing a work-account ADC carrying `quota_project_id: wawitas-pet-shelter`,
+a project that had just been deleted. Useless for both projects.
+
+**Note that `gcloud auth application-default set-quota-project` is no longer a
+fix.** It was the right advice while both projects lived under one identity; it
+cannot help now, because the problem is the *credential*, not the quota project.
+A gmail-account ADC has no access to `trustcert-ai-g` at any quota project.
+
+**One genuine improvement from the split:** a wrong-identity ADC now fails with
+a permission error instead of silently writing to the wrong place. The two
+accounts share no access, so the 2026-08-07 class of incident — a build quietly
+reaching real Firestore in the work project — is no longer possible. Forgetting
+to switch is now noisy rather than dangerous.
+
+Verify rather than trusting this note; both values are mutable:
+
+```bash
+gcloud config get-value project
+```
+
+`.env.local` is pinned as a second layer and is gitignored, so it does not
+travel between machines:
+
+```bash
+GOOGLE_CLOUD_PROJECT=wawitas
+```
+
+Its four `NEXT_PUBLIC_FIREBASE_*` client values are still empty — they need a
+registered Firebase **web app**, which does not exist yet.
+
+### The next four things, in order
+
+1. **Put one real pet in Firestore and load the wall.** This is now the shortest
+   path to a proven end-to-end system and the last unverified link in the core
+   loop: `pets-server.ts` → `Muro.tsx` → rendered HTML has never once run with
+   data in it. Everything underneath it is live — database, rules, indexes,
+   Cloud Run.
+
+   Two constraints on the seed document:
+   - **`coverPhoto` must be hosted on `firebasestorage.googleapis.com`** or the
+     page throws `E231 Invalid src prop` and 500s (`next.config.ts`
+     `images.remotePatterns`). This is the constraint that killed the mock-data
+     attempt on 2026-08-08.
+   - `status` must be `adopcion` and `createdAt` must exist, or the wall query
+     will not return it.
+
+   Then confirm it renders in **production**, not just locally. Note the
+   homepage is ISR at 300s, so allow one revalidation window.
+
+   **Still outstanding from the deploy, but not blocking:**
+   - **`storage.rules` is not deployed.** `firebase deploy --only storage`
+     fails with *"Firebase Storage has not been set up"* — the CLI wants a
+     Firebase **default** bucket, and this project deliberately uses a named
+     one (`wawitas-app`) created by Terraform. Naming it via `storage.bucket`
+     in `firebase.json` did not satisfy the check. Resolving it likely means
+     clicking "Get Started" at
+     `https://console.firebase.google.com/project/wawitas/storage`, which
+     creates a *second*, default bucket — decide whether to adopt that as the
+     real one or keep the Terraform-managed one. **Not urgent:** `wawitas-app`
+     has no `allUsers` binding, uniform bucket-level access is on, and only the
+     Cloud Run service account holds `objectAdmin`.
+   - **Rules enforcement has never been exercised.** They compiled and
+     released, which is not the same as being correct. The first real test
+     comes with auth (step 3).
+   - `public_access_prevention` on `wawitas-app` is `inherited`, not
+     `enforced`. Decide when Storage is actually used — enforcing it may affect
+     how pet photos are served.
+2. **Register a Firebase web app** and fill the four empty
+   `NEXT_PUBLIC_FIREBASE_*` values in `.env.local`. Nothing client-side can
+   exist until this does — no auth, no client reads, and therefore no way to
+   test that `firestore.rules` actually enforces anything. Remember these are
+   **build-time** values baked into the bundle by `next build` (see the
+   Dockerfile ARGs), not Cloud Run runtime env vars.
+3. **Auth flows** (email + Google). Everything gated is currently a placeholder —
+   `/cuenta` renders static text and the expediente's sign-in prompt is not a
+   working gate. The `detail`, `medical`, and `care/feeding` tiers have rules
+   written but no UI can reach them yet.
+4. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
    `MICROCHIP_ERROR_ES` are built and tested, ready to wire into a form.
 
 ### Two open questions awaiting a decision
@@ -123,6 +254,26 @@ SDK connects to localhost and never touches a real project.
 
 ### Things that will bite whoever picks this up
 
+Found by running it (2026-08-08):
+
+- **A stale `.next` cache 404s every route** while the server still logs `200`,
+  and makes `tsc --noEmit` report phantom syntax errors inside
+  `.next/dev/types/`. Suspect this before suspecting your routing.
+  `rm -rf .next` and restart.
+- **An unreachable Firestore endpoint hangs the SSR render 12–40 s** on gRPC
+  retries — the browser gives up before the server answers, though the request
+  still ends `200`. A slow page here means a connection problem, not slow code.
+- **`images.remotePatterns` allows only `firebasestorage.googleapis.com`**
+  (`next.config.ts`). Any `coverPhoto` on another host throws
+  `E231 Invalid src prop` and 500s the whole page. This constrains seed data.
+- **`.env.local` holds placeholders only** and is gitignored, so it does not
+  travel between machines. Every value needs filling in.
+- **Do not add mock/fallback data to `pets-server.ts`** to make the wall look
+  populated. It was tried on 2026-08-08, collided with the image-host rule
+  above, and was reverted. Seed real documents instead.
+
+Known from before:
+
 - **The service-area bounds live in two places** — `src/config/shelter.ts` and
   `firestore.rules`. The rules copy is the enforced one. Change both together.
 - **`pets-server.ts` bypasses all security rules** (Admin SDK). It must never be
@@ -132,6 +283,34 @@ SDK connects to localhost and never touches a real project.
   test file explicitly. Revisit when the machine moves to Node 22.
 - **Facebook sync (`PLAN.md` §5) was never built.** It predates the GCP pivot;
   the destination is now a Firestore document, not a markdown file.
+
+Known from the sibling stack, not yet hit here (full list:
+[`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md)):
+
+- **The `Dockerfile` runner stage does not set `ENV HOSTNAME=0.0.0.0`.**
+  Next.js `output: 'standalone'` generates a `server.js` that reads
+  `process.env.HOSTNAME`, and container runtimes set it to the container id —
+  so the server binds to a non-routable name, Cloud Run's startup probe never
+  succeeds, and the failure message points at the container rather than at this
+  line. One line, add it before the first `docker build`.
+- **`terraform apply` will fail on APIs that `plan` never checks** —
+  `monitoring`, `firebasestorage`, and `cloudresourcemanager` are all used by
+  resources in `terraform/` but absent from `apis.tf`.
+- **The moment CI deploys images, Cloud Run needs `lifecycle {
+  ignore_changes }`** or the next `terraform apply` rolls production back to
+  the tag in tfvars.
+
+### Emulator leftovers still in the repo
+
+The emulator decision is documented but not fully swept out of the code. None of
+these are active — `NEXT_PUBLIC_USE_EMULATORS` is unset, so the branch is dead
+and the client never attempts an emulator connection — but they are the last
+things that would let someone re-derive the retired workflow:
+
+- `src/lib/firebase-client.ts` — `if (process.env.NEXT_PUBLIC_USE_EMULATORS === 'true')`, now a dead branch
+- `src/lib/firebase-admin.ts` — two comments still describing emulator routing
+- `package.json` — the `emulators` script
+- `firebase.json` — the `emulators` port block
 
 ---
 
@@ -144,7 +323,8 @@ SDK connects to localhost and never touches a real project.
 | App server (Next.js SSR) | Cloud Run 2nd gen | 2M requests/mo, scales to zero | No VMs; see [Frontend](#frontend) for why Next over static export |
 | CDN + custom domain | Firebase Hosting, rewriting to Cloud Run | 10 GB stored, 360 MB/day transfer | Gives the custom domain and edge caching without a load balancer |
 | Auth | Firebase Authentication | 50k MAU | Email/password + Google provider |
-| Database | Firestore (Native) | 1 GiB, 50k reads / 20k writes per day | |
+| Database | Firestore (Native) | 1 GiB, 50k reads / 20k writes per day | System of record — see [Database choice](#database-choice--decided-2026-08-09) |
+| Reporting | BigQuery, fed by the Firestore→BigQuery extension | 1 TB queries/mo, 10 GB storage | **Not built yet** — add when the first report is asked for, not before |
 | Images | Cloud Storage for Firebase | 5 GB | ~1000 pets at 300 KB optimized |
 | Privileged logic | Cloud Functions 2nd gen (on Cloud Run) | 2M invocations/mo | Only where Rules can't reach |
 | Maps | Maps JavaScript API | 10k loads/mo per SKU | The first thing that will cost money |
@@ -166,6 +346,83 @@ Rules evaluation is free. Routing reads through a Cloud Function costs an invoca
 - moderation and rate-limit enforcement on public sighting reports
 
 **Corollary:** admin status lives in a **custom auth claim** (`request.auth.token.admin`), not in a `users/{uid}.role` field. A claim is already inside the token and costs nothing to check; a Firestore field costs one document read *on every rule evaluation*.
+
+**Caveat, noted 2026-08-09:** the Next.js pivot moved the wall and pet pages to
+Server Components using the Admin SDK, which **bypasses Rules entirely** and pays
+Cloud Run compute per read. So this principle currently pays off only on the
+paths that are still client-side — and none of those exist yet, because auth
+flows aren't built. Every future read is a live decision about which side of this
+line it sits on: public, crawlable, SEO-relevant pages belong server-side despite
+the cost; the signed-in expediente and the admin console should read client-side
+so Rules do the authorization for free.
+
+### Database choice — **decided 2026-08-09**
+
+**Firestore is the system of record. BigQuery gets added for reporting when a
+report is actually asked for, not before.** The model here is genuinely
+relational and Firestore is not the best *fit* for it — this is a decision made
+on cost and integration, and it's worth keeping the reasoning honest so the
+revisit triggers below stay legible.
+
+**Why NoSQL holds.** The binding constraint is the one at the top of this
+section — serverless, scale-to-zero, $0/month — and it eliminates most of the
+field before data-model fit is even considered:
+
+| Option | Scales to zero | Realistic floor | Notes |
+|---|---|---|---|
+| **Firestore** | yes | **$0** | Free tier is ~50× this shelter's traffic |
+| Cloud SQL Postgres | **no** | ~$9–25/mo | Smallest instance bills 24/7, forever |
+| AlloyDB | no | ~$200+/mo | Not in the conversation |
+| Supabase (Postgres + RLS) | free tier pauses | $0 → $25/mo | Closest philosophical match; leaves GCP |
+| Neon / Turso | yes | $0 | Real option, but no Auth/Storage/App Check to integrate with |
+
+Cloud SQL is the natural "just use Postgres" answer and it fails the first
+constraint on line one. The rest is coupling: Firebase Auth, Cloud Storage, App
+Check, and Rules are one integrated system, and this design leans on all four.
+Supabase RLS is the only alternative that preserves that property, and it costs
+the GCP tenant plan and the Terraform already written.
+
+**Where the fit is genuinely bad.** Named so nobody rediscovers them as
+surprises:
+
+1. **Reporting queries.** "Which pets are due for a vaccination in the next 30
+   days," "adoptions per month," "animals with no microchip" — one line of SQL
+   each, awkward-to-impossible in Firestore. Every new filter combination needs
+   its own composite index and there are no joins. **This is what BigQuery is
+   for.**
+2. **The retention sweep** (concern #3). `DELETE ... WHERE scannedAt < ...` in
+   SQL; in Firestore a paginated batched job you write, schedule, and pay
+   per-document-delete for. The deferral is fine — the implementation cost is
+   higher than it looks.
+3. **No referential integrity.** `adoptions.ownerUid`, `custody.holderUid`,
+   `scans.scannedByUid` are strings pointing at documents nothing enforces. A
+   deleted user leaves orphans that surface much later as a UI bug.
+4. **Tier-as-subcollection is a Firestore-shaped workaround.** Rules can't
+   protect a field, so visibility tiers became five documents; assembling one
+   pet's full expediente is five reads where Postgres RLS would be one `SELECT`
+   with a column-level policy. Free at this scale — but it is not a
+   universally-good design, it is a design *this database* forced.
+5. **No `ALTER TABLE`.** Schema changes are code changes plus a backfill script.
+
+**What BigQuery fixes and what it doesn't.** The Firebase
+*Stream Firestore to BigQuery* extension mirrors collections continuously.
+Firestore stays the system of record; BigQuery only answers the questions
+Firestore is bad at (weakness 1, and the *analysis* half of 2). It does not fix
+3, 4, or 5. At this data size it stays inside the free tier. **Do not add it
+speculatively** — it is a second copy of personal data (see concerns #2 and #3),
+so it should arrive with a named report to justify it, and with the restricted
+tiers considered rather than mirrored by default.
+
+**Revisit the database choice if any of these become true:**
+
+- **The identity record becomes the product** rather than the adoption wall —
+  the secondary objective. Medical history + custody chain + scan ledger is the
+  most relational part of the model; if shelters use this primarily as a chip
+  registry, Postgres gets more attractive.
+- **Multiple shelters share one deployment** and want cross-shelter queries. The
+  current template design is one shelter per deployment, which sidesteps this.
+- **Someone needs ad-hoc SQL against live data** — a grant report, a vet audit —
+  and BigQuery's mirror lag or missing tiers make it insufficient.
 
 ### Frontend
 
@@ -333,6 +590,13 @@ re-auth and a live GCP project existing. Parameterized for a tenant move from
 day one, per the user's plan to move this project to a new GCP tenant once
 it's complete, rather than retrofitting that later.
 
+**A clean plan is not proof of a valid config.** Several classes of error —
+an unenabled API, a server-side constraint, an invalid immutable location —
+surface only at `apply`. [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md)
+§4 lists ten specific gaps in this stack found by diffing it against a live
+one; three of them are exactly that class and should be fixed before the
+first apply.
+
 Division of responsibility, decided in advance so it doesn't drift later:
 
 - **Terraform owns infrastructure:** enabled APIs, the Firestore database
@@ -352,6 +616,108 @@ Remote state uses a GCS backend configured via `-backend-config` flags at
 itself can differ per tenant without editing `.tf` files. Moving tenants later
 should be: stand up the new project, change the tfvars and backend config,
 re-init, apply.
+
+---
+
+## Lessons from a live sibling stack
+
+Carried over 2026-08-08 from `trustcert-ai-g` — same architecture (Next.js on
+Cloud Run + Firestore + Firebase Auth + Terraform + GitHub Actions), except live
+for months. Full write-up, with the reasoning and the incident timelines:
+[`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md).
+The rules below are the part that changes what gets built here.
+
+### The one that generalises
+
+**A thing that validated, compiled, or passed tests was not the thing that was
+verified.** Every incident in that repo has this shape. A clean `terraform plan`
+on a config the API rejected at apply. A remediation script written, merged, and
+then not run with `--commit` for six weeks while the data was recorded as fixed.
+A feature with 61 green tests and a clean offline replay that failed on the
+first live request. This project is in exactly that state right now: everything
+compiles, validates, and renders; **nothing has been applied**. Read every ✅ in
+the verified-state table as "not yet falsified."
+
+### Before the first `terraform apply` — **all five done 2026-08-12**
+
+1. ✅ **Enabled `monitoring`, `firebasestorage`, and `cloudresourcemanager`** in
+   `apis.tf`. All three are used by resources already in `terraform/` and none
+   were declared. `validate` and `plan` are structurally blind to this class.
+   **Corrected 2026-08-12 by measuring the real project rather than trusting
+   the sibling stack's list:** of the three, `monitoring` was *already enabled
+   by default* on a fresh project in this org. Only `cloudresourcemanager` and
+   `firebasestorage` were genuinely missing. Declaring all three is still right
+   — `google_project_service` is idempotent and pins them against later
+   disablement — but "three missing APIs" was inherited, not observed, and two
+   is the true number here. `cloudresourcemanager` was confirmed missing the
+   hard way: an ADC probe failed with *"Cloud Resource Manager API has not been
+   used in project wawitas-pet-shelter before or it is disabled."*
+   It has since been enabled manually via `gcloud services enable`, because the
+   Terraform provider needs it to bootstrap. `serviceusage` is on by default, so
+   Terraform can enable the remainder itself.
+2. ✅ **Firestore location confirmed — and a inherited claim corrected.** This
+   item used to say `us-east1` is *not* a valid Firestore single-region, taken
+   from the sibling stack's incident log. **That is wrong.** Checked against
+   `gcloud firestore locations list` on the real project rather than trusted:
+   `us-east1`, `us-central1`, `southamerica-east1` and ~40 others are all valid.
+   Whatever the sibling stack actually hit, it was not this.
+   **`var.region` is now `us-east1`**, at the user's direction — it is inside
+   the Cloud Storage Always Free tier (only `us-east1`, `us-central1`,
+   `us-west1` are), a cheap Cloud Run region, and ~1,200 km closer to Cochabamba
+   than Iowa, with South American traffic typically routing via Miami. The
+   Firestore location remains **immutable** once created.
+   **Second inherited claim from that doc to fail verification today** — the
+   first was "three missing APIs," which was two. Treat its specifics as leads
+   to check, not facts.
+3. ✅ **`ENV HOSTNAME=0.0.0.0`** added to the `Dockerfile` runner stage, with a
+   do-not-remove comment. No `docker build` has run yet, so this is still
+   unverified — it is the fix for a failure that has not been reproduced here.
+4. ✅ **`user_project_override` + `billing_project`** added to both provider
+   blocks. Directly relevant to the ADC hazard — without them some calls are
+   quota'd against whatever ADC defaults to rather than the target project.
+5. ✅ **Firestore PITR + two backup schedules** (daily/14d, weekly/14w). Delete
+   protection was already set; it does not help against a bad write or a sweep.
+   Their 2026-07-12 incident is the argument: *correct + unrecoverable* is one
+   bug away from *wrong + unrecoverable*. Both bill for storage — this is the
+   project's first deliberate non-zero line item, and it is worth it.
+
+**All five are now `plan`-clean against the live project** — 29 to add, 0
+warnings — which is a stronger claim than the `validate` this section originally
+earned, but still not `apply`. Retention bounds and the PITR flag are validated
+server-side at apply and remain unproven. So does org policy. So does
+`docker build`. The checkmarks mean "planned successfully," not "known to work."
+
+### Rules to hold as the project grows
+
+- **The Cloud Run env var list has exactly one owner.** If Terraform owns the
+  service, Terraform declares every env var and CI passes only the image tag.
+  Their `IP_HASH_SALT` was CI-injected and Terraform-undeclared, so every full
+  apply planned to delete it. A plain env silently overrides a `secret_key_ref`
+  of the same name.
+- **The day CI deploys images, Cloud Run needs `lifecycle { ignore_changes }`**
+  on `template[0].containers[0].image` (plus `client`, `client_version`,
+  `scaling`) — otherwise the next `apply` rolls production back to the tfvars
+  tag. Add it in the same commit as the pipeline, not after.
+- **Never let the client write a field the server trusts for authz.** Gate the
+  *diff*, not the identity: `!diff().affectedKeys().hasAny(privilegedFields())`,
+  plus `allow delete: if false`. This repo's design already avoids the incident
+  structurally (tiers are separate documents; admin is a custom claim) — the
+  exposure returns the moment a client writes its own `users/{uid}`.
+- **A `fieldOverride` in `firestore.indexes.json` replaces, it does not merge.**
+  Always re-list the default `COLLECTION` ASC+DESC entries. And when documents
+  look missing, check they exist before assuming loss — *"data gone" is usually
+  "query broken."* This is live risk for `findPetByMicrochip()`: a broken index
+  on `identity.code` returns nothing, which reads as "chip not registered."
+- **Cost is per API call, not per artifact.** A cheap-looking scheduled job over
+  a saturated queue is a recurring bill. Estimate per-cycle calls × frequency
+  before shipping any cron. Their user traffic was $0.33 lifetime against a $665
+  month that was ~99% background jobs. Here the equivalent line item is Maps.
+- **Secrets in Secret Manager are created empty.** Add the version *before* a
+  `version = "latest"` binding resolves, or the revision fails to start. And
+  keep values out of `plan` output — theirs leaked a salt and had to rotate it.
+- **Write the postmortem.** Their loop — incident → blameless writeup → numbered
+  gotcha → next person reads it — is the only reason any of this was recoverable
+  eight months later.
 
 ---
 
@@ -422,28 +788,47 @@ it.
 
 ## Setup required from you
 
-**1. Re-authenticate the gcloud CLI.** Its tokens are expired and refresh needs
-an interactive prompt:
-
-```bash
-gcloud auth login
-```
-
-Note this is *separate* from Application Default Credentials, which are still
-valid and currently pinned to the work project — see
-[Next session](#next-session--start-here) before running a local build.
+**1. ✅ gcloud CLI authenticated** as `israel.rocha.clarke@gmail.com` with
+`core/project = wawitas`. **ADC needs re-running whenever you switch between
+this project and `trustcert-ai-g`** — one file, two identities. The full ritual
+is in [Next session](#next-session--start-here); do not skip the ADC step, and
+do not reach for `set-quota-project`, which cannot fix a wrong identity.
 
 Node is no longer a blocker: the current Node 20.20.2 satisfies Next.js,
 TypeScript, and `firebase-admin` 13.x.
 
-**2. Decided: a new dedicated GCP project**, and it will later move to a **new
-tenant entirely** once the project is complete — Terraform is written with that
-move in mind (see [Terraform](#terraform)). Not `trustcert-ai-g` for the interim
-either way — that is a work project, and a nonprofit's infrastructure should not
-share quotas, billing, or an audit trail with it. Needs a Blaze billing account
-linked (Firestore and Cloud Run require it, though real usage should stay inside
-the free tier). A budget alert at $5 is in the Terraform and goes up with
-everything else.
+**2. ✅ Project and billing both exist.** This landed after a same-day
+false start worth knowing about, because it explains a burned project ID:
+
+| | |
+|---|---|
+| Project ID | `wawitas` |
+| Project number | `181094228409` |
+| Parent org | **none** — created without `--organization` |
+| Owner account | `israel.rocha.clarke@gmail.com` (personal) |
+| Billing | ✅ `01AC67-128A11-DCD80D`, free trial, `billingEnabled: true` |
+
+**The false start:** the project was first created as `wawitas-pet-shelter`
+inside the employer's `trustcertllc.com` org, at the user's explicit choice.
+Billing there was blocked (`israel.rocha@` had only
+`roles/billing.costsManager`), and the user then judged the whole arrangement
+too complex and moved to a personal free-trial account. `wawitas-pet-shelter`
+was shut down. **Its ID is permanently burned** — Google never releases a
+project ID for reuse, even after deletion. `pet-shelter` was tried next and was
+already taken globally, which is how the ID landed on `wawitas`.
+
+**Two consequences of the personal account, both good:** there is no
+organization parent, so no inherited org policy — the Domain Restricted Sharing
+risk that could have blocked `allUsers` on Cloud Run is gone. And the account
+holds `billing.admin` on its own billing account, so linking took one command
+rather than a colleague.
+
+**⏰ The one date that matters: the free trial is $300 over 90 days, expiring
+around 2026-11-10.** When it ends, services stop and resources are eventually
+deleted unless the account is upgraded to paid. Upgrading does not mean paying —
+real usage here sits well inside the Always Free tier — but it does mean a card
+stays on file. A budget alert at $5 is in the Terraform and goes up with
+everything else. **Set a reminder for ~2026-11-01.**
 
 **3. Terraform is installed** (v1.14.8 verified). `terraform >= 1.9` is assumed.
 

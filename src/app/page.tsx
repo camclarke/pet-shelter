@@ -2,6 +2,25 @@ import Link from 'next/link';
 import { Muro } from '@/components/Muro';
 import { SHELTER } from '@/config/shelter';
 
+/**
+ * REQUIRED — do not remove.
+ *
+ * This page renders <Muro>, which reads Firestore. Without a `revalidate`,
+ * Next.js prerenders it once at BUILD time and serves that HTML forever. The
+ * build runs in Cloud Build with no access to Firestore, so what gets frozen
+ * is the Muro's *error* state — a permanently empty wall on the one page that
+ * matters most, with nothing in the logs to suggest anything is wrong.
+ *
+ * That is exactly what happened on the first deploy (2026-08-12): /adopta and
+ * /adopta/[slug] both carried `revalidate = 300` and recovered on their own;
+ * this page did not, and stayed broken until this line was added.
+ *
+ * 300s rather than `dynamic = 'force-dynamic'` on purpose: a fully dynamic
+ * homepage costs one Firestore query per visitor, while ISR bounds it to ~12
+ * per hour regardless of traffic. See CLAUDE.md § "The cost principle".
+ */
+export const revalidate = 300;
+
 const PASOS = [
   {
     n: '01',

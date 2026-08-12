@@ -5,17 +5,27 @@ variable "project_id" {
 
 variable "region" {
   description = <<-EOT
-    Region for Cloud Run, Artifact Registry, and the Firestore/App Engine
-    location. Defaults to us-central1 for cost: it's consistently one of the
-    cheapest Cloud Run regions and has the broadest free-tier product
-    availability. The tradeoff is latency to Cochabamba, Bolivia — a
-    southamerica-east1 (São Paulo) or southamerica-west1 (Santiago) deployment
-    would be measurably faster for end users at a small cost premium. Revisit
-    if latency ever becomes a real complaint; for a shelter site with this
-    traffic volume it is very unlikely to be.
+    Region for Cloud Run, Artifact Registry, and the Firestore location.
+
+    Defaults to us-east1. It is one of the three US regions covered by the
+    Cloud Storage Always Free tier (with us-central1 and us-west1), it is a
+    cheap Cloud Run region, and it is roughly 1,200 km closer to Cochabamba
+    than us-central1 — South American traffic generally routes through Miami,
+    so us-east1 is the better US choice for this deployment's actual users.
+
+    NOTE: the Firestore location is IMMUTABLE once the database is created.
+    Verified against `gcloud firestore locations list` rather than assumed:
+    both us-east1 and us-central1 are valid Firestore regional locations. An
+    earlier note in CLAUDE.md claimed us-east1 was not — that was inherited
+    from a sibling project and is incorrect.
+
+    southamerica-east1 (São Paulo) or southamerica-west1 (Santiago) are also
+    valid and would be faster still for end users, at a cost premium and
+    outside the free storage tier. Revisit only if latency becomes a real,
+    reported complaint.
   EOT
   type        = string
-  default     = "us-central1"
+  default     = "us-east1"
 }
 
 variable "billing_account" {

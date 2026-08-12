@@ -1,12 +1,12 @@
 {
   "hosting": {
-    "//": "Firebase Hosting fronts the Cloud Run service: CDN caching and a custom domain for free, SSR compute on Cloud Run. serviceId and region must match the Cloud Run service Terraform creates (terraform/modules/cloud_run).",
+    "//": "Firebase Hosting fronts the Cloud Run service: CDN caching and a custom domain for free, SSR compute on Cloud Run. serviceId and region MUST match what terraform/cloud_run.tf actually creates — serviceId is \"${app_name}-${environment}\", not app_name alone, and the region is var.region. Both were wrong until 2026-08-12 and would have silently broken the rewrite.",
     "rewrites": [
       {
         "source": "**",
         "run": {
-          "serviceId": "pet-shelter-web",
-          "region": "us-central1"
+          "serviceId": "pet-shelter-web-production",
+          "region": "us-east1"
         }
       }
     ],
@@ -35,6 +35,8 @@
     "indexes": "firestore.indexes.json"
   },
   "storage": {
+    "//": "`bucket` is required here. Without it the CLI targets Firebase's DEFAULT bucket, which this project does not have — Terraform creates a named bucket (terraform/storage.tf) and links it via google_firebase_storage_bucket, rather than relying on the console's 'Get Started' flow. Deploying without this failed on 2026-08-12 with 'Firebase Storage has not been set up on project wawitas', which is misleading: Storage exists, it just is not the default one. Name must match google_storage_bucket.app, i.e. \"${project_id}-app\".",
+    "bucket": "wawitas-app",
     "rules": "storage.rules"
   },
   "emulators": {

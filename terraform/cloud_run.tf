@@ -16,6 +16,24 @@ resource "google_cloud_run_v2_service" "app" {
     # min_instance_count to 1 only if cold starts become a real, reported
     # problem — that trade costs a small always-on fee and should be made
     # deliberately, not defaulted into.
+    #
+    # ⚠️ KNOWN BENIGN DIFF — `plan` will always show this block as changing:
+    #
+    #   - scaling {
+    #       - manual_instance_count = 0 -> null
+    #       - min_instance_count    = 0 -> null
+    #
+    # It is a google provider quirk, not drift in the infrastructure. Verified
+    # 2026-08-12 by removing `min_instance_count` entirely and re-planning: the
+    # diff was byte-identical, so the trigger is `manual_instance_count` — a
+    # field this config never sets. `apply` accepts it as a no-op and the next
+    # `plan` shows it again.
+    #
+    # Deliberately NOT suppressed with `lifecycle { ignore_changes }`: the only
+    # expression broad enough to hide it would also hide real changes to
+    # max_instance_count, which is a value worth seeing change. Documented
+    # instead. If a plan ever shows something OTHER than these two lines here,
+    # that one is real.
     scaling {
       min_instance_count = 0
       max_instance_count = 4
