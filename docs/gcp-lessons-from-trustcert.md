@@ -120,10 +120,18 @@ service back to whatever tag is in the tfvars. `client`/`client_version` are in
 the list because `gcloud run deploy` stamps them and they'd otherwise produce a
 permanent diff.
 
-**This repo's `terraform/cloud_run.tf` has no `lifecycle` block.** That is
-correct *today* (no CI, image is an explicit variable) and becomes a live bug
-the moment a deploy pipeline exists. Add it in the same commit as the pipeline,
-not after.
+~~**This repo's `terraform/cloud_run.tf` has no `lifecycle` block.**~~
+**Closed 2026-08-12**, in the same commit as the pipeline, exactly as this
+instruction said to. `ignore_changes` covers `image`, `client`, and
+`client_version` — and **the block was then proven rather than assumed**: after
+CI deployed a commit-SHA tag, `terraform plan` showed only the known-benign
+`scaling` diff and did *not* propose reverting to the stale tag still sitting in
+`terraform.tfvars`. That is the rollback this lesson predicts, observed not
+happening.
+
+One deliberate divergence: `template[0].scaling` is **not** ignored here. That
+would also hide real changes to `max_instance_count` — see the reasoning in
+`terraform/cloud_run.tf`.
 
 ### Backend via `-backend-config`, never hardcoded
 
@@ -218,12 +226,12 @@ Found by diffing this repo's stack against theirs. Ordered by when they'd bite.
 | 1 | `monitoring.googleapis.com` not in `apis.tf`, but `budget.tf` creates a `google_monitoring_notification_channel` | Possible **apply failure** on a fresh project. Plan won't catch it. |
 | 2 | `firebasestorage.googleapis.com` not in `apis.tf`, but `storage.tf` creates a `google_firebase_storage_bucket` | Same class — apply-time only |
 | 3 | `cloudresourcemanager.googleapis.com` not enabled | Project-level IAM operations can fail on a fresh project |
-| 4 | No `lifecycle { ignore_changes }` on Cloud Run | Fine today; rolls back prod the day CI exists (§3) |
+| 4 | ~~No `lifecycle { ignore_changes }` on Cloud Run~~ | ✅ **Closed 2026-08-12** with the pipeline, and verified by a plan that declined to roll back (§3) |
 | 5 | No `user_project_override` / `billing_project` on the providers | Quota/billing attributed to the ADC quota project — the exact hazard this repo is guarding against |
 | 6 | Firestore has `delete_protection_state` but **no PITR and no backup schedule** | An accidental delete is unrecoverable. Their 2026-07-12 incident is precisely this. |
 | 7 | No uptime check, no 5xx alert | Nothing tells you the site is down except a person noticing |
 | 8 | No Secret Manager secrets declared | Fine now (none needed); the pattern and its ordering trap are in §3 for when Maps/reCAPTCHA keys land |
-| 9 | No WIF pool / CI service account | Deploys will be manual until this exists (§7) |
+| 9 | ~~No WIF pool / CI service account~~ | ✅ **Closed 2026-08-12** — `terraform/cicd.tf`, copied from §7 nearly wholesale (§7) |
 | 10 | `Dockerfile` runner stage does not set `ENV HOSTNAME=0.0.0.0` | See §9 — a real Cloud Run startup-probe failure mode |
 
 Items 1–3 are the ones that turn the first `terraform apply` into a debugging
@@ -314,6 +322,22 @@ indexes are a manual step, which is their gotcha #31 and the direct cause of one
 security incident and one outage (§8). They know it's a gap and left it open —
 if you wire CI here, consider closing it, but only with a rules test in front of
 it, because an unreviewed automatic rules deploy is worse than a manual one.
+
+**Built here 2026-08-12** (`terraform/cicd.tf`, `.github/workflows/`), following
+this section closely enough that it is worth recording only where it differs:
+
+- **`run.admin` is project-level, not bound to the one service.** Cloud Run v2
+  operations are project-scoped resources, so a service-level binding covers
+  `services.update` and then fails polling the operation it returns. Everything
+  else is scoped tight — `artifactregistry.writer` to the one repository,
+  `serviceAccountUser` to the runtime SA alone.
+- **Three APIs, not one.** `iam` fails at apply; `sts` and `iamcredentials` fail
+  at the first workflow run, which is a worse place to discover them.
+- **The two outputs are GitHub repository *variables*, not secrets.** They are
+  resource identifiers and useless without a matching OIDC claim — that being
+  the entire point of WIF — and as variables a failed auth step prints what it
+  tried instead of `***`.
+- **The rules/indexes gap was left open here too**, for the reason given above.
 
 ---
 

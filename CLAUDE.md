@@ -31,7 +31,7 @@ scanned chip resolves to a name and a phone call.
 | Pet identity (RFID microchip) | ✅ Modelled + validated, 10/10 unit tests — `src/lib/microchip.ts` |
 | Medical history + feeding | ✅ Modelled — not yet surfaced in any UI |
 | Template config for other shelters | ✅ `src/config/shelter.ts`, `README.md`, MIT licensed |
-| Dockerfile + Cloud Run target | ✅ **Built and deployed 2026-08-12.** Built by **Cloud Build** — there is no local Docker on this machine. `ENV HOSTNAME=0.0.0.0` is proven, not assumed: Cloud Run's startup probe passed |
+| Dockerfile + Cloud Run target | ✅ **Built and deployed 2026-08-12.** Now built by **GitHub Actions** (`docker buildx`); the first build was Cloud Build, since there is no local Docker on this machine. `ENV HOSTNAME=0.0.0.0` is proven, not assumed: Cloud Run's startup probe passed |
 | Terraform | ✅ **APPLIED — 40 resources live.** GCS backend in `gs://wawitas-terraform-state`. One known-benign perpetual diff on `cloud_run scaling`, documented in `cloud_run.tf` |
 | **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf` |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
@@ -73,6 +73,8 @@ scanned chip resolves to a name and a phone call.
 - **2026-08-12** — **Firestore rules and indexes deployed.** After `firebase logout` / `firebase login` as the personal account, the first-ever deploy of `firestore.indexes.json` **rejected the file**, which found two bugs that had sat undetected precisely because the file had never been deployed and nothing else validates it. Both were single-field entries declared as composite indexes, which Firestore refuses with *"this index is not necessary, configure using single field index controls"*: `scans`/`scannedAt` was already automatic and was deleted outright, and `identity`/`code` — **the microchip lookup, the single most important query in the system** — had to move to `fieldOverrides`, because a COLLECTION_GROUP scope on a *single* field is a field-level setting, not an index. That fix ran straight into this file's own inherited warning that **a `fieldOverride` replaces rather than merges**: the default COLLECTION ASC and DESC entries are now re-listed explicitly, since dropping them would have silently disabled ordinary per-pet queries on `code`. Deployed result verified by API, not by the CLI's success message: 10 composite indexes plus the `code` field override. **Rules compiled and released, but their enforcement remains completely untested** — no Firebase web app exists, so no client can reach Firestore at all. `storage.rules` is still undeployed: the CLI demands a Firebase *default* bucket while this project deliberately uses a Terraform-managed named one, and setting `storage.bucket` in `firebase.json` did not satisfy it. Confirmed that is not an exposure — `wawitas-app` carries no `allUsers` binding, has uniform bucket-level access, and grants `objectAdmin` only to the Cloud Run service account.
 - **2026-08-12** — **Moved off the employer's org entirely, onto a personal free-trial account, and billing finally works.** The user judged the trustcertllc.com arrangement too complex — a fair call, since it had already cost a blocked billing link, an unreadable org policy, and a dependency on a colleague. `wawitas-pet-shelter` was shut down. **Two project IDs are now permanently burned:** Google never releases an ID for reuse after deletion, so `wawitas-pet-shelter` is gone forever, and `pet-shelter` turned out to be already taken globally by someone else. The project is **`wawitas`** (`181094228409`) on `israel.rocha.clarke@gmail.com`, with **no organization parent** — `gcloud projects create` without `--organization` leaves the project outside the org Google auto-provisioned for the account. That kills the single largest unknown in the apply: there is no org policy to inherit, so the Domain Restricted Sharing risk to `allUsers` on Cloud Run is gone. Billing linked in one command (`billingEnabled: true`) because the user holds `billing.admin` on their own account. **The trial is $300 over 90 days, not 90 months as first understood — it expires around 2026-11-10, and services stop unless the account is upgraded to paid.** The new structural fact is that **two Google identities now share one machine**, and ADC is a single file that cannot hold both. This bit immediately: an `application-default login` run as the work account kept `quota_project_id: wawitas-pet-shelter`, a project deleted minutes earlier, leaving a credential useless to both projects. Offered per-project `CLOUDSDK_CONFIG` directories versus manual re-login; **the user chose manual switching.** Worth recording from that investigation: `google-auth-library` *does* honour `CLOUDSDK_CONFIG` (verified in `node_modules/.../util.js:162`), but Terraform's Go provider does not, so the config-dir approach needs `GOOGLE_APPLICATION_CREDENTIALS` alongside it — which is why it was judged more machinery than it is worth. One consolation in the split: the two accounts share no access, so a forgotten switch now fails with a permission error instead of silently writing to the wrong project. The 2026-08-07 class of incident is structurally impossible now.
 
+- **2026-08-12** — **CI/CD is live and a deploy has actually run through it.** Every deploy before this was hand-driven: `gcloud builds submit`, bump `container_image` in tfvars, `terraform apply`. Now a push to `main` builds, pushes a commit-SHA tag, rolls a Cloud Run revision, and checks the URL answers. **No service-account key exists** — GitHub's OIDC token is exchanged via STS, and the pool provider's `attribute_condition` pins the repository, which is the only thing separating this repo from every other one presenting a token from the same shared issuer. The CI service account is separate from the runtime one, so CI cannot read Firestore and the runtime cannot deploy. Applied 10 resources (40 total now). **The `lifecycle { ignore_changes }` on the Cloud Run image landed in the same commit as the pipeline**, as `docs/gcp-lessons-from-trustcert.md` §3 explicitly instructs, and — unusually for this project — **it was then proven rather than assumed**: after CI deployed `app:7c62d54…`, `terraform plan` showed only the known-benign `scaling` diff and did *not* propose reverting to `20260812-2`, the tag still sitting in `terraform.tfvars`. That is the silent production rollback this file has been warning about since 2026-08-08, observed not happening. Three findings worth keeping. (1) **`run.admin` had to stay project-level.** Cloud Run v2 operations are project-scoped resources, not children of the service, so a service-level binding covers `services.update` and then fails polling the operation it returns — the failure would look like a broken deploy, not a missing grant. (2) **WIF is three APIs, not one.** `iam` fails at apply; `sts` and `iamcredentials` fail at the *first workflow run*, which is a strictly worse place to find out — the same apply-time-blindness lesson one layer further out. (3) **The pipeline found a real vulnerability on its first run.** `npm audit --omit=dev` reported nanoid 3.3.16 (high, GHSA-2v37-7h3g-55p8), reached through `next → postcss`. Not a regression — the advisory postdates the 2026-08-08 audit, which is precisely the argument for the step existing. Fixed with an `overrides` entry, matching how `sharp`/`postcss`/`uuid` were already handled; back to 0 vulnerabilities. The audit step is deliberately `continue-on-error` — a newly-published advisory against a transitive dependency should warn, not block an unrelated PR. **Rules and indexes are deliberately still not in the pipeline:** an unreviewed automatic rules deploy is worse than a manual one until there is a rules test in front of it. `terraform/**` is in `paths-ignore` for the same reason — infrastructure stays a deliberate human `apply`.
+
 ---
 
 ## Next session — start here
@@ -93,9 +95,12 @@ documents.**
 |---|---|---|
 | **Live site** | `GET /` | ✅ **HTTP 200**, correct Spanish copy, wall shows its empty state from a live query |
 | **Live site** | `GET /adopta` | ✅ HTTP 200, empty state correct |
-| Container image | `gcloud builds submit` | ✅ **built + pushed**, tag `20260812-2`. First build in this project's history |
-| Infra | `terraform apply` | ✅ **30 resources live**, GCS backend |
+| Container image | GitHub Actions `docker buildx` | ✅ **built + pushed**, tag = commit SHA. `gcloud builds submit` was the bootstrap path and is now the fallback, not the norm |
+| Infra | `terraform apply` | ✅ **40 resources live**, GCS backend |
 | Infra | `terraform plan` | 🟡 one **known-benign** diff on `cloud_run` `scaling` — see `cloud_run.tf`. Anything else is real |
+| **CI** | GitHub Actions, PR #1 | ✅ typecheck + 10/10 tests + build + **0 vulnerabilities**, 47s |
+| **CD** | GitHub Actions, push to `main` | ✅ **built, pushed, deployed, verified 200** — keyless via WIF, 3m23s |
+| **CD ↔ Terraform** | `terraform plan` after a CI deploy | ✅ **does NOT roll the image back** — `ignore_changes` proven, not assumed |
 | Firestore | live query via Admin SDK | ✅ connects, returns 0 docs |
 | GCP project | `gcloud projects describe wawitas` | ✅ `ACTIVE`, `us-east1`, **no org parent** |
 | Billing | `gcloud billing projects describe wawitas` | ✅ `billingEnabled: true` — trial expires ~2026-11-10 |
@@ -272,6 +277,29 @@ Found by running it (2026-08-08):
 - **Do not add mock/fallback data to `pets-server.ts`** to make the wall look
   populated. It was tried on 2026-08-08, collided with the image-host rule
   above, and was reverted. Seed real documents instead.
+
+From the CI/CD pipeline (2026-08-12):
+
+- **Never add `--set-env-vars` / `--update-env-vars` to `deploy.yml`.** Terraform
+  owns the Cloud Run service's entire env list, so a CI-injected variable it
+  does not declare gets planned for deletion on every apply — and a plain env
+  silently overrides a Secret Manager binding of the same name. The workflow
+  carries this warning inline. `NEXT_PUBLIC_*` are the exception and are *not*
+  env vars: Next inlines them at `next build`, so they are build args, and
+  setting them on Cloud Run does nothing whatsoever.
+- **`terraform.tfvars`' `container_image` is stale on purpose** and must not be
+  "corrected" to match production. See the comment in that file.
+- **A commit touching only `**.md`, `docs/`, `design/`, or `terraform/` does not
+  deploy** — `paths-ignore` in `deploy.yml`. Infrastructure stays a deliberate
+  human `apply`. If a deploy seems not to have fired, check this before
+  suspecting the pipeline.
+- **The two GitHub repository variables are not secrets, and must be reset if
+  the WIF pool is ever recreated.** `terraform output workload_identity_provider`
+  and `ci_service_account`. A recreated pool gets a new resource path and auth
+  fails with a message about the audience, which does not obviously point here.
+- **`attribute_condition` in `terraform/cicd.tf` is the entire trust boundary.**
+  Every GitHub Actions workflow on the planet presents a token from the same
+  issuer. Broadening or removing that condition hands deploy rights to anyone.
 
 Known from before:
 
