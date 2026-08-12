@@ -31,7 +31,16 @@ locals {
     # build`. Not referenced by any resource here — Terraform does not build
     # images — but the build step is part of the deploy path, so the API
     # belongs in the declared set rather than being enabled by hand.
-    "cloudbuild.googleapis.com"
+    "cloudbuild.googleapis.com",
+
+    # ── Added for CI/CD (cicd.tf) ───────────────────────────────────────────
+    # Workload Identity Federation is three services, not one, and only the
+    # first is obvious. `plan` cannot see any of this: the pool resource fails
+    # at apply, and the STS/token-exchange pair fails later still — at the
+    # first GitHub Actions run, which is a worse place to find out.
+    "iam.googleapis.com",            # the pool and provider resources themselves
+    "sts.googleapis.com",            # exchanges GitHub's OIDC token for a GCP token
+    "iamcredentials.googleapis.com"  # impersonates the CI service account with it
   ]
 }
 
