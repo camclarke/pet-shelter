@@ -25,8 +25,8 @@ Nothing below can ship until these land, and they are already the top of
 `CLAUDE.md` names repeatedly: a plan that validates is not a plan that works.
 
 There is also a hard date. **The GCP free trial expires ~2026-11-10.** This plan
-adds the project's first per-request paid API (Vertex AI) and, if X is ever
-enabled, its first per-post one. Both land inside that window.
+adds the project's first per-request paid API — the **Gemini API via AI Studio**
+— and its first API-key credential. Both land inside that window.
 
 ---
 
@@ -229,7 +229,48 @@ field on `pets` so a token can be revoked and reissued without touching the
 animal's record, and so the reverse lookup is one `get()` by document id rather
 than a query.
 
-### 2.6 `socialPosts/{postId}` — new, admin-only
+### 2.6 `api_usage_daily/{date__process__model}` — new, server-only
+
+Playbook §4.1, and it goes in **at the first AI call site, not later**. A bounded
+daily rollup — `~processes × models × 365` documents/year — incremented by
+`recordAiUsage`.
+
+```ts
+export interface AiUsageDaily {
+  date: string;          // UTC, YYYY-MM-DD
+  process: string;       // see the taxonomy below
+  model: string;         // the resolved id, for cost attribution
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  estCostUsd: number;
+}
+```
+
+Process taxonomy in the shelter's vocabulary, not the code's:
+
+| Process | Label |
+|---|---|
+| `carnet_extract` | Lectura de carné de vacunación |
+| `social_copy` | Redacción para redes *(deferred — §5)* |
+
+**No `groundingRequests` field.** The playbook's rollup carries one; we do not
+ground, and a column that is structurally always zero invites someone to later
+assume grounding is metered when it is not. If grounding is ever added, the
+column arrives with it.
+
+Rules: **server-side access only.** Nothing client-side reads or writes this.
+
+Two properties that are non-negotiable, both from playbook §4.1: `recordAiUsage`
+**never throws** (an observation that can break the thing it observes is worse
+than no observation), and the structured log line is emitted **synchronously** so
+detail survives a Cloud Run cold shutdown that drops the Firestore write.
+
+### 2.7 `socialPosts/{postId}` — ⏸ deferred, not built
+
+> **Deferred at the user's direction, 2026-08-16.** Facebook and Instagram only
+> when it happens; X and TikTok are out. Kept here as a record of the intended
+> shape so the decision does not get re-litigated — **do not build this yet.**
 
 ```ts
 export type SocialPlatform = 'facebook' | 'instagram' | 'x' | 'tiktok';
@@ -280,6 +321,7 @@ a stranger to message about a specific animal, and that only needs steps 1–2.
 ```
 1. Identity      species, name, sex, size, estimated age, breed
                  → microchip scan/entry (validateMicrochip already exists)
+                 → DEDUPLICATION CHECK — see 3.1
 2. Media         drag-drop photos + video. First photo = cover.
                  → Spanish alt text required on photos
 3. Story         temperament, story, commitments, good-with-children/pets
@@ -287,9 +329,56 @@ a stranger to message about a specific animal, and that only needs steps 1–2.
                  or manual entry
 5. Care          feeding plan, restrictions
 6. Publish       preview the public card + the expediente
-                 → generate social drafts (§5)
-                 → publish
+                 → batched write to pets/{petId} + subcollections
+                 → mint qrTokens/{token}
 ```
+
+### 3.1 Re-admission: the chip is a deduplication key, not just a field
+
+Shelters take the same street animal in more than once — returned adoptions,
+recaptured strays, transfers back from a foster. A linear "create new pet" wizard
+produces a second record for the same animal, and then the medical history is
+split across two documents with neither one complete. That is the failure this
+system exists to prevent.
+
+So step 1 is not just entry, it is a **lookup**:
+
+```
+chip entered → validateMicrochip() → findPetByMicrochip()
+                                          │
+              ┌───────────────────────────┴──────────────────────┐
+              │                                                  │
+        resolves to a pet                                  no match
+              │                                                  │
+    ┌─────────┴──────────┐                             continue as new intake
+    │                    │
+ Reabrir expediente   Es otro animal
+    │                 (chip mis-read, or a
+    │                  mis-linked record)
+    ▼                    ▼
+ skip to step 2,      flag for admin;
+ append a new         NEVER silently
+ custody + scan       create a duplicate
+```
+
+Three things follow:
+
+- **Reopening writes history, it does not overwrite.** A re-admission appends a
+  new `CustodyEvent` and a `ScanEvent` with `context: 'intake'`. The existing
+  medical records, microchip identity and former names stay. `Pet.status` moves
+  back to `refugio`, and the current name goes to `formerNames` if it changed.
+- **`findPetByMicrochip()` already exists** and returns the public tier only.
+  Intake runs as an admin, so this path needs an admin-scoped variant that can
+  show enough to confirm identity — or it reuses the existing one and links
+  through to the full expediente.
+- **A chip that resolves to an unexpected animal is a real signal, not an
+  error.** `ScanEvent.codeRead` exists precisely to record a mismatch. Surface
+  it; do not let the wizard "fix" it by creating a fresh record.
+
+**Animals without a chip get no deduplication.** Most street rescues arrive
+unchipped, so this check protects the minority case. A name-and-photo similarity
+prompt is possible later; it is not in this plan, and pretending otherwise would
+oversell the guarantee.
 
 **Steps 3–5 are skippable.** A rescue arriving at 22:00 needs to be on the wall,
 not blocked on a feeding plan. Publishing with only steps 1–2 is a supported
@@ -312,43 +401,129 @@ path, and the admin dashboard shows what's incomplete rather than refusing.
 
 ## 4. Gemini vaccination-card extraction
 
-### 4.1 Route it through Vertex AI, not the Gemini Developer API
+**Decided 2026-08-16: Gemini API via AI Studio (`generativelanguage.googleapis.com`)
+with an API key. Not Vertex AI.** This follows
+[`gemini-api-playbook.md`](gemini-api-playbook.md), which is ~4 months of
+production experience on this exact surface from a sibling stack. Everything in
+this section defers to that document; where the two disagree, the playbook wins.
 
-Both serve the same models. Vertex authenticates with the **Cloud Run runtime
-service account via ADC** — no API key to create, store, rotate, or leak. The
-Developer API needs a key, which means a Secret Manager entry, a rotation story,
-and one more credential on a project that already documents having three
-credential stores and two identities.
+### 4.1 Setup
 
-Cost is the counter-argument and it is small: Flash-tier pricing against one or
-two card images per animal is negligible at shelter volume. **It is not zero**,
-which makes it the project's second deliberate non-zero line item after Firestore
-backups. Budget alert already exists.
+Per playbook §1 and §15, day one:
 
-Requires, in Terraform: `aiplatform.googleapis.com` enabled, and
-`roles/aiplatform.user` on the runtime service account. Per `CLAUDE.md`'s
-most-repeated lesson, **an unenabled API fails at apply, not at plan** — expect
-this one to bite exactly once.
+```jsonc
+"ai":              "^6.0.159",   // AI SDK core — all real-time paths
+"@ai-sdk/google":  "^3.0.62",    // Gemini provider
+"@google/genai":   "2.8.0",      // PINNED. Files API only — see 4.5
+"zod":             "^3.24.1"     // v3, not v4 — generateObject schemas
+```
 
-### 4.2 Extraction contract
+Five modules before the first call, not after:
+
+| File | Why |
+|---|---|
+| `src/lib/ai/google.ts` | Provider on **`v1beta`** with an explicit `x-goog-api-key` header. The v1 surface silently lacks features |
+| `src/lib/ai/model-ids.ts` | Every model ID in one place, with **persistence-stable keys separate from IDs** |
+| `src/lib/ai/pricing.mjs` | Pure price table with a **Flash-tier fallback, never 0**, plus `estimateCostUsd`. Unit-tested under `node --test` |
+| `src/lib/ai/metered.ts` | `recordAiUsage` — never throws, `void`-called. **Wired at the very first call site** |
+| `src/lib/ai/schemas.ts` | The Zod schemas that are both the API contract and the parse boundary |
+
+Also alias `GOOGLE_GENERATIVE_AI_API_KEY = GEMINI_API_KEY`; some SDK paths read
+the former.
+
+### 4.2 The cost shape here is the easy one — and it is worth saying why
+
+The playbook's dominant cost risk is **grounded search**, billed per search query
+at $0.014, invisible to token counters, and 73% of one month's bill. **We use no
+grounding at all.** Card extraction reads an uploaded image; copy generation reads
+a Firestore record. Neither searches the web, and neither should ever be given
+`googleSearch` as a tool.
+
+That removes the single biggest failure mode in the playbook by construction. Say
+so at the call sites, because playbook §5.3 records grounding creeping back in via
+an unrelated commit and running for **five weeks** unnoticed.
+
+What still applies: metering from day one, a price table that falls back to Flash
+rather than zero, and reading `usage.reasoningTokens` — thinking tokens bill as
+output and `maxOutputTokens` does not bound them.
+
+### 4.3 Extraction contract
 
 Runs as a Server Action on the existing Cloud Run service. No new infrastructure.
 
-- **Structured output with a JSON schema.** Gemini supports JSON Schema across
-  current models; a Zod schema serves as both the API contract and the parse
+- **`generateObject` + a Zod v3 schema** (playbook §6). The schema is the parse
   boundary, so malformed output fails loudly instead of writing garbage.
 - **Prompt in Spanish.** The cards are Spanish, handwritten, often stamped, often
-  faded. Ask for `null` on any field that is not legible.
-- **Per-field confidence, 0–1, required.** Anything below threshold is
-  highlighted in the review UI rather than silently accepted.
-- **Never invent a date.** This is the instruction that matters most. A
+  faded.
+- **Verbatim transcription, in the card's own wording** (playbook §6.3). Do not
+  let the model normalise `"quíntuple"` into a canonical vaccine name or reformat
+  a date. A silently normalised value cannot be checked against the image, and
+  §5 of the research doc already decided product names stay as printed.
+- **Return the snippet it read, per field.** Alongside each value, the model
+  returns the literal text it believes it saw. This is our substitute for the
+  playbook's post-hoc verbatim validator — we cannot string-match against a
+  source document because the source is an image, so the check has to be a human
+  looking at *"I read `12/03/25` here"* next to the original. It makes review
+  fast enough to actually happen.
+- **Per-field confidence, 0–1, required.** Below threshold is highlighted rather
+  than silently accepted.
+- **Never invent a date.** `null` is always the correct answer when unsure. A
   hallucinated vaccination date is a health decision made on fabricated data, and
-  for rabies it has legal consequences. `null` is always the correct answer when
-  unsure.
+  for rabies it carries legal consequences.
 - **The card image is retained** as `sourceDocument` — the field already exists.
-  A human reviewer needs to see the original next to the extraction.
 
-### 4.3 The review gate is not optional
+**Failure direction, stated explicitly** (playbook §6.2, the most transferable
+idea in it): this is a **persistence gate into a medical record**, so it
+**fails toward dropping**. A missing field costs one manual entry; a wrong
+vaccination date is served, trusted, and acted on for years.
+
+### 4.4 Store the model key, not the model ID
+
+Playbook §2.1: model IDs churn every few months; a key written into a database
+can never be renamed. `MedicalRecord.source` is currently the string
+`'llm-extracted'`. Extend the provenance to carry **which** model produced it:
+
+```ts
+  source: 'manual' | 'llm-extracted';
+  /** Stable KEY, never the raw model id. e.g. "gemini-3-flash". */
+  extractedByModel: string | null;
+  extractedAt: Timestamp | null;
+```
+
+Without this, an accuracy problem traced to one model generation cannot be
+scoped — you cannot find the records it wrote.
+
+### 4.5 Inline the image; the Files API is a later problem
+
+Playbook §9: inline data caps at **~20 MB** per request and base64 inflates ~33%,
+so the practical inline ceiling is ~15 MB of source image. A phone photo of a
+vaccination card is 2–5 MB. **Inline is correct here**, which keeps every
+real-time path on the AI SDK and `@google/genai` unused.
+
+Revisit only if someone uploads a multi-page PDF of a full clinical history. If
+that day comes, the playbook's rules apply in full: poll to `ACTIVE` at upload
+time not request time, cache the routing decision below the 48 h retention, and
+note that AI SDK v6 file parts use **`mediaType`, not `mimeType`** — `mimeType`
+type-checks and throws at runtime.
+
+### 4.6 Two-extractor consensus — phase 2, and here is the honest case
+
+Playbook §6.1 runs the same schema on two model tiers and escalates
+disagreements. Measured reality there: a Flash + Flash-Lite pair **disagrees on
+roughly 100% of extractions**, and arbitration cost ~$0.017 per item.
+
+Normally that ratio argues against it. Here it argues *for* it, for a reason
+specific to this flow: **we already mandate human review, so the scarce resource
+is the reviewer's attention, not the model's verdict.** A second extractor's
+disagreement is a precision-targeted *"look at this field"* marker. We do not need
+arbitration at all — the human is the arbiter, and they were going to be there
+anyway.
+
+Not phase 1: it doubles extraction cost and complexity to improve a review step
+that has not yet been used once on a real card. Build the single-extractor path,
+measure how often review actually catches something, then decide.
+
+### 4.7 The review gate is not optional
 
 `MedicalRecord.source` and `confirmedBy` **already exist** in the schema — the
 2026-08-07 design anticipated this exactly. Honour it:
@@ -365,7 +540,17 @@ review step is not ceremony.
 
 ---
 
-## 5. Social syndication
+## 5. Social syndication — ⏸ DEFERRED
+
+> **Decided 2026-08-16: do not build this now.** When it is built, it is
+> **Facebook and Instagram only**. X and TikTok are out — the research below is
+> why, and it is kept so the question is not reopened from scratch.
+>
+> Nothing in §9's build order depends on this section. `socialPosts` (§2.7) is
+> not created, no Meta app is registered, and no platform adapter is written.
+> The one thing worth doing early is the **one-minute check in §5.3**, because
+> if it fails, the eventual plan changes shape entirely and it is better to know
+> now than after building an intake flow that assumes a publish target.
 
 ### 5.1 What is actually possible, per platform
 
@@ -402,16 +587,20 @@ shelter's content is overwhelmingly photographic. A photo carousel is possible
 but it is not what performs there. The honest recommendation is that TikTok
 deserves a human posting real video, not an API syndicating a database record.
 
-### 5.2 Recommendation
+### 5.2 Decision
 
-**Phase 1 — Facebook + Instagram only.** Both free, both no-review, and both are
-where Wawitas' 1.9K followers already are.
+**Facebook + Instagram only, and not yet.** Both free, both avoid App Review,
+and both are where Wawitas' 1.9K followers already are.
 
-**Phase 2 — Threads**, if wanted. Free, same Meta app.
+**X and TikTok are out**, not deferred. X charges ~$0.20 per post carrying a URL
+and every post we would generate carries one; TikTok demands an audit to escape
+`SELF_ONLY` and is a video-first platform for photo-first content. Neither is a
+close call. If either is revisited, it should be because something in the tables
+above changed, not because the idea resurfaced.
 
-**Phase 3 — X and TikTok behind per-platform feature flags**, defaulting off,
-each with its cost and audit status documented at the flag. Build the syndication
-layer platform-agnostic so adding one is an adapter, not a redesign.
+When this is built, the syndication layer should still be written
+platform-agnostic so Facebook and Instagram are two adapters rather than two
+code paths — but that is a phase-2 design note, not work to do now.
 
 ### 5.3 ⚠️ Verify the Facebook target is a Page, not a profile
 
@@ -442,7 +631,10 @@ be queued. Three reasons, and the first is sufficient:
 
 ### 5.5 LLM copy generation
 
-Same Vertex AI path as §4.
+Same AI Studio path as §4 — provider, metering and price table are shared, and
+this becomes a second `process` tag (`social_copy`) on the same rollup. Its
+failure direction is **silence**: if generation fails, there is simply no draft
+to approve, which is a non-event.
 
 - **Input is the structured record only.** The prompt receives explicit fields
   and is instructed to use nothing else. It must not infer temperament, health,
@@ -551,14 +743,25 @@ public with a phone and no scanner — which is most finders. Neither is a track
 
 | Change | Where | Note |
 |---|---|---|
-| Enable `aiplatform.googleapis.com` | `terraform/apis.tf` | Fails at apply, not plan |
-| `roles/aiplatform.user` on runtime SA | `terraform/` | Least privilege; not the CI SA |
-| Secret Manager: FB/IG tokens | `terraform/` + Cloud Run `secret_key_ref` | **Create the secret version before the binding resolves**, or the revision fails to start |
-| Cloud Run env vars | Terraform only | Never `--set-env-vars` in CI. A plain env silently overrides a secret ref of the same name |
+| **Secret Manager: `GEMINI_API_KEY`** | `terraform/` + Cloud Run `secret_key_ref` | **Create the secret version BEFORE a `version = "latest"` binding resolves**, or the revision fails to start. `CLAUDE.md` already carries this lesson |
+| `GOOGLE_GENERATIVE_AI_API_KEY` alias | same secret, second env entry | Some SDK paths read the alias |
+| Cloud Run env vars | Terraform only | Never `--set-env-vars` in CI. A plain env silently overrides a `secret_key_ref` of the same name |
 | Storage rules deployed | blocked | Media upload makes this urgent. Needs the Firebase default-bucket decision |
 | `public_access_prevention` on `wawitas-app` | currently `inherited` | Decide now that media is real |
-| New composite indexes | `firestore.indexes.json` | `socialPosts(status, petId)`, `adoptionApplications(petId, status)`, `media(tier, order)` |
-| Rules for 5 new collections | `firestore.rules` | Still deployed by hand, deliberately |
+| New composite indexes | `firestore.indexes.json` | `adoptionApplications(petId, status)`, `media(tier, order)` |
+| Rules for 4 new collections | `firestore.rules` | `petDrafts`, `adoptionApplications`, `qrTokens`, `api_usage_daily`. Still deployed by hand, deliberately |
+
+**No Vertex AI, so no `aiplatform.googleapis.com` and no
+`roles/aiplatform.user`.** The AI Studio surface is a public API reached with a
+key — it needs no GCP project binding, no ADC, and no IAM grant. That is one
+fewer apply-time API failure, and it sidesteps the ADC hazard `CLAUDE.md`
+documents at length: an AI call now cannot resolve to the wrong project, because
+it does not resolve to a project at all.
+
+The tradeoff is honest and is the thing to watch: **an API key is a credential
+this project did not previously have.** It goes in Secret Manager, never in
+`.env.local` committed anywhere, and never in `plan` output — the sibling stack
+leaked a salt that way and had to rotate it.
 
 **Storage rules move from "not urgent" to blocking.** The current assessment in
 `CLAUDE.md` — that the undeployed `storage.rules` is not an exposure — rests on
@@ -569,28 +772,39 @@ both halves of that.
 
 ## 9. Build order
 
-Sequenced so something is verifiable at each step, and so the riskiest external
-dependency is checked before anything is built on it.
+Sequenced so something is verifiable at each step. With social deferred there is
+no longer a risky external dependency to check first — every step below is
+self-contained.
 
 | # | Step | Unblocks |
 |---|---|---|
-| **0** | **Verify the FB target is a Page, not a profile** (§5.3) | All of §5. One minute. Do it first |
 | 1 | Firebase web app + `NEXT_PUBLIC_*` | Everything client-side |
 | 2 | Auth: email + Google, admin custom claim | Every admin screen |
 | 3 | Seed one real pet by hand | Proves the core loop end-to-end |
 | 4 | Storage rules + media upload + derivatives | §2.2 |
 | 5 | Admin intake wizard, steps 1–3, manual only | An admin can publish an animal |
-| 6 | `MedicalRecord` extensions + manual medical entry | §2.1 |
-| 7 | Vertex AI plumbing + card extraction + review gate | §4 |
-| 8 | QR tokens + `/id/{token}` + print sheet | §7 |
-| 9 | Adoption applications + admin queue | §6 — **first real test of the rules** |
-| 10 | Social: generation → draft → approve | §5.5 |
-| 11 | Facebook adapter | Real posting |
-| 12 | Instagram adapter | Real posting |
-| 13 | Threads / X / TikTok behind flags | Optional, costed |
+| 6 | **Re-admission / dedup path** | §3.1 — cheap now, expensive once duplicates exist |
+| 7 | `MedicalRecord` extensions + manual medical entry | §2.1, §4.4 |
+| 8 | **AI foundations**: provider, `model-ids`, `pricing.mjs`, `recordAiUsage` | §4.1 — before the first call |
+| 9 | Card extraction + review gate | §4.3, §4.7 |
+| 10 | QR tokens + `/id/{token}` + print sheet | §7 |
+| 11 | Adoption applications + admin queue | §6 — **first real test of the rules** |
+| — | ⏸ *Social syndication* | **Deferred** — §5 |
 
-Steps 5 and 9 are each independently useful if the plan stalls: 5 gives the
-shelter a working admin console, 9 gives them a screening queue.
+**Step 8 is its own step deliberately.** The playbook's §15 checklist puts
+metering and the price table on day one, and its §4.2 records the cost of not
+doing so: 14 unmetered call sites found in an audit, and per-turn classifiers
+left unmeasured for months on the assumption they were too small to matter.
+*"Too small to matter"* should be a claim the dashboard can **check**, not an
+assumption baked into a blind spot. Wiring `recordAiUsage` at the first call site
+costs an hour; retrofitting it costs an audit.
+
+**Step 6 moved earlier than strict dependency order requires**, for a similar
+reason: deduplication is cheap before there is data and expensive after, because
+retrofitting means merging records that have already diverged.
+
+Steps 5 and 11 are each independently useful if the plan stalls: 5 gives the
+shelter a working admin console, 11 gives them a screening queue.
 
 ---
 
@@ -600,44 +814,64 @@ shelter a working admin console, 9 gives them a screening queue.
 |---|---|---|
 | Firestore, Cloud Run, Storage | **$0** | Free tier is ~50× this shelter's volume |
 | Firestore PITR + backups | small, existing | Already the first deliberate line item |
-| **Vertex AI — card extraction** | cents/month | ~1–2 images per animal, Flash tier |
-| **Vertex AI — post generation** | cents/month | 3–4 short generations per animal |
-| Facebook + Instagram | **$0** | No paid tier involved |
-| **X, if enabled** | **~$0.20 per post** | Every post carries a URL. ~$4/mo at 20 animals |
-| TikTok | $0 + audit effort | Free API, weeks of approval |
+| **Gemini — card extraction** | cents/month | ~1–2 inline images per animal, Flash tier |
+| **Grounded search** | **$0 — structurally** | We use none. This is the SKU that was 73% of the sibling stack's bill |
+| *Social (deferred)* | — | Facebook + Instagram are free when built |
 
-The bill stays effectively zero unless X is switched on. **The real financial
-event is the trial expiring ~2026-11-10**, not anything in this plan.
+**The bill stays effectively zero.** With X and TikTok out and grounding never
+enabled, nothing in this plan has an unbounded cost path — extraction cost is
+bounded by the number of animals a shelter physically handles, which is a
+self-limiting quantity in a way that per-visitor or per-search costs are not.
+
+Two guardrails worth keeping anyway, both cheap:
+
+- **Price the model before swapping to it** (playbook §3.2). `pricingFor()` falls
+  back to Flash rates for unknown IDs, so an unlisted model reports wrong on the
+  very dashboard you would use to confirm the change.
+- **Derive rates from the bill, not the pricing page.** The sibling stack's first
+  price table under-reported spend ~9× because it used proxy rates. Ours will be
+  a hypothesis until an invoice confirms it — mark which rows are bill-derived.
+
+**The real financial event remains the trial expiring ~2026-11-10**, not anything
+in this plan.
 
 ---
 
 ## 11. Open decisions
 
-1. **Is the Facebook target a Page?** (§5.3) Blocking, one minute, do it first.
-2. **X — worth ~$0.20/post?** Recommendation: not in Phase 1. Facebook and
-   Instagram are where the existing 1.9K followers are.
-3. **TikTok — worth the audit?** Recommendation: no. Video-first platform, photo
-   content, and the audit requires demonstrating a flow that is restricted until
-   the audit passes.
-4. **Storage: adopt a Firebase default bucket, or keep Terraform-managed
+1. **Which Gemini model tier for extraction?** The playbook's Flash is the
+   default, but a handwritten faded card is closer to its hardest OCR case than
+   its easiest. Start on Flash, measure review-correction rate, and let that
+   decide — not a guess made now.
+2. **Storage: adopt a Firebase default bucket, or keep Terraform-managed
    `wawitas-app`?** Forced by step 4. Inherited from `CLAUDE.md` and now due.
-5. **What does the adoption application actually ask?** The shelter has real
+3. **What does the adoption application actually ask?** The shelter has real
    screening questions today, asked over WhatsApp. Get their list rather than
    inventing one.
-6. **Scan-history retention** — still open from `CLAUDE.md` concern #3, and now
+4. **Scan-history retention** — still open from `CLAUDE.md` concern #3, and now
    more pressing: intake writes the first real `ScanEvent` records.
-7. **Do adopters get write access to their animal's record?** Currently
+5. **Do adopters get write access to their animal's record?** Currently
    admin-only writes throughout. An adopter updating a vaccination after a vet
    visit is genuinely useful and is a meaningful widening of the rules.
+6. *(Deferred with §5)* **Is the Facebook target a Page or a personal profile?**
+   Not blocking anything now, but it is a one-minute check and the answer
+   reshapes the eventual social plan. Worth doing opportunistically.
 
 ---
 
 ## 12. What this plan does not do
 
-- **No Facebook→site inbound sync.** `PLAN.md` §5 describes pulling posts *from*
-  Facebook. This plan is the opposite direction. Inbound remains unbuilt and is
-  now largely redundant: if the database is the source and posts are generated
-  from it, there is nothing to parse back.
+- **No social syndication at all, in either direction.** Outbound is deferred
+  (§5). Inbound — `PLAN.md` §5's plan to pull posts *from* Facebook — remains
+  unbuilt and is now largely redundant: if the database is the source and posts
+  are generated from it, there is nothing to parse back.
+- **No Vertex AI.** Decided 2026-08-16. The Gemini API via AI Studio, with a key
+  in Secret Manager. See §4 and [`gemini-api-playbook.md`](gemini-api-playbook.md).
+- **No grounded search, ever, on any path.** Not a deferral — a standing
+  constraint. It is the playbook's dominant cost SKU and nothing in this product
+  needs the web.
+- **No embeddings, no corpus, no Batch API.** Playbook §7 and §8 do not apply.
+  Nothing here is retrieval; if that changes, re-read them before writing a line.
 - **No BigQuery.** `CLAUDE.md` decided 2026-08-09 to add it when a named report
   justifies it. Nothing here is that report.
 - **No terminology coding.** §4 of the research doc — the socket, not the plug.
