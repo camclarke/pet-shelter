@@ -1,8 +1,9 @@
 # Plan — pet intake, medical records, adoption, and social syndication
 
-Covers: the admin intake flow, Gemini-assisted vaccination-card parsing and
-veterinary voice dictation, the adopter-facing flow, QR identity tags, food
-donation and daily ration tracking, and (deferred) social syndication.
+Covers: the arrival pipeline and shelter-area tracking, the admin intake flow,
+Gemini-assisted vaccination-card parsing and veterinary voice dictation, the
+adopter-facing flow, QR identity tags, food donation and daily ration tracking,
+and (deferred) social syndication.
 
 Depends on: [`veterinary-records-standards.md`](veterinary-records-standards.md) ·
 [`rfid-microchips.md`](rfid-microchips.md) ·
@@ -891,8 +892,8 @@ public with a phone and no scanner — which is most finders. Neither is a track
 | Cloud Run env vars | Terraform only | Never `--set-env-vars` in CI. A plain env silently overrides a `secret_key_ref` of the same name |
 | Storage rules deployed | blocked | Media upload makes this urgent. Needs the Firebase default-bucket decision |
 | `public_access_prevention` on `wawitas-app` | currently `inherited` | Decide now that media is real |
-| New composite indexes | `firestore.indexes.json` | `adoptionApplications(petId, status)`, `media(tier, order)` |
-| Rules for 4 new collections | `firestore.rules` | `petDrafts`, `adoptionApplications`, `qrTokens`, `api_usage_daily`. Still deployed by hand, deliberately |
+| New composite indexes | `firestore.indexes.json` | `adoptionApplications(petId, status)`, `media(tier, order)`, and the **collection-group** index on `placements(areaId, startedAt)` — §13.7 |
+| Rules for new collections | `firestore.rules` | `petDrafts`, `adoptionApplications`, `qrTokens`, `api_usage_daily`, `areas`, `foodDonations`, `foodStock`, `cookBatches`, `feedingLog`, plus the `placements` and `measurements` subcollections. Still deployed by hand, deliberately |
 
 **No Vertex AI, so no `aiplatform.googleapis.com` and no
 `roles/aiplatform.user`.** The AI Studio surface is a public API reached with a
@@ -926,6 +927,7 @@ self-contained.
 | 3 | Seed one real pet by hand | Proves the core loop end-to-end |
 | 4 | Storage rules + media upload + derivatives | §2.2 |
 | 5 | Admin intake wizard, steps 1–3, manual only | An admin can publish an animal |
+| **5a** | **Arrival pipeline: `en-camino` → areas → placements** | §13 — weekly-use feature, and the outbreak requirement |
 | 6 | **Re-admission / dedup path** | §3.1 — cheap now, expensive once duplicates exist |
 | 7 | `MedicalRecord` extensions + manual medical entry | §2.1, §4.4 |
 | 8 | **AI foundations**: provider, `model-ids`, `pricing.mjs`, `recordAiUsage` | §4.1 — before the first call |
@@ -936,6 +938,13 @@ self-contained.
 | 13 | **Food: donation parsing, stock, cook log, daily rations** | §12 — parallelisable |
 | 14 | Adoption applications + admin queue | §6 — **first real test of the rules** |
 | — | ⏸ *Social syndication* | **Deferred** — §5 |
+
+**§13's arrival pipeline slots in at 5a**, immediately after the intake wizard
+and before the dedup path. It is the earliest step in the animal's real-world
+journey, it needs almost nothing built (a sparse form, an areas collection, an
+interval ledger, a `wa.me` link), and it is the feature the staff touch every
+week. Built there, it also gives step 6's dedup check somewhere sensible to
+land a re-admission: straight back into quarantine.
 
 **Step 10 before 11 and 13 is not optional.** Dosing is `mg/kg` and energy
 requirement is a function of `kg^0.75`; both subsystems are uninterpretable
@@ -1025,7 +1034,15 @@ in this plan.
    speaks and confirms their own record. If a volunteer transcribes on their
    behalf, `dictatedByUid` and professional responsibility come apart, and the
    confirmation step needs rethinking.
-9. *(Deferred with §5)* **Is the Facebook target a Page or a personal profile?**
+9. **What are the actual areas, and their kinds and capacities?** §13.5 needs the
+   real list — names or numbers as the shelter uses them. Worth seeding from
+   reality rather than inventing "Cuarentena 1..3".
+10. **How long is Wawitas' quarantine period, and is it observed in practice?**
+    The ASV-referenced figures are ≥2 weeks for parvovirus exposure and up to a
+    month for distemper. If the shelter's real period is shorter, the system
+    should record what they actually do — not display a target they will miss and
+    then learn to ignore.
+11. *(Deferred with §5)* **Is the Facebook target a Page or a personal profile?**
    Not blocking anything now, but it is a one-minute check and the answer
    reshapes the eventual social plan. Worth doing opportunistically.
 
@@ -1192,7 +1209,230 @@ courtyard.
 
 ---
 
-## 13. What this plan does not do
+## 13. Arrival pipeline and area tracking
+
+**Added at the user's direction, 2026-08-16.** Today the manager announces an
+incoming dog by WhatsApp message. Instead: the manager records the basic
+information — usually a photo, sometimes a breed, sometimes a name — and staff
+can see an animal is on its way. On arrival it goes to one of several quarantine
+areas, is examined by a vet, and is then assigned to general population. Areas
+are identified by name or number, and **the system must be able to isolate an
+area if a virus breaks out.**
+
+### 13.1 ⚠️ `transito` already means something else
+
+`PetStatus` has `transito`, and in `types.ts` it means **"in a foster home
+(hogar de tránsito)"** — the standard Bolivian Spanish term. Naming the new
+en-route state "en tránsito" would collide with it head-on, in the one language
+the staff actually use, and the two states are opposites: a fostered dog has a
+home, an incoming dog has nowhere yet.
+
+Use **`en-camino`**. Unambiguous in Spanish, and it cannot be confused with
+`hogar de tránsito` by anyone.
+
+New status values:
+
+| Value | Meaning |
+|---|---|
+| `en-camino` | Announced, not yet physically here |
+| `cuarentena` | Arrived, in a quarantine area, not yet cleared by a vet |
+| `cancelado` | Announced but never arrived — the rescue fell through |
+
+`refugio` keeps its current meaning: at the shelter, in general population.
+
+**The wall is unaffected.** `getWall()` filters `status == 'adopcion'`, so every
+new value is excluded automatically. No query anywhere needs changing — which is
+the payoff for the wall having been written as an allowlist rather than a
+denylist.
+
+`cancelado` is worth having rather than deleting the record. Announced rescues
+that never materialise are common, and "we were told about this dog and then
+nothing" is information — particularly if the same source does it repeatedly.
+
+### 13.2 Do not replace the WhatsApp message. Wrap it.
+
+This is the part most likely to fail in practice, so it deserves stating
+plainly.
+
+WhatsApp works for this shelter because **everyone already has it and it
+pushes.** An in-app-only notification will be missed, staff will go back to the
+group chat, and the system will hold empty records while the real information
+lives in a chat thread — which is exactly today's problem with extra steps.
+
+**So the record moves to the app; the ping stays on WhatsApp.** The manager
+enters the animal, and the app produces a pre-filled `wa.me` link — *"🐕 Nuevo
+ingreso en camino: Luna, mestiza. Ficha: wawitas.org/id/xxxx"* — which they send
+to the staff group as they do now. Zero new infrastructure, zero cost, no
+notification permissions, and the group message now **points at a record instead
+of being the record.**
+
+This is the same mechanism the whole public site already converts through, so it
+is a pattern the project has rather than a new dependency.
+
+Web push via the PWA is the phase-2 upgrade if staff want it. It is free, but it
+needs installation and per-device permission, and it should be *added alongside*
+the WhatsApp link rather than replacing it.
+
+### 13.3 The pre-arrival form is a capacity check, not just an announcement
+
+The manager announcing a dog needs to know one thing immediately: **is there
+room in quarantine?** So the form shows live occupancy per quarantine area
+beside the fields.
+
+It also shows, per quarantine area, **the date of the most recent arrival** —
+because adding a new animal to an occupied quarantine pen restarts the
+observation clock for everyone already in it. Cohorting matters, and this is the
+one derived number that makes it visible at the moment the decision is made.
+
+Fields, all optional except species:
+
+```
+foto (usually)   ·   nombre (sometimes)   ·   raza (sometimes)
+sexo · tamaño estimado · de dónde viene · quién avisa · cuándo llega
+```
+
+**Everything nullable is the point.** The existing intake wizard (§3) assumes
+the animal is in front of you. This is earlier than that, and a form that
+demands a name for a dog nobody has met yet will be filled with `"?"`.
+
+**This creates a real `pets` document, not a `petDraft`.** The draft/pet boundary
+is *"has an admin deliberately declared this animal exists?"* — and an
+announcement to the whole staff group is exactly that declaration. Drafts stay
+what they are: private, half-finished wizard state.
+
+### 13.4 The state machine
+
+```
+   en-camino ──── llegó ────▶ cuarentena ──── alta veterinaria ────▶ refugio
+       │                          │                                    │
+       │                          ├── traslado ──▶ otra área           │
+       └── no llegó ──▶ cancelado └── enfermo ───▶ aislamiento         │
+                                                                       ▼
+                                                                   adopcion
+```
+
+Arrival is an explicit action, not a timer, and it writes three things at once in
+one batch: the status change, the first `placement`, and a `ScanEvent` with
+`context: 'intake'` if the animal is chipped and scanned on the way in.
+
+Veterinary clearance out of quarantine is likewise explicit and attributed —
+`clearedBy`, a real user. "Nobody remembers who moved it" is how an outbreak
+investigation stalls.
+
+### 13.5 Areas
+
+```
+areas/{areaId}                          ADMIN read + write
+  name         "Cuarentena 2" · "Patio A" · "3"   — names OR numbers, free text
+  kind         cuarentena | aislamiento | general | medica | maternidad
+  capacity     number | null
+  active       boolean
+  notes
+```
+
+**`cuarentena` and `aislamiento` are different kinds and must not be merged.**
+This is the [ASV Guidelines](https://www.aspcapro.org/topics-shelter-medicine/asv-guidelines-standards-care-animal-shelters)
+distinction: *quarantine* holds healthy, newly admitted or exposed animals under
+observation; *isolation* holds animals showing or suspected of infectious
+disease. Putting a sick animal into a quarantine pen exposes every healthy animal
+in it. If the model conflates them, the UI cannot warn about it.
+
+`capacity` exists because the ASV guidelines are explicit that **crowding is
+itself a disease risk** — higher contact rate, worse air quality, more stress. An
+occupancy figure the manager sees before saying yes to another dog is the cheapest
+possible intervention.
+
+### 13.6 Placements are an interval ledger, and this is the whole design
+
+```
+pets/{petId}/placements/{placementId}   AUTHENTICATED read, admin write
+  areaId
+  areaName      snapshot at the time — areas get renamed, history must not shift
+  startedAt
+  endedAt       null = currently here
+  reason        ingreso | fin-cuarentena | traslado | medico | brote | salida
+  movedBy, note
+```
+
+**A `currentArea` field would not satisfy the requirement.** The user's stated
+reason for tracking area is *"in case of a virus break, to isolate the area"* —
+and that question is always asked **retrospectively**. A dog diagnosed today was
+infectious before it looked sick. What is needed is not where it is, but
+**everywhere it has been, and who was there at the same time.**
+
+The retention window is set by the pathogens, and it is longer than intuition
+suggests:
+
+| Disease | Incubation | Implied lookback |
+|---|---|---|
+| **Canine parvovirus** | 3–4 days typical, **up to 14** | ≥2 weeks |
+| **Canine distemper** | 10–14 days typical, **up to 6 weeks** | **≥6 weeks** |
+
+So placement history must reach back **at least six weeks** to be useful for
+distemper, which is the case that actually closes shelters. In practice: keep it
+indefinitely. At ~40 animals this collection is trivially small, and unlike the
+scan ledger (`CLAUDE.md` concern #3) it is **not surveillance of a person** — it
+records which pen an animal was in, inside one facility. The retention argument
+that applies to `scans` does not apply here.
+
+**A foster home is not an area.** Placements describe positions inside the
+shelter's own facility. A dog in `hogar de tránsito` has `custody` and possibly
+`location`, and no open placement. Keeping that boundary clean is what stops a
+volunteer's home address from ever ending up in an operational area list.
+
+### 13.7 The outbreak query
+
+Given a sick animal, the contact trace is two steps:
+
+1. Read that animal's placements overlapping the exposure window.
+2. For each `(areaId, interval)`, find every other placement in the same area
+   whose interval overlaps.
+
+```
+collectionGroup('placements')
+  .where('areaId', '==', areaId)
+  .where('startedAt', '<=', windowEnd)
+// then filter endedAt >= windowStart in memory
+```
+
+Interval overlap is awkward in Firestore because of range-filter constraints, and
+the honest answer at this scale is **don't fight it**: forty animals over six
+weeks is a few hundred documents. Fetch by area and filter in memory. Optimise
+if a shelter with 400 animals ever forks this — not now.
+
+Needs a collection-group index on `placements(areaId, startedAt)`. Note
+`CLAUDE.md`'s standing warning here: the microchip lookup broke because a
+collection-group index was declared but never deployed, and the symptom was
+indistinguishable from "no data." **An outbreak trace that silently returns
+nothing is the worst possible version of that bug** — so this query needs a test
+with known data, not just a green deploy.
+
+**Current occupancy** uses the same index shape:
+`where('areaId','==',X).where('endedAt','==',null)`.
+
+**Deliberately not denormalised onto `Pet`.** A `currentAreaId` field would make
+the board view a single query, but `pets/{petId}` is **public read** — and where
+an animal is housed is operational data with no reason to be world-readable. The
+collection-group query is admin-side and costs nothing at this scale.
+
+### 13.8 What this earns beyond the outbreak case
+
+Three things fall out of the same ledger, free:
+
+- **Length of stay per animal**, which is the single most-used shelter metric and
+  currently uncomputable.
+- **Whether the quarantine period is actually being observed**, rather than
+  assumed — the ASV guidance is only worth anything if someone can check it.
+- **Which areas cycle fastest**, which is a capacity-planning input the shelter
+  has never had.
+
+None of these need building now. They are queries against data this feature
+records anyway, which is the argument for recording intervals rather than a
+current-state field.
+
+---
+
+## 14. What this plan does not do
 
 - **No social syndication at all, in either direction.** Outbound is deferred
   (§5). Inbound — `PLAN.md` §5's plan to pull posts *from* Facebook — remains
