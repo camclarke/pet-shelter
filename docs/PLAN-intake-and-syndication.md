@@ -38,6 +38,51 @@ There is also a hard date. **The GCP free trial expires ~2026-11-10.** This plan
 adds the project's first per-request paid API — the **Gemini API via AI Studio**
 — and its first API-key credential. Both land inside that window.
 
+### 0.1 The first coding session, concretely
+
+Everything in §9's build order assumes the three blockers above are gone.
+**Steps 1–3 are that unblocking work, and they are console-and-config, not
+architecture.** Do them first and in this order; nothing below them can be
+tested otherwise.
+
+| Step | Do | Definition of done |
+|---|---|---|
+| **1a** | Register a Firebase **web app** in the console for project `wawitas` | Four `NEXT_PUBLIC_FIREBASE_*` values exist |
+| **1b** | Fill them in `.env.local` **and** as Docker build ARGs | `next build` inlines them — they are **build-time**, not Cloud Run env vars |
+| **1c** | Decide the Storage bucket question (open decision #2) | Either a Firebase default bucket exists, or `wawitas-app` is confirmed as the one |
+| **2a** | Enable Email/Password + Google providers | A user can sign in on `/cuenta` |
+| **2b** | Write the admin custom claim via a one-off Admin SDK script | `request.auth.token.admin === true` for your own uid |
+| **2c** | Exercise `firestore.rules` from a **real client** | First time enforcement is tested at all — see below |
+| **3** | Seed one real pet document by hand | The Muro renders it in **production**, allowing one 300 s ISR window |
+
+**Step 2c is the one to slow down on.** `firestore.rules` has been compiled and
+released since 2026-08-12 but **never enforced against a client**, because no
+client could reach Firestore. The moment auth works, every rule in that file gets
+exercised for the first time simultaneously. Expect failures there, and read them
+as "the rules were never tested" rather than "auth is broken."
+
+**Seed constraints for step 3**, both already documented and both still true:
+`coverPhoto` must be served from `firebasestorage.googleapis.com` or the page
+throws `E231` and 500s, and `status` must be `adopcion` with a `createdAt` or
+the wall query will not return it.
+
+### 0.2 What to build after that, and what to skip
+
+Steps 4 → 5 → 5a are the shortest path to a system the shelter can actually use
+daily: media upload, the intake wizard, and the arrival pipeline. **That is a
+coherent shippable increment** — an admin can announce an incoming dog, record
+it on arrival, assign it to a quarantine area, and publish it to the wall.
+
+Everything AI-shaped (steps 8, 9, 11) and the food module (13) sit behind that
+deliberately. They are the interesting parts and they are not the urgent parts.
+
+Two things to resist:
+
+- **Do not start with the Gemini work** because it is the novel bit. It depends
+  on a review UI, which depends on the admin console, which depends on auth.
+- **Do not add mock or fallback pet data** to make the wall look populated. It
+  was tried on 2026-08-08, collided with the image-host rule, and was reverted.
+
 ---
 
 ## 1. Standards decisions

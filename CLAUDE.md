@@ -46,11 +46,17 @@ scanned chip resolves to a name and a phone call.
 | Storage rules | 🟡 **Not deployed** — needs a Firebase *default* bucket (console-only "Get Started"). **Not an exposure:** `wawitas-app` has no `allUsers` binding and uniform access is on |
 | Firebase emulator suite | ❌ **Not used — decided 2026-08-08.** Also cannot run here (no Java) |
 | Firebase web app | ⬜ Not registered — the four empty `NEXT_PUBLIC_FIREBASE_*` values need it |
-| Auth flows | ⬜ Not started |
-| Admin publishing UI | ⬜ Not started |
+| Auth flows | ⬜ Not started — **step 2 of the build plan**, and the first real test of `firestore.rules` |
+| Admin publishing UI | ⬜ Not started — **fully specified**, [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md) §3 |
 | Maps + sightings | ⬜ Not started |
 | Reporting (BigQuery mirror) | ⬜ **Decided 2026-08-09, deliberately not built** — add when a real report is asked for |
-| LLM vaccination-card parsing | ⬜ Stage 2 — deliberately deferred |
+| **Intake / medical / food / areas plan** | ✅ **Written 2026-08-16** — [`PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md). 14 sections, nothing built yet |
+| Veterinary record standards | ✅ **Researched 2026-08-16** — [`veterinary-records-standards.md`](docs/veterinary-records-standards.md). No international EMR standard exists; modelled on the EU passport + WSAVA 2024 |
+| LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
+| LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
+| Arrival pipeline + shelter areas | ⬜ Planned, plan §13. Placement intervals for outbreak tracing, not a current-area field |
+| Food: donations → pot → rations | ⬜ Planned, plan §12. LLM parses, **deterministic code does the arithmetic** |
+| Social syndication | ⏸ **Deferred 2026-08-16 at the user's direction.** Facebook + Instagram only when resumed; X and TikTok are *out* |
 
 ### Progress log
 
@@ -78,6 +84,12 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-12** — **Swept for vulnerabilities and confirmed everything deployable was already deployed.** Nothing needed fixing: `npm audit` is clean on both the production and dev trees, and the nanoid advisory found hours earlier is in the running image — the Docker build log for `app:7c62d54…` shows `found 0 vulnerabilities`, which is a stronger check than auditing the working tree. Terraform needed no apply: `plan` proposes exactly one action, the known-benign `scaling` no-op, and nothing else is drifting. Firebase needed no deploy either, and this was **verified rather than inferred from git history** — the released ruleset was pulled from the Rules API and diffed against `firestore.rules` byte-for-byte (identical), and the 10 deployed composite indexes plus the `identity/code` field override match the declared set. `storage.rules` is still blocked, re-confirmed by running the deploy rather than trusting the note: *"Firebase Storage has not been set up."* The Rules API shows only a `cloud.firestore` release and the project has no default bucket, only `wawitas-app`, `wawitas-terraform-state`, and a now-orphaned `wawitas_cloudbuild` left over from the bootstrap build. **The one real gap found was that Dependabot alerts were disabled** — CI's audit step only runs when someone pushes, so a new advisory during a quiet week would go unseen, which is exactly how the nanoid one nearly slipped by. Alerts *and* automated security updates are now on, verified by API (`{"enabled":true,"paused":false}`, 0 open alerts). Dependabot's fix PRs run through `ci.yml` like any other, so nothing merges unverified. Note the interaction to watch: this project pins transitive fixes with `overrides`, and Dependabot does not manage those — a PR bumping a direct dependency may leave a stale override behind.
 
+- **2026-08-16** — **Planned the next phase end to end, and wrote down the standards it rests on.** No code; the output is `docs/PLAN-intake-and-syndication.md` plus `docs/veterinary-records-standards.md`, on `feature/pet-intake-and-social-syndication`. The research produced one **negative** headline that shapes everything else: **there is no international standard for a companion animal's electronic medical record** — nothing in veterinary medicine corresponds to FHIR/SNOMED/LOINC, so the schema is ours to design. It is anchored to the **EU pet passport's section structure** (the only published field schema for this data) plus **WSAVA 2024**'s certificate fields, which between them produced four `MedicalRecord` additions we lacked — `manufacturer`, and `validFrom`/`validUntil` as genuinely distinct from `performedAt`/`nextDueAt`, because for rabies the date protection *begins* is 21 days after injection and is the one with legal force. Clinical terminology (VeNom, SNOMED VetSCT) is **deliberately deferred with an empty `codes[]` socket**: neither survives contact with a volunteer transcribing a handwritten card, and free text is backfillable. **Corrected a stale claim in `rfid-microchips.md` §5** — Regulation (EU) 576/2013 was superseded on **22 April 2026** by Delegated Regulation (EU) 2026/131 under the Animal Health Law. Every rule the code depends on survived, so `rabiesVaccinationIsValid()` is still right; one rule was *added* (≥12 weeks at rabies vaccination) that we do not validate. For **Bolivia** the answer is that nothing here is nationally mandated, but the choice is forced anyway by SENASAG's ISO-based export paperwork, the ISO hardware sold locally, and keeping internationally adopted animals eligible — with **WOAH Ch. 7.7** added as the legitimacy argument rather than a schema. Two platform findings killed most of the social-media request on the facts: **X discontinued its free tier on 6 February 2026** and charges ~$0.20 per post carrying a URL, which every post of ours would; and **TikTok forces unaudited posts to `SELF_ONLY`**. Facebook and Instagram are free and avoid App Review entirely, because posting only to the shelter's own accounts lets the Meta app stay in Development mode indefinitely. The user then **deferred social work altogether** and scoped it to those two.
+
+- **2026-08-16** — **Three directed reversals and three new subsystems, same day.** (1) **Gemini goes through AI Studio with an API key, not Vertex AI**, at the user's direction, following `docs/gemini-api-playbook.md` — ~4 months of production experience on that exact surface, carried from the sibling stack. This reversed a recommendation made hours earlier that had argued for Vertex on the grounds that the runtime service account avoids managing a key; the playbook wins because adopting Vertex would discard a document cataloguing a **$665/month surprise bill** and a metering layer that was **9× wrong**. Infrastructure got *simpler* — no `aiplatform` API, no IAM grant, no ADC involvement, so an AI call can no longer resolve to the wrong project because it does not resolve to a project at all — at the cost of one new credential in Secret Manager. **Grounded search is ruled out as a standing constraint, not a deferral**: it is billed per search query, was 73% of one month's bill, carries zero tokens so token-based metering is structurally blind to it, and nothing here needs the web. (2) **Veterinary voice dictation** is now the highest-consequence path in the system and is designed accordingly — one call returns *both* a verbatim transcript and the structured extraction, the transcript is the record, and **two-extractor consensus is mandatory** because *"medio mililitro"* and *"cinco mililitros"* differ by one syllable in spoken Spanish and a factor of ten in the animal. The system may display `mg/kg × weight` as a labelled aid but must never write a computed dose as though prescribed. (3) **Food management reverses the requested design on purpose:** the LLM parses donation descriptions into structured stock, and **deterministic code does the yield arithmetic** — an LLM is non-deterministic on numbers, so the same stock could give two answers on two days with no way to tell which was wrong. The raw→cooked→ladle conversion is **measured, not computed**: rice triples, meat shrinks, water is unmeasured, and the first N cook batches *are* the calibration dataset. Grounded rations in `RER = 70 × kg^0.75`, which surfaces something the ladle heuristic hides — energy need scales **sub-linearly**, so a linear ladle rule systematically underfeeds large dogs. Body condition uses the **WSAVA 9-point scale**, from the same body whose vaccination guidelines this project already follows. All of which exposed a real gap: **there is no weight field** — `Pet.size` is a wall filter, not a clinical quantity — so a `measurements` subcollection was added, as a subcollection rather than two fields because *"reduce the fat ones"* is a feedback loop and a loop needs a trend.
+
+- **2026-08-16** — **Arrival pipeline and shelter areas planned, replacing a WhatsApp message with a record.** Caught a naming collision worth knowing about: **`PetStatus.transito` already means "hogar de tránsito" — a foster home** — so the new en-route state is **`en-camino`**, because the two are opposites and colliding them in the only language the staff use would be a lasting mistake. The wall needed no change at all, since `getWall()` filters to `adopcion`: an allowlist, not a denylist. **Deliberately did not replace the WhatsApp ping — wrapped it.** WhatsApp works because everyone has it and it pushes; an in-app notification gets missed, staff revert to the group chat, and the system holds empty records while the real information lives in a thread. So the record moves to the app and the app emits a pre-filled `wa.me` link, making the group message *point at* a record rather than *be* it — the same mechanism the public site already converts through. The central design point is that **placements are an interval ledger, not a `currentArea` field**: outbreak isolation is always asked retrospectively, a dog diagnosed today was infectious before it looked sick, and **canine distemper incubation reaches six weeks** (parvovirus two), which sets the minimum lookback. Kept **quarantine and isolation as distinct area kinds** per the **ASV Guidelines for Standards of Care in Animal Shelters** — merging them means the UI cannot warn when a sick animal is about to go in among healthy ones — and modelled area capacity because those guidelines are explicit that crowding is itself a disease risk. `currentAreaId` is **not** denormalised onto `Pet`, because that document is public-read and where an animal is housed has no reason to be. Flagged that the required collection-group index is the same shape as the one whose non-deployment broke `findPetByMicrochip()`, and that **an outbreak trace silently returning nothing is the worst version of that bug** — so it needs a test with known data, not a green deploy.
+
 ---
 
 ## Next session — start here
@@ -89,8 +101,32 @@ Cloud Run live, and the Muro rendering a real Firestore query in production.
 **https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app**
 
 Every ✅ below was *executed*, not inferred. The remaining gaps are narrow and
-named: **no security rules deployed, 11 of 12 indexes missing, and no pet
-documents.**
+named: **no Firebase web app, no auth, and no pet documents.** Rules and indexes
+*are* deployed — the rules have simply never been enforced against a client,
+because no client can reach Firestore yet.
+
+### 📋 There is now a written build plan. Read it before starting.
+
+**[`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md)**
+— written 2026-08-16, covering the arrival pipeline and shelter areas, the admin
+intake flow, Gemini card parsing and veterinary voice dictation, adoption, QR
+identity tags, and food management. **Its §0.1 is a concrete first-session
+checklist** and §9 is the 14-step build order.
+
+Nothing in it is built. It is a plan, and per this file's own most-repeated
+lesson, **a plan that reads well is not a plan that works.**
+
+Two supporting documents:
+
+- [`docs/veterinary-records-standards.md`](docs/veterinary-records-standards.md)
+  — the standards research. §6 answers "we are in Bolivia, what should we
+  follow?" **Also corrects a stale citation in `rfid-microchips.md`:** EU
+  576/2013 was superseded by Reg. (EU) 2026/131 on 22 April 2026.
+- [`docs/gemini-api-playbook.md`](docs/gemini-api-playbook.md) — **read before
+  writing any AI code.** All LLM work is Gemini via **AI Studio**, never Vertex.
+
+The four-item list further down this section is superseded by that plan's build
+order. It is kept because its constraints and warnings are still accurate.
 
 ### Verified state, as of 2026-08-12
 
@@ -204,6 +240,14 @@ registered Firebase **web app**, which does not exist yet.
 
 ### The next four things, in order
 
+> **Superseded 2026-08-16 by
+> [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md)
+> §0.1 and §9**, which expand this into a 14-step order covering the arrival
+> pipeline, medical records, AI extraction, food and adoption. The four items
+> below are still steps 1–4 of that order and their constraints are all still
+> accurate — the plan adds sequence and definitions of done around them, it does
+> not contradict them. Read this for the *why*, the plan for the *order*.
+
 1. **Put one real pet in Firestore and load the wall.** This is now the shortest
    path to a proven end-to-end system and the last unverified link in the core
    loop: `pets-server.ts` → `Muro.tsx` → rendered HTML has never once run with
@@ -252,14 +296,28 @@ registered Firebase **web app**, which does not exist yet.
 4. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
    `MICROCHIP_ERROR_ES` are built and tested, ready to wire into a form.
 
-### Two open questions awaiting a decision
+### Open questions awaiting a decision
 
 - **Scan-history retention.** Currently indefinite — because nothing deletes it,
   not because anyone chose that. A rolling 24-month window (keeping intake and
   adoption permanently as `custody` records) would preserve every recovery use
-  case while shrinking the surveillance surface. See concern #3.
+  case while shrinking the surveillance surface. See concern #3. **Note the
+  contrast with `placements`** (plan §13.6), which is also indefinite but for a
+  sound reason: it records a pen inside one facility, not a person's movements.
 - **The `LICENSE` copyright line** reads "pet-shelter contributors" rather than a
   named person or company, deliberately. Change it if a specific holder is wanted.
+
+**Eleven more are open in the plan** ([§11](docs/PLAN-intake-and-syndication.md)).
+Six of them are things only the shelter can answer, and they block real work:
+
+| Needed from the shelter | Blocks |
+|---|---|
+| Pot and ladle measurements | Any food yield estimate — constants stay `null` until then |
+| The real area list — names/numbers, kinds, capacities | The arrival pipeline. Seed from reality, don't invent "Cuarentena 1–3" |
+| Their actual quarantine period | Whether the system shows a target they will meet or one they will learn to ignore |
+| **Do they weigh the dogs?** | Every `mg/kg` dose and every ration. If there is no scale, say so in the UI rather than hiding it behind a computed number |
+| Who dictates — the vet, or a volunteer relaying? | Who is professionally responsible for a dictated medical record |
+| Their existing adoption screening questions | The application form. They ask these over WhatsApp today |
 
 ### Things that will bite whoever picks this up
 
@@ -554,6 +612,53 @@ users/{uid}                           SELF READ
 adoptions/{petId}                     RESTRICTED — keyed by petId so
   petId, ownerUid, adoptedAt          ownsPet() resolves in one get()
 ```
+
+**Planned additions, none built.** Specified in
+[`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md) §2,
+§12.5 and §13; listed here so this stays the one place the whole shape is
+visible:
+
+```
+pets/{petId}/media/{mediaId}          public|auth — REPLACES detail.photos[]
+  kind, tier, path, derivatives       photos AND video. Tier is a FIELD here,
+  alt, order, uploadedAt              not a document — the one deliberate
+                                      exception, see plan §2.2
+
+pets/{petId}/measurements/{id}        AUTHENTICATED
+  weightKg, bcs (WSAVA 1–9), mcs      the model has NO weight today, and both
+  measuredAt, measuredBy              mg/kg dosing and kg^0.75 energy need it
+
+pets/{petId}/placements/{id}          AUTHENTICATED — the outbreak ledger
+  areaId, areaName, startedAt         INTERVALS, not a currentArea field.
+  endedAt (null = here now), reason   Distemper incubation reaches 6 weeks
+
+areas/{areaId}                        ADMIN
+  name ("Cuarentena 2" | "3"), kind   cuarentena|aislamiento|general|
+  capacity, active                    medica|maternidad — ASV keeps
+                                      quarantine and isolation SEPARATE
+
+petDrafts/{draftId}                   ADMIN — half-finished wizard state,
+                                      deliberately OUTSIDE pets/
+
+adoptionApplications/{id}             applicant + admin. internalNotes must
+                                      NOT be readable by the applicant
+
+qrTokens/{token}                      PUBLIC READ — resolves to public tier
+                                      only, like findPetByMicrochip()
+
+api_usage_daily/{date__proc__model}   SERVER ONLY — playbook §4.1 rollup,
+                                      wired at the FIRST AI call site
+
+foodDonations/{id} · foodStock/{key}  ADMIN — LLM parses the donation text,
+cookBatches/{id} · feedingLog/{date}  deterministic code does the arithmetic
+
+socialPosts/{postId}                  ⏸ DEFERRED — do not create
+```
+
+Three enum changes go with these: `PetStatus` gains `en-camino`, `cuarentena`
+and `cancelado` (**not** "en tránsito" — `transito` already means *hogar de
+tránsito*, a foster home); `MedicalRecordKind` gains `serologia`; and
+`FeedingUnit` gains `cucharones`.
 
 ### The RFID microchip — what it is and is not
 
