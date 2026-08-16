@@ -154,7 +154,20 @@ interoperability.
 
 ## 5. Regulation
 
-### EU — Regulation (EU) No 576/2013
+### EU — ⚠️ superseded: 576/2013 → Regulation (EU) 2026/131
+
+> **Corrected 2026-08-16.** This section was written against Regulation (EU)
+> No 576/2013, which **has been superseded**. Since **22 April 2026**,
+> non-commercial pet movement is governed by **Commission Delegated Regulation
+> (EU) 2026/131**, completing the Animal Health Law (Regulation (EU) 2016/429).
+> The passport model moved to Implementing Regulation (EU) 2026/705.
+>
+> **Every rule below survived the change** — ISO transponder, chip-before-rabies,
+> the 21-day wait — so `rabiesVaccinationIsValid()` is still correct. One rule
+> was *added*: the animal must be **at least 12 weeks old** at rabies
+> vaccination, which we do not yet validate. Full detail, including the new
+> mandatory-microchipping and interoperable-national-database requirements, is
+> in [`veterinary-records-standards.md`](veterinary-records-standards.md) §1.
 
 Governs non-commercial movement of dogs, cats, and ferrets. Requires an
 **ISO 11784/11785-compliant transponder**, a valid rabies vaccination, and an
