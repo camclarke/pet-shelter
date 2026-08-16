@@ -1,12 +1,21 @@
 # Plan — pet intake, medical records, adoption, and social syndication
 
-Covers: the admin intake flow, Gemini-assisted vaccination-card parsing, the
-adopter-facing flow, QR identity tags, and LLM-generated cross-posting to social
-media.
+Covers: the admin intake flow, Gemini-assisted vaccination-card parsing and
+veterinary voice dictation, the adopter-facing flow, QR identity tags, food
+donation and daily ration tracking, and (deferred) social syndication.
 
-Standards research this depends on:
-[`veterinary-records-standards.md`](veterinary-records-standards.md) ·
-[`rfid-microchips.md`](rfid-microchips.md)
+Depends on: [`veterinary-records-standards.md`](veterinary-records-standards.md) ·
+[`rfid-microchips.md`](rfid-microchips.md) ·
+[`gemini-api-playbook.md`](gemini-api-playbook.md)
+
+Three Gemini-assisted paths, all sharing one provider, one price table and one
+review discipline — listed here because their risk levels are **not** the same:
+
+| Path | § | Risk | Consensus extractor |
+|---|---|---|---|
+| Vaccination card → medical record | §4.3 | Moderate — a wrong date | Optional, phase 2 |
+| **Vet dictation → medications + dosages** | **§4.7** | **High — a 10× dose is one syllable** | **Required** |
+| Donation description → food stock | §12 | Low — a recount fixes it | No |
 
 ---
 
@@ -266,7 +275,43 @@ Two properties that are non-negotiable, both from playbook §4.1: `recordAiUsage
 than no observation), and the structured log line is emitted **synchronously** so
 detail survives a Cloud Run cold shutdown that drops the Firestore write.
 
-### 2.7 `socialPosts/{postId}` — ⏸ deferred, not built
+### 2.7 `pets/{petId}/measurements/{measurementId}` — new, authenticated read
+
+**The model has no weight field, and two new subsystems both require one.**
+`Pet.size` is `pequeno | mediano | grande`, which is a wall filter, not a
+clinical quantity. Drug dosing is `mg/kg` and energy requirement is a function of
+`kg^0.75`; neither can be computed from a size bucket.
+
+```ts
+export interface PetMeasurement {
+  id: string;
+  weightKg: number | null;
+  /** WSAVA 9-point Body Condition Score. 1 emaciated, 5 ideal, 9 obese. */
+  bcs: number | null;
+  /** WSAVA Muscle Condition Score — separate axis from fat. */
+  mcs: 'normal' | 'leve' | 'moderada' | 'marcada' | null;
+  measuredAt: Timestamp;
+  measuredBy: string;
+  note: string | null;
+}
+```
+
+**Why a subcollection and not two fields on `Pet`.** "The fat ones are reduced,
+the slim are increased" is a **feedback loop**, and a feedback loop needs a
+trend, not a current value. One BCS reading tells you a dog is thin; a sequence
+tells you whether the extra ladle is working. Latest values get denormalised onto
+`Pet` for the wall and for dose calculation, the way `coverPhoto` already is.
+
+**BCS is a real standard, not an ad-hoc field.** The
+[WSAVA Global Nutrition Guidelines](https://wsava.org/global-guidelines/global-nutrition-guidelines/)
+9-point scale is the same body whose vaccination guidelines §3 of the research
+doc already adopts — 1 emaciated, 5 ideal, 9 grossly obese, with 4–5 ideal for
+dogs. WSAVA publishes the charts in its Global Nutrition Toolkit, in Spanish,
+which means the admin UI can show the real chart rather than asking a volunteer
+to guess what "gordo" means. Modelling it as a free-text `gordo | flaco` would
+throw away a calibrated, repeatable scale for nothing.
+
+### 2.8 `socialPosts/{postId}` — ⏸ deferred, not built
 
 > **Deferred at the user's direction, 2026-08-16.** Facebook and Instagram only
 > when it happens; X and TikTok are out. Kept here as a record of the intended
@@ -523,7 +568,105 @@ Not phase 1: it doubles extraction cost and complexity to improve a review step
 that has not yet been used once on a real card. Build the single-extractor path,
 measure how often review actually catches something, then decide.
 
-### 4.7 The review gate is not optional
+### 4.7 Voice dictation for the veterinary consult
+
+**Added at the user's direction, 2026-08-16.** The vet speaks a diagnosis; the
+system transcribes it and extracts medications, dosages and findings into
+`pets/{petId}/medical/{recordId}`.
+
+This is the same plumbing as card extraction — same provider, same metering, same
+review discipline — but **the stakes are materially higher and the design has to
+reflect that.**
+
+#### Why this is the highest-risk path in the system
+
+A misheard vaccination date on a card is recoverable. **A misheard dose is not.**
+`0.5 ml` and `5 ml` differ by one syllable in spoken Spanish and by a factor of
+ten in the animal. `15 mg` and `50 mg` are near-homophones. Concentration and
+volume are routinely conflated in speech — a vet says *"un mililitro de
+ivermectina"* without stating the concentration, and the same volume of a
+different presentation is a different dose entirely.
+
+So the dosage path gets treatment nothing else in this plan gets.
+
+#### One call, two outputs
+
+Gemini accepts audio natively, so transcription and extraction are a single
+`generateObject` call rather than a separate speech-to-text service. But the
+schema must return **both**:
+
+```ts
+{
+  transcript: string,            // VERBATIM. The vet's actual words, unedited.
+  findings: { ... },
+  medications: Array<{
+    name: string,                // as spoken, not normalised
+    dose: number | null,
+    doseUnit: 'mg' | 'ml' | 'mg/kg' | 'UI' | 'gotas' | null,
+    concentration: string | null,
+    route: 'oral' | 'sc' | 'im' | 'iv' | 'topica' | null,
+    frequency: string | null,
+    durationDays: number | null,
+    heardAs: string,             // the literal phrase this came from
+    confidence: number,
+  }>
+}
+```
+
+**The verbatim transcript is the record; the extraction is a convenience.** If
+the two ever disagree, the transcript wins. Storing only the structured output
+would discard the one artefact that lets a vet check what was actually said —
+and playbook §6.3's warning about deleting text from a model's output applies
+directly: a scrubber that removed a link once produced *"Submit the completed to
+the regulator"*, confident and grammatical and wrong.
+
+`heardAs` is the §4.3 verbatim-snippet rule doing its most important work. The
+reviewer sees *"heard: «medio mililitro»"* beside `0.5 ml`.
+
+#### Two-extractor consensus is REQUIRED here, not phase 2
+
+§4.6 argued consensus was optional for vaccination cards. **For dosages it is
+not.** The playbook measured a Flash + Flash-Lite pair disagreeing on ~100% of
+extractions, which is precisely the property wanted: run both on the same audio,
+and **any disagreement on a dose, unit, or concentration hard-blocks the record**
+until a human resolves it. `Promise.allSettled`, never `Promise.all` — one
+extractor failing must not lose the other's work.
+
+Agreement is not proof of correctness. It is a cheap filter that lets the vet's
+attention go to the fields where the models diverged, and at ~$0.017 per consult
+it is the least expensive safety measure in this document.
+
+#### The rest of the rules
+
+- **Failure direction: drop, hard.** Playbook §6.2. An unparseable dose is
+  `null` and a manual entry. There is no defensible reason to guess.
+- **Nothing auto-commits, ever.** The dictating vet confirms their own record.
+  They are professionally responsible for it, and the system must not put words
+  in their notes — record `dictatedByUid` separately from `confirmedBy`.
+- **Never compute a dose.** The system may *display* `mg/kg × weightKg` as an
+  arithmetic aid next to what was dictated, clearly labelled as a calculation.
+  It must never write a computed dose into the record as though it were
+  prescribed. That is the line between a transcription tool and an unlicensed
+  prescribing system, and it is not a line to be near.
+- **`weightKg` is a precondition** (§2.7). A `mg/kg` dose against a null weight
+  is not a partial record, it is an uninterpretable one — surface it as missing.
+- **The audio is the source document**, stored like the card scan. It is
+  **restricted tier**: a consult recording can carry a client's name, a
+  volunteer's voice, and an address mentioned in passing. It is not `medical`'s
+  authenticated tier.
+- **Spanish, Bolivian veterinary vocabulary.** Prompt for it explicitly and do
+  not let the model normalise drug names into international spellings.
+
+#### Audio size
+
+Playbook §9: inline caps at ~20 MB before base64 inflation. A compressed
+few-minute consult is comfortably under that, so **inline, same as the card**.
+A long multi-animal session is the case that would need the Files API — enforce a
+recording length cap in the client rather than discovering the ceiling in
+production, and note that the model-side limits are stricter and format-specific
+than the upload limits.
+
+### 4.8 The review gate is not optional
 
 `MedicalRecord.source` and `confirmedBy` **already exist** in the schema — the
 2026-08-07 design anticipated this exactly. Honour it:
@@ -546,7 +689,7 @@ review step is not ceremony.
 > **Facebook and Instagram only**. X and TikTok are out — the research below is
 > why, and it is kept so the question is not reopened from scratch.
 >
-> Nothing in §9's build order depends on this section. `socialPosts` (§2.7) is
+> Nothing in §9's build order depends on this section. `socialPosts` (§2.8) is
 > not created, no Meta app is registered, and no platform adapter is written.
 > The one thing worth doing early is the **one-minute check in §5.3**, because
 > if it fails, the eventual plan changes shape entirely and it is better to know
@@ -786,10 +929,26 @@ self-contained.
 | 6 | **Re-admission / dedup path** | §3.1 — cheap now, expensive once duplicates exist |
 | 7 | `MedicalRecord` extensions + manual medical entry | §2.1, §4.4 |
 | 8 | **AI foundations**: provider, `model-ids`, `pricing.mjs`, `recordAiUsage` | §4.1 — before the first call |
-| 9 | Card extraction + review gate | §4.3, §4.7 |
-| 10 | QR tokens + `/id/{token}` + print sheet | §7 |
-| 11 | Adoption applications + admin queue | §6 — **first real test of the rules** |
+| 9 | Card extraction + review gate | §4.3, §4.8 |
+| 10 | **Weight + BCS measurements** | §2.7 — precondition for 11 and 13 |
+| 11 | **Voice dictation + consensus dosage gate** | §4.7 — highest-risk path, build it after the review UI exists |
+| 12 | QR tokens + `/id/{token}` + print sheet | §7 |
+| 13 | **Food: donation parsing, stock, cook log, daily rations** | §12 — parallelisable |
+| 14 | Adoption applications + admin queue | §6 — **first real test of the rules** |
 | — | ⏸ *Social syndication* | **Deferred** — §5 |
+
+**Step 10 before 11 and 13 is not optional.** Dosing is `mg/kg` and energy
+requirement is a function of `kg^0.75`; both subsystems are uninterpretable
+without a weight, and `Pet.size` is a wall filter, not a clinical quantity.
+
+**Step 11 deliberately follows 9** rather than leading. The voice path is the
+highest-consequence thing in this document, and it should be built on a review UI
+that has already been exercised on real vaccination cards — not on one that has
+only ever been reasoned about.
+
+**Step 13 can move.** Food shares only `Pet` and the Gemini plumbing with
+everything above it. If the shelter's daily pain is the pot rather than the wall,
+build it right after step 8 and nothing breaks.
 
 **Step 8 is its own step deliberately.** The playbook's §15 checklist puts
 metering and the price table on day one, and its §4.2 records the cost of not
@@ -815,6 +974,9 @@ shelter a working admin console, 11 gives them a screening queue.
 | Firestore, Cloud Run, Storage | **$0** | Free tier is ~50× this shelter's volume |
 | Firestore PITR + backups | small, existing | Already the first deliberate line item |
 | **Gemini — card extraction** | cents/month | ~1–2 inline images per animal, Flash tier |
+| **Gemini — vet dictation** | cents/month | Audio in, **two extractors** per consult (~$0.017 each), bounded by consults performed |
+| **Gemini — donation parsing** | negligible | A short text string per delivery |
+| **Food yield calculation** | **$0** | Deterministic arithmetic, not an LLM call — §12.1 |
 | **Grounded search** | **$0 — structurally** | We use none. This is the SKU that was 73% of the sibling stack's bill |
 | *Social (deferred)* | — | Facebook + Instagram are free when built |
 
@@ -853,13 +1015,184 @@ in this plan.
 5. **Do adopters get write access to their animal's record?** Currently
    admin-only writes throughout. An adopter updating a vaccination after a vet
    visit is genuinely useful and is a meaningful widening of the rules.
-6. *(Deferred with §5)* **Is the Facebook target a Page or a personal profile?**
+6. **Pot and ladle measurements** — the user is providing these. Until then the
+   constants in `shelter.ts` stay `null` and no yield estimate is shown. §12.2.
+7. **Does the shelter weigh its dogs, and how often?** §2.7 assumes a scale
+   exists. If it does not, every `mg/kg` dose and every RER figure is an estimate
+   built on an estimate, and that should be visible in the UI rather than hidden
+   behind a computed number. This is worth asking before building step 10.
+8. **Who dictates — the vet, or a volunteer relaying?** §4.7 assumes the vet
+   speaks and confirms their own record. If a volunteer transcribes on their
+   behalf, `dictatedByUid` and professional responsibility come apart, and the
+   confirmation step needs rethinking.
+9. *(Deferred with §5)* **Is the Facebook target a Page or a personal profile?**
    Not blocking anything now, but it is a one-minute check and the answer
    reshapes the eventual social plan. Worth doing opportunistically.
 
 ---
 
-## 12. What this plan does not do
+## 12. Food: donations, cooking, and daily rations
+
+**Added at the user's direction, 2026-08-16.** The shelter receives raw food as
+donations — pork, beef, chicken giblets, rice, vegetables — cooks it as soup in
+one large pot, and serves ~40 dogs in ladles (*cucharones*): roughly 4 for a
+large dog, 2 for a small one, reduced for the overweight and increased for the
+thin. The system must track raw stock in, what can be cooked from it, and what is
+actually served each day.
+
+### 12.1 The architectural call: the LLM parses, arithmetic decides
+
+The request says the LLM will calculate how much food can be cooked. **I'd do
+that differently, and it matters.**
+
+| Job | Who does it | Why |
+|---|---|---|
+| *"Trajeron 5 kilos de menudencia, 2 bolsas de arroz y una caja de verduras"* → structured items | **Gemini** | Messy natural language → structure. Exactly what it's for, and the same pattern as the card and the consult |
+| *This stock yields N ladles, which feeds M dogs* | **Deterministic code** | Arithmetic |
+
+An LLM doing the arithmetic is slower, costs money per calculation, and is
+**non-deterministic on numbers** — the same stock could yield two different
+answers on two days, and there would be no way to tell which was wrong. A shelter
+deciding whether tonight's pot feeds every dog needs an answer that is
+reproducible and auditable, not generated.
+
+Keep the LLM at the input boundary. This also keeps the food module almost
+entirely free, since parsing a donation is a handful of tokens.
+
+### 12.2 The hard part is not the code, it is the conversion factor
+
+Raw mass → cooked volume → ladles cannot be derived from first principles:
+
+- Rice roughly **triples** in volume as it absorbs water; meat **shrinks** as it
+  renders; water is added in an amount nobody measures.
+- Bone-in donations carry mass that never becomes food.
+- "Una bolsa de arroz" is not a unit. Neither is "una caja de verduras."
+
+**So do not compute the yield — measure it.** The first N cook batches *are* the
+calibration dataset: record what went into the pot and how many ladles actually
+came out, and the prediction becomes a fit to this shelter's own history rather
+than a food-science guess that will be wrong in a way nobody can debug.
+
+Concretely: `cookBatches` records `inputs[]` **and** an observed
+`ladlesYielded`. Until there are enough batches to fit, the UI shows *"aún
+calibrando"* and no estimate at all — which is more useful than a confident wrong
+number, and is the §6.2 failure-direction rule applied to a non-LLM path.
+
+**Pot and ladle geometry go in `src/config/shelter.ts`**, the file a forking
+shelter edits — the user is providing measurements later, and until then the
+constants are explicitly `null`, not guessed defaults. A shelter with a different
+pot must not inherit Wawitas' numbers silently.
+
+### 12.3 Rations have a standard, and it is not "big dog = 4 spoons"
+
+"Big dogs 4, small dogs 2" is a reasonable field heuristic and it is what the
+staff will keep using. But there is a real international standard underneath it,
+and recording both lets the heuristic be checked rather than merely followed:
+
+**Resting Energy Requirement**, the veterinary standard referenced by WSAVA and
+AAHA:
+
+```
+RER (kcal/day) = 70 × (weightKg ^ 0.75)
+MER            = RER × factor      // neutered adult ~1.6, active ~2.0,
+                                   // weight loss ~1.0, growth 2–3
+```
+
+Note `^0.75`: energy need scales **sub-linearly** with weight. A 40 kg dog needs
+about 2.7× a 10 kg dog's calories, not 4×. A linear ladle rule therefore
+systematically **underfeeds large dogs relative to small ones** — which is worth
+knowing in a shelter where the large dogs are the ones that look thin.
+
+The system should not overrule the staff. It should show, next to the recorded
+ration, what the standard suggests — and let the divergence be visible.
+
+**Body Condition Score (§2.7) is the feedback signal**, on the WSAVA 9-point
+scale, not a `gordo | flaco` flag. Ration adjustment becomes: BCS ≥ 7 → reduce
+and re-score in 4 weeks; BCS ≤ 3 → increase and check for parasites or disease
+first, because a thin dog in a shelter is a clinical question before it is a
+feeding one.
+
+### 12.4 Two safety checks that belong at donation intake
+
+**Toxic ingredients.** Donated vegetables genuinely arrive containing onion, and
+*Allium* species — onion, garlic, leek, chives — cause haemolytic anaemia in
+dogs, with cooking offering no protection. Also grapes and raisins, chocolate,
+xylitol, macadamia, alcohol, and raw bread dough. The parser already reads the
+donation description, so flagging these costs nothing extra and catches the case
+where nobody looked in the box.
+
+**Cooked bones.** Cooked bone splinters and can perforate the digestive tract —
+a documented risk distinct from raw bone. A shelter boiling donated meat is
+producing exactly this, so bone-in donations should be flagged as *"deshuesar
+antes de servir"* at intake.
+
+**Framing, deliberately:** the system **flags for the shelter's own judgement**.
+It does not diagnose, does not refuse a donation, and does not tell anyone what
+to feed. That is the shelter's and their vet's call, and a tool that nags gets
+switched off.
+
+**One thing worth stating plainly, once, and then leaving alone:** a soup of
+donated scraps, rice and vegetables is unlikely to be a complete and balanced
+canine diet — calcium in particular is easy to miss when meat arrives without
+usable bone. This system will be recording the exact data that reveals it, which
+is a genuine argument for building it. It is not an argument for the system to
+give nutritional advice.
+
+### 12.5 Data model
+
+```
+foodDonations/{donationId}        ADMIN
+  donor, receivedAt, rawText, items[], flags[], recordedBy
+  source: 'manual' | 'llm-parsed'
+  confirmedBy                     ← same review gate as everything else
+
+foodStock/{itemKey}               ADMIN   — current pantry, one doc per item type
+  category: 'carne' | 'menudencia' | 'arroz' | 'verdura' | 'hueso' | 'otro'
+  quantity, unit, updatedAt
+
+cookBatches/{batchId}             ADMIN
+  cookedAt, inputs[]              ← decrements foodStock
+  potFillLevel
+  ladlesYielded                   ← OBSERVED, not predicted. The calibration data
+  dogsServed, cookedBy, notes
+
+feedingLog/{YYYY-MM-DD}           ADMIN
+  batchIds[], servings[{ petId, ladles, adjustedReason }]
+  dogsPresent, shortfall
+```
+
+`feedingLog` keyed by date so a day is one document and one read.
+
+**`FeedingPlan` needs reconciling, not extending.** The existing shape —
+`portion`, `unit: 'gramos'|'tazas'|'latas'|'ml'`, `food: string`,
+`foodKind: 'seco'|'humedo'|'mixto'|'casero'` — describes an **owned pet eating
+from a bag**. It is the right model for an adopter and the wrong one for a
+communal pot. The split:
+
+- **`care/feeding`** stays, and becomes what travels **with the animal to its
+  adopter** — the existing rationale in `types.ts` is exactly this, avoiding
+  digestive upset from a sudden diet change.
+- **`rationLadles`** is added as the shelter-side ration, with `unit` gaining
+  `'cucharones'`.
+
+Conflating them would mean handing an adopter a feeding plan measured in ladles
+from a pot they do not have.
+
+### 12.6 Where this sits
+
+Food management is **largely independent of the adoption and identity core** —
+it shares only `Pet` and the Gemini plumbing. It can be built in parallel or
+deferred without blocking anything else, and it is the one module a different
+shelter might want without wanting the rest.
+
+It is also the module most likely to be used **every single day**, by staff who
+are not the people entering pets. That argues for its own simple screen rather
+than a tab inside the admin console, and for it working on a phone in a
+courtyard.
+
+---
+
+## 13. What this plan does not do
 
 - **No social syndication at all, in either direction.** Outbound is deferred
   (§5). Inbound — `PLAN.md` §5's plan to pull posts *from* Facebook — remains
@@ -872,6 +1205,12 @@ in this plan.
   needs the web.
 - **No embeddings, no corpus, no Batch API.** Playbook §7 and §8 do not apply.
   Nothing here is retrieval; if that changes, re-read them before writing a line.
+- **No LLM arithmetic.** The food yield is deterministic code (§12.1), and the
+  system never computes a drug dose into a record (§4.7). Both are deliberate
+  refusals, not gaps.
+- **No nutritional or veterinary advice.** The food module flags known-toxic
+  ingredients and shows what the RER standard suggests beside what the staff
+  actually recorded. It does not prescribe, and it does not overrule anyone.
 - **No BigQuery.** `CLAUDE.md` decided 2026-08-09 to add it when a named report
   justifies it. Nothing here is that report.
 - **No terminology coding.** §4 of the research doc — the socket, not the plug.
