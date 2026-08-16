@@ -1,0 +1,645 @@
+# Plan — pet intake, medical records, adoption, and social syndication
+
+Covers: the admin intake flow, Gemini-assisted vaccination-card parsing, the
+adopter-facing flow, QR identity tags, and LLM-generated cross-posting to social
+media.
+
+Standards research this depends on:
+[`veterinary-records-standards.md`](veterinary-records-standards.md) ·
+[`rfid-microchips.md`](rfid-microchips.md)
+
+---
+
+## 0. Read this first: the plan is blocked on three things that do not exist
+
+Nothing below can ship until these land, and they are already the top of
+`CLAUDE.md`'s queue. This plan does not replace them, it sits on top of them:
+
+1. **A registered Firebase web app** — the four `NEXT_PUBLIC_FIREBASE_*` values
+   are empty. No client-side Firestore, no auth, no admin console.
+2. **Auth flows** — every admin screen here is gated on
+   `request.auth.token.admin`, a custom claim nothing currently sets.
+3. **One real pet document** — the wall has never rendered with data in it.
+
+**Read every estimate here as conditional on those.** This is the same trap
+`CLAUDE.md` names repeatedly: a plan that validates is not a plan that works.
+
+There is also a hard date. **The GCP free trial expires ~2026-11-10.** This plan
+adds the project's first per-request paid API (Vertex AI) and, if X is ever
+enabled, its first per-post one. Both land inside that window.
+
+---
+
+## 1. Standards decisions
+
+The full reasoning is in the research docs, and the Bolivia-specific answer —
+what actually binds a shelter in Cochabamba versus what we adopt by choice — is
+[`veterinary-records-standards.md` §6](veterinary-records-standards.md#6-bolivia--which-standards-actually-bind-us-and-which-we-choose).
+
+The one-line version: **Bolivia mandates nothing here, so we choose — and the
+choice is forced anyway** by SENASAG's ISO-based export paperwork, by the ISO
+hardware sold locally, and by keeping internationally adopted animals eligible
+under EU rules. The decisions:
+
+| Question | Decision | Why |
+|---|---|---|
+| **Microchip standard** | **ISO 11784 / 11785**, FDX-B at 134.2 kHz | Already implemented and tested. The only universal standard in the domain. Keeps internationally adopted animals eligible under EU rules |
+| Non-ISO chips | Keep `non-iso-125` / `non-iso-128` as first-class | A shelter records what it scans, not what it wishes it scanned |
+| **Medical record standard** | **None exists.** Model on the **EU pet passport** section structure + **WSAVA 2024** certificate fields | The only published, internationally legible field schema for this data |
+| **Vaccination practice** | **WSAVA 2024**, using the **shelter table** and the **Latin America regional recommendations** (published in Spanish) | Correct protocol for our actual use case, in our actual language |
+| **Clinical terminology** | **Defer.** Free text + `MedicalRecordKind` enum, plus an empty optional `codes[]` | VeNom and SNOMED VetSCT are both real; neither survives contact with a volunteer transcribing a handwritten card. Backfillable later |
+| **Exchange format** | None. Keep one medical event per document so a FHIR-shaped export stays possible | No adopted veterinary FHIR profile exists. Don't build for it, don't preclude it |
+| **Vaccine product ids** | Free text: manufacturer + product name + lot | No international registry exists. Transcribe the card faithfully |
+| **Population management** | **WOAH Terrestrial Code Ch. 7.7** — cite, don't implement | Bolivia is a WOAH member state. No schema, but it is the legitimacy argument for grants and municipal partnership |
+| **QR symbology** | **ISO/IEC 18004**, error correction **level Q** | Collar tags get scratched. The usual level M default is not enough |
+| **QR payload** | Plain HTTPS URL with an **opaque revocable token**. Not GS1 Digital Link | GS1 needs paid membership and buys interoperability with retail systems no shelter will use |
+
+---
+
+## 2. Data model changes
+
+Existing collections are unchanged except where noted. The tier discipline from
+`CLAUDE.md` holds throughout: **a new visibility tier is a new document, never a
+new field.**
+
+### 2.1 `MedicalRecord` — four additions
+
+The EU passport and WSAVA both demand fields we don't have:
+
+```ts
+  /** Vaccine manufacturer as printed on the card. Null for campaign doses. */
+  manufacturer: string | null;
+
+  /**
+   * When protection BEGINS. For rabies this is 21 days after the primary
+   * protocol completes, NOT the injection date — and it is the date with legal
+   * consequences. Distinct from performedAt on purpose.
+   */
+  validFrom: Timestamp | null;
+
+  /**
+   * When protection LAPSES — WSAVA's "duration of immunity" field. Distinct
+   * from nextDueAt, which is when to come back. Core vaccine immunity commonly
+   * outlasts the booster interval, and conflating the two is how an animal gets
+   * revaccinated unnecessarily or travels on lapsed cover.
+   */
+  validUntil: Timestamp | null;
+
+  /** Reserved for a future VeNom / SNOMED VetSCT mapping. Empty for now. */
+  codes: string[];
+```
+
+Add `'serologia'` to `MedicalRecordKind` — titre testing is §VI of the passport
+and WSAVA-endorsed, and it is not a `consulta` with a note.
+
+**Keep `veterinarian` and `batch` nullable and do not treat null as incomplete.**
+Bolivia's free national rabies campaign produces exactly this: a real, valid
+vaccination with no named vet and no lot number. Cochabamba receives the largest
+departmental allocation in the country, so this is the common case here, not an
+edge case.
+
+### 2.2 `pets/{petId}/media/{mediaId}` — new, replaces the photo arrays
+
+The request adds **videos**, and the current model has nowhere to put them:
+`coverPhoto` is one public string and `detail.photos[]` is an array in a gated
+document.
+
+```ts
+export type MediaKind = 'photo' | 'video';
+export type MediaTier = 'public' | 'auth';
+
+export interface PetMedia {
+  id: string;
+  kind: MediaKind;
+  tier: MediaTier;
+
+  /** Storage path, not a URL — URLs are derived at read time. */
+  path: string;
+  /** Generated derivatives: thumb, card, full. Videos also get a poster frame. */
+  derivatives: Record<string, string>;
+
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;   // video only
+  /** Spanish alt text. Required for photos — accessibility, and it feeds the LLM. */
+  alt: string | null;
+  /** Ordering on the expediente. The cover is order 0 with tier 'public'. */
+  order: number;
+
+  uploadedAt: Timestamp;
+  uploadedBy: string;
+}
+```
+
+**This bends the "tier is a document" rule and the reason should be explicit.**
+Media is many-per-pet and unbounded; an array in a document means every upload
+rewrites the whole document, and a pet with 40 photos plus video derivatives
+approaches Firestore's 1 MiB document ceiling. So tier becomes a *field*, and the
+rule enforces it via a **query constraint** instead:
+
+```
+match /pets/{petId}/media/{mediaId} {
+  allow read: if resource.data.tier == 'public' || isSignedIn();
+  allow write: if isAdmin();
+}
+```
+
+The caveat that must be understood by whoever writes the client: on a **query**,
+Firestore evaluates rules against the query's constraints, not the results. An
+unauthenticated client must issue `where('tier','==','public')` or the whole
+query is rejected — it does not silently return a filtered subset. This is a
+known Firestore sharp edge and it will look like a broken query the first time
+it happens.
+
+`Pet.coverPhoto` stays as-is. It is denormalised on purpose: the wall renders it
+server-side, and a subcollection read per card would multiply the wall's
+Firestore cost by the number of pets on it.
+
+### 2.3 `petDrafts/{draftId}` — new, admin-only
+
+Where a half-finished intake lives, and where LLM output lands before a human
+confirms it. Separate from `pets` so an unfinished animal can never appear on the
+public wall through a status typo — the wall queries `pets`, and a draft is not
+in `pets`.
+
+```ts
+export interface PetDraft {
+  id: string;
+  /** Everything the wizard has collected so far. All optional by design. */
+  payload: Partial<Pet & PetDetail & PetIdentity>;
+  medical: Partial<MedicalRecord>[];
+  /** Per-field provenance, so the UI can highlight what the LLM guessed. */
+  fieldSources: Record<string, 'manual' | 'llm-extracted'>;
+  /** 0–1 per field, from the extraction. Low confidence forces review. */
+  fieldConfidence: Record<string, number>;
+  step: number;
+  createdBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+```
+
+### 2.4 `adoptionApplications/{applicationId}` — new
+
+`adoptions/{petId}` records a *completed* adoption. "Users should be able to
+adopt" needs the step before it, which does not exist.
+
+```ts
+export type ApplicationStatus =
+  | 'enviada' | 'en-revision' | 'entrevista' | 'aprobada' | 'rechazada' | 'retirada';
+
+export interface AdoptionApplication {
+  id: string;
+  petId: string;
+  applicantUid: string;
+
+  /** Contact + housing + household. The shelter's real screening questions. */
+  answers: Record<string, string | boolean | number>;
+  status: ApplicationStatus;
+  /** Admin-only. Never readable by the applicant. */
+  internalNotes: string | null;
+
+  submittedAt: Timestamp;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+}
+```
+
+**Read rule: the applicant and admins only.** An application contains a private
+individual's housing situation, household composition, and contact details.
+`internalNotes` must live in a separate admin-only document — an applicant who
+can read the shelter's private assessment of them is a problem the first time
+someone is rejected.
+
+### 2.5 `qrTokens/{token}` — new, public read
+
+```ts
+export interface QrToken {
+  token: string;      // doc id; opaque, ~10 chars base32
+  petId: string;
+  revokedAt: Timestamp | null;
+  createdAt: Timestamp;
+  createdBy: string;
+}
+```
+
+Public read is deliberate and safe: the token resolves to the **public** tier
+only, exactly like `findPetByMicrochip()`. A separate document rather than a
+field on `pets` so a token can be revoked and reissued without touching the
+animal's record, and so the reverse lookup is one `get()` by document id rather
+than a query.
+
+### 2.6 `socialPosts/{postId}` — new, admin-only
+
+```ts
+export type SocialPlatform = 'facebook' | 'instagram' | 'x' | 'tiktok';
+export type SocialPostStatus =
+  | 'borrador'      // LLM generated, awaiting human edit
+  | 'aprobado'      // human approved, queued
+  | 'publicando'
+  | 'publicado'
+  | 'fallido';
+
+export interface SocialPost {
+  id: string;
+  petId: string;
+  platform: SocialPlatform;
+
+  /** LLM output. Always editable before publish. */
+  body: string;
+  hashtags: string[];
+  mediaIds: string[];
+
+  status: SocialPostStatus;
+  /** Set on publish. The permalink, for the audit trail and for un-posting. */
+  externalId: string | null;
+  externalUrl: string | null;
+  error: string | null;
+
+  generatedBy: 'gemini';
+  /** Null until a human has read it. Nothing publishes with this null. */
+  approvedBy: string | null;
+  approvedAt: Timestamp | null;
+  publishedAt: Timestamp | null;
+}
+```
+
+**No access token ever goes in Firestore.** Platform credentials live in Secret
+Manager, bound to the Cloud Run runtime service account. `CLAUDE.md` already
+carries the rule that Terraform owns the Cloud Run env list — these are secret
+refs, declared in Terraform, not CI-injected.
+
+---
+
+## 3. The intake flow
+
+Six steps, each independently saveable to `petDrafts`. The ordering is chosen so
+the animal is publishable as early as possible — the primary objective is getting
+a stranger to message about a specific animal, and that only needs steps 1–2.
+
+```
+1. Identity      species, name, sex, size, estimated age, breed
+                 → microchip scan/entry (validateMicrochip already exists)
+2. Media         drag-drop photos + video. First photo = cover.
+                 → Spanish alt text required on photos
+3. Story         temperament, story, commitments, good-with-children/pets
+4. Medical       ── upload vaccination card → Gemini extraction → REVIEW ──
+                 or manual entry
+5. Care          feeding plan, restrictions
+6. Publish       preview the public card + the expediente
+                 → generate social drafts (§5)
+                 → publish
+```
+
+**Steps 3–5 are skippable.** A rescue arriving at 22:00 needs to be on the wall,
+not blocked on a feeding plan. Publishing with only steps 1–2 is a supported
+path, and the admin dashboard shows what's incomplete rather than refusing.
+
+**Validation that must run at entry, not later:**
+
+- `validateMicrochip()` — already built and tested, 10/10. Wire it in.
+- `rabiesVaccinationIsValid()` — already built. Fires when a rabies record is
+  entered against a chip implant date.
+- **New: the 12-week rule.** Reg. (EU) 2026/131 requires the animal be ≥12 weeks
+  old at rabies vaccination. Bolivia's national campaign vaccinates **from 10
+  days**. Both are legitimate; they answer different questions. Surface this as
+  an informational note — *"protegido bajo la campaña nacional; no cumple los
+  requisitos de viaje a la UE"* — and **never as an error**. Flagging a
+  correctly-administered Bolivian campaign dose as invalid would train staff to
+  ignore the validator.
+
+---
+
+## 4. Gemini vaccination-card extraction
+
+### 4.1 Route it through Vertex AI, not the Gemini Developer API
+
+Both serve the same models. Vertex authenticates with the **Cloud Run runtime
+service account via ADC** — no API key to create, store, rotate, or leak. The
+Developer API needs a key, which means a Secret Manager entry, a rotation story,
+and one more credential on a project that already documents having three
+credential stores and two identities.
+
+Cost is the counter-argument and it is small: Flash-tier pricing against one or
+two card images per animal is negligible at shelter volume. **It is not zero**,
+which makes it the project's second deliberate non-zero line item after Firestore
+backups. Budget alert already exists.
+
+Requires, in Terraform: `aiplatform.googleapis.com` enabled, and
+`roles/aiplatform.user` on the runtime service account. Per `CLAUDE.md`'s
+most-repeated lesson, **an unenabled API fails at apply, not at plan** — expect
+this one to bite exactly once.
+
+### 4.2 Extraction contract
+
+Runs as a Server Action on the existing Cloud Run service. No new infrastructure.
+
+- **Structured output with a JSON schema.** Gemini supports JSON Schema across
+  current models; a Zod schema serves as both the API contract and the parse
+  boundary, so malformed output fails loudly instead of writing garbage.
+- **Prompt in Spanish.** The cards are Spanish, handwritten, often stamped, often
+  faded. Ask for `null` on any field that is not legible.
+- **Per-field confidence, 0–1, required.** Anything below threshold is
+  highlighted in the review UI rather than silently accepted.
+- **Never invent a date.** This is the instruction that matters most. A
+  hallucinated vaccination date is a health decision made on fabricated data, and
+  for rabies it has legal consequences. `null` is always the correct answer when
+  unsure.
+- **The card image is retained** as `sourceDocument` — the field already exists.
+  A human reviewer needs to see the original next to the extraction.
+
+### 4.3 The review gate is not optional
+
+`MedicalRecord.source` and `confirmedBy` **already exist** in the schema — the
+2026-08-07 design anticipated this exactly. Honour it:
+
+- Everything Gemini produces is written with `source: 'llm-extracted'` and
+  `confirmedBy: null`.
+- An unconfirmed record is visible in the admin UI and **excluded from anything
+  that computes** — due dates, travel eligibility, the public "vacunado" badge.
+- Confirmation is per-record, one click, and stamps `confirmedBy`.
+
+The realistic accuracy expectation should be stated plainly: handwritten dates
+on a faded card, photographed on a phone, will be read wrong sometimes. The
+review step is not ceremony.
+
+---
+
+## 5. Social syndication
+
+### 5.1 What is actually possible, per platform
+
+Researched 2026-08-16. This is the part of the request with the largest gap
+between what is asked and what the platforms permit.
+
+| Platform | Programmatic posting | Cost | The blocker |
+|---|---|---|---|
+| **Facebook Page** | ✅ Graph API | Free | Meta app + `pages_manage_posts`. **App Review avoidable** — see below |
+| **Instagram** | ✅ two-step: create container → publish | Free | Professional account linked to the FB Page. 100 API posts / 24 h |
+| **X (Twitter)** | ✅ | ⚠️ **~$0.20 per post containing a URL** | The free tier was **discontinued 6 Feb 2026**. New developers get pay-per-use only; the $200/mo Basic tier is closed to new signups |
+| **TikTok** | 🟡 Content Posting API | Free | Requires a **separate audit**. Until it passes, every post is forced to `SELF_ONLY` — invisible to the public |
+| WhatsApp Channels | ❌ | — | No public posting API |
+| Threads | ✅ | Free | Real, lower priority |
+
+**The App Review escape hatch — this is what makes Phase 1 shippable.** A Meta
+app in **Development mode** can use `pages_manage_posts` for users who hold a
+role on the app, with no App Review. Instagram has the equivalent via the
+Instagram Tester role. Since we are posting to *the shelter's own* Page and
+account — not offering a service to third parties — the app stays in Development
+mode indefinitely and never goes near a 2–4 week review cycle. Combined with a
+long-lived Page access token, which does not expire on a timer, this is a
+genuinely low-maintenance integration.
+
+**X is the one that costs money.** Every post we generate contains a link to the
+pet's expediente — that *is* the point of the post — which puts every X post in
+the ~$0.20 bucket rather than the ~$0.015 one. At 20 animals/month that is ~$4/mo:
+small in absolute terms, but it is a recurring per-post charge on a project whose
+stated constraint is $0/month, and it scales with exactly the activity we want to
+increase.
+
+**TikTok fights the format.** Beyond the audit, TikTok is video-first, and the
+shelter's content is overwhelmingly photographic. A photo carousel is possible
+but it is not what performs there. The honest recommendation is that TikTok
+deserves a human posting real video, not an API syndicating a database record.
+
+### 5.2 Recommendation
+
+**Phase 1 — Facebook + Instagram only.** Both free, both no-review, and both are
+where Wawitas' 1.9K followers already are.
+
+**Phase 2 — Threads**, if wanted. Free, same Meta app.
+
+**Phase 3 — X and TikTok behind per-platform feature flags**, defaulting off,
+each with its cost and audit status documented at the flag. Build the syndication
+layer platform-agnostic so adding one is an adapter, not a redesign.
+
+### 5.3 ⚠️ Verify the Facebook target is a Page, not a profile
+
+`PLAN.md` §5 asserts the Wawitas page is a Facebook Page rather than a personal
+profile. The URL on file is `profile.php?id=61563998952145`. That format *is*
+consistent with a Page created under the New Pages Experience — IDs beginning
+`61` are typical — but it is also the format of a personal profile, and **the
+Graph API cannot post to a personal profile at all.**
+
+This is a one-minute check that invalidates the entire Facebook and Instagram
+half of this plan if it goes the wrong way. **Do it before writing any adapter
+code.**
+
+### 5.4 Nothing auto-publishes
+
+Every generated post lands as `borrador` and requires `approvedBy` before it can
+be queued. Three reasons, and the first is sufficient:
+
+1. **The copy is machine-written and it goes out under a real shelter's name**,
+   to 1.9K people who know them. A hallucinated claim that an animal is "great
+   with children" is not a typo — it is a placement decision, and it can get a
+   child bitten and an animal returned.
+2. A wrong post cannot be reliably retracted across platforms.
+3. `PLAN.md` §5 already made this exact call for the inbound Facebook sync — *"A
+   weekly two-minute confirmation is a fair price for a site that is always
+   correct."* The same logic applies with more force outbound, because outbound
+   is public.
+
+### 5.5 LLM copy generation
+
+Same Vertex AI path as §4.
+
+- **Input is the structured record only.** The prompt receives explicit fields
+  and is instructed to use nothing else. It must not infer temperament, health,
+  or suitability that is not in the record — see reason 1 above.
+- **Per-platform variants** from one call: Facebook long-form, Instagram with
+  emoji and hashtags, X within 280 characters.
+- **Spanish, in the shelter's voice.** They have a corpus already —
+  `PLAN.md` §1 quotes real captions (*"¡ADOPTA A MOCCA! …COMPROMISOS: castración
+  gratuita a sus 6/7 meses. Se hará seguimiento."*). Few-shot on their own posts
+  rather than inventing a voice.
+- **Always ends in the conversion.** The `wa.me` deep link pre-filled with the
+  animal's name, plus the expediente URL. This is the primary objective and it
+  is not the LLM's creative decision — template it around the generated body.
+- Media selection: public-tier media only, `order` ascending.
+
+---
+
+## 6. The adoption flow — and a conflict worth naming
+
+### The conflict
+
+`CLAUDE.md`'s primary objective is *"get a stranger from scrolling to messaging
+the shelter about a specific animal"*, and `PLAN.md` §2 is emphatic that the
+conversion is **WhatsApp, no account, no form** — *"three taps from landing to
+conversation"*, and that this is "the single highest-leverage decision in the
+plan."
+
+"Users should be able to adopt the pet" implies an account and a form. A signup
+wall in front of the WhatsApp button would directly undercut the project's stated
+primary objective.
+
+### The resolution
+
+**Both, with WhatsApp unambiguously primary.** They serve different people:
+
+```
+Expediente
+  ├── [ ADÓPTAME por WhatsApp ]   ← coral, primary, no account. UNCHANGED.
+  └──   Postular en línea →        ← secondary, text link, optional account
+```
+
+The online application is worth having because it captures the structured
+screening answers the shelter currently gathers by hand over WhatsApp, and it
+gives them a reviewable queue instead of a chat backlog. It is not worth having
+at the cost of the conversion rate.
+
+**Design rule: the account requirement never moves in front of the WhatsApp
+button.** If measurement later shows the online path performing better, that is
+a decision to revisit with data — not an assumption to build in now.
+
+### The flow
+
+1. Visitor reads the expediente (public tier).
+2. Optionally signs in — this also unlocks the gated `detail` tier, which is the
+   real incentive to create an account, rather than a wall.
+3. Submits an application: housing, household, other pets, experience, why this
+   animal.
+4. Admin sees it queued against the pet. Status moves through
+   `en-revision → entrevista → aprobada`.
+5. On approval, the admin creates `adoptions/{petId}` — which is what
+   `ownsPet()` resolves against, unlocking the restricted tiers (microchip,
+   medical, feeding) **to the new owner**. The identity record transfers with
+   the animal, which is the secondary objective working as designed.
+6. A `custody` record is written. `Pet.status` → `adoptado`.
+
+**Step 5 is the first real test of `firestore.rules`.** Those rules have been
+compiled and released but never exercised against a live client — the ownership
+path is the most intricate thing in them, and this is where it either works or
+does not.
+
+---
+
+## 7. QR codes
+
+**Payload:** `https://wawitas.org/id/{token}` — a short host and a ~10-character
+base32 token keep the symbol at a low version, which is what keeps it scannable
+at collar-tag size. Level Q error correction, 4-module quiet zone, ≥20 mm printed.
+
+**Generated server-side as SVG.** No external QR service: sending pet identifiers
+to a third-party image API is a privacy leak for zero benefit, and it puts a
+runtime dependency in the path of a printable page.
+
+**What `/id/{token}` shows** — the same stance as `findPetByMicrochip()`:
+
+| Visitor | Sees |
+|---|---|
+| Anyone | Public tier: photo, name, species, breed, size, status, `hasMicrochip`. Plus a prominent **"¿Encontraste a este animalito?"** → WhatsApp |
+| Signed in | Adds the gated `detail` tier |
+| Owner / admin | Adds microchip, medical, feeding, custody |
+
+A finder gets a name and a phone call in one scan without an account. They do not
+get the microchip number, an address, or the ability to enumerate the registry.
+
+**Print surface:** `/admin/pets/{id}/qr` with a print stylesheet — a single tag,
+and a sheet of tags for a batch intake.
+
+**The honest limitation, which belongs in the UI copy:** a QR tag is on the
+collar and the collar comes off. The microchip is under the skin and does not.
+These are complementary, and the QR is the one that works for a member of the
+public with a phone and no scanner — which is most finders. Neither is a tracker;
+`rfid-microchips.md` §1 applies to both.
+
+---
+
+## 8. Infrastructure changes
+
+| Change | Where | Note |
+|---|---|---|
+| Enable `aiplatform.googleapis.com` | `terraform/apis.tf` | Fails at apply, not plan |
+| `roles/aiplatform.user` on runtime SA | `terraform/` | Least privilege; not the CI SA |
+| Secret Manager: FB/IG tokens | `terraform/` + Cloud Run `secret_key_ref` | **Create the secret version before the binding resolves**, or the revision fails to start |
+| Cloud Run env vars | Terraform only | Never `--set-env-vars` in CI. A plain env silently overrides a secret ref of the same name |
+| Storage rules deployed | blocked | Media upload makes this urgent. Needs the Firebase default-bucket decision |
+| `public_access_prevention` on `wawitas-app` | currently `inherited` | Decide now that media is real |
+| New composite indexes | `firestore.indexes.json` | `socialPosts(status, petId)`, `adoptionApplications(petId, status)`, `media(tier, order)` |
+| Rules for 5 new collections | `firestore.rules` | Still deployed by hand, deliberately |
+
+**Storage rules move from "not urgent" to blocking.** The current assessment in
+`CLAUDE.md` — that the undeployed `storage.rules` is not an exposure — rests on
+`wawitas-app` having no `allUsers` binding and holding nothing. Media upload ends
+both halves of that.
+
+---
+
+## 9. Build order
+
+Sequenced so something is verifiable at each step, and so the riskiest external
+dependency is checked before anything is built on it.
+
+| # | Step | Unblocks |
+|---|---|---|
+| **0** | **Verify the FB target is a Page, not a profile** (§5.3) | All of §5. One minute. Do it first |
+| 1 | Firebase web app + `NEXT_PUBLIC_*` | Everything client-side |
+| 2 | Auth: email + Google, admin custom claim | Every admin screen |
+| 3 | Seed one real pet by hand | Proves the core loop end-to-end |
+| 4 | Storage rules + media upload + derivatives | §2.2 |
+| 5 | Admin intake wizard, steps 1–3, manual only | An admin can publish an animal |
+| 6 | `MedicalRecord` extensions + manual medical entry | §2.1 |
+| 7 | Vertex AI plumbing + card extraction + review gate | §4 |
+| 8 | QR tokens + `/id/{token}` + print sheet | §7 |
+| 9 | Adoption applications + admin queue | §6 — **first real test of the rules** |
+| 10 | Social: generation → draft → approve | §5.5 |
+| 11 | Facebook adapter | Real posting |
+| 12 | Instagram adapter | Real posting |
+| 13 | Threads / X / TikTok behind flags | Optional, costed |
+
+Steps 5 and 9 are each independently useful if the plan stalls: 5 gives the
+shelter a working admin console, 9 gives them a screening queue.
+
+---
+
+## 10. Cost
+
+| Item | Estimate | Note |
+|---|---|---|
+| Firestore, Cloud Run, Storage | **$0** | Free tier is ~50× this shelter's volume |
+| Firestore PITR + backups | small, existing | Already the first deliberate line item |
+| **Vertex AI — card extraction** | cents/month | ~1–2 images per animal, Flash tier |
+| **Vertex AI — post generation** | cents/month | 3–4 short generations per animal |
+| Facebook + Instagram | **$0** | No paid tier involved |
+| **X, if enabled** | **~$0.20 per post** | Every post carries a URL. ~$4/mo at 20 animals |
+| TikTok | $0 + audit effort | Free API, weeks of approval |
+
+The bill stays effectively zero unless X is switched on. **The real financial
+event is the trial expiring ~2026-11-10**, not anything in this plan.
+
+---
+
+## 11. Open decisions
+
+1. **Is the Facebook target a Page?** (§5.3) Blocking, one minute, do it first.
+2. **X — worth ~$0.20/post?** Recommendation: not in Phase 1. Facebook and
+   Instagram are where the existing 1.9K followers are.
+3. **TikTok — worth the audit?** Recommendation: no. Video-first platform, photo
+   content, and the audit requires demonstrating a flow that is restricted until
+   the audit passes.
+4. **Storage: adopt a Firebase default bucket, or keep Terraform-managed
+   `wawitas-app`?** Forced by step 4. Inherited from `CLAUDE.md` and now due.
+5. **What does the adoption application actually ask?** The shelter has real
+   screening questions today, asked over WhatsApp. Get their list rather than
+   inventing one.
+6. **Scan-history retention** — still open from `CLAUDE.md` concern #3, and now
+   more pressing: intake writes the first real `ScanEvent` records.
+7. **Do adopters get write access to their animal's record?** Currently
+   admin-only writes throughout. An adopter updating a vaccination after a vet
+   visit is genuinely useful and is a meaningful widening of the rules.
+
+---
+
+## 12. What this plan does not do
+
+- **No Facebook→site inbound sync.** `PLAN.md` §5 describes pulling posts *from*
+  Facebook. This plan is the opposite direction. Inbound remains unbuilt and is
+  now largely redundant: if the database is the source and posts are generated
+  from it, there is nothing to parse back.
+- **No BigQuery.** `CLAUDE.md` decided 2026-08-09 to add it when a named report
+  justifies it. Nothing here is that report.
+- **No terminology coding.** §4 of the research doc — the socket, not the plug.
+- **No EU passport issuance.** We are not an issuing authority. We model the
+  fields so a vet can fill one in; we do not print one.
