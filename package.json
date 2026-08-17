@@ -10,7 +10,10 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "emulators": "firebase emulators:start",
-    "test": "node --test --import tsx src/lib/__tests__/microchip.test.ts"
+    "//deploy:storage-rules": "`firebase deploy --only storage` CANNOT deploy this project's storage.rules — it demands a Firebase DEFAULT bucket and we deliberately use a named, Terraform-managed one. See scripts/release-storage-rules.mjs.",
+    "deploy:storage-rules": "node scripts/release-storage-rules.mjs",
+    "//test": "node --test globs do not work on Node 20, so every test file is named explicitly. Revisit when this machine moves to Node 22.",
+    "test": "node --test --import tsx src/lib/__tests__/microchip.test.ts src/lib/__tests__/placements.test.ts src/lib/__tests__/arrival.test.ts"
   },
   "engines": {
     "node": ">=20.9.0"

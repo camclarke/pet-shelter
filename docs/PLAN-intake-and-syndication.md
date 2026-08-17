@@ -22,6 +22,21 @@ review discipline — listed here because their risk levels are **not** the same
 
 ## 0. Read this first: the plan is blocked on three things that do not exist
 
+> **Execution began 2026-08-16.** Status of this section as of that session:
+>
+> | | |
+> |---|---|
+> | **0. Firebase project** | ❌ **NEW BLOCKER, under #1.** The GCP project was never added to Firebase at all. Needs a human to accept the Firebase ToS in the console — `addFirebase` 403s even for `roles/owner`. See `CLAUDE.md` |
+> | 1. Firebase web app | ⬜ Declared in `terraform/firebase.tf`; blocked on 0 |
+> | 2. Auth flows | ⬜ Blocked on 1 |
+> | 3. One real pet | ⬜ Blocked on Storage for the cover photo |
+>
+> **What shipped anyway**, because it needed none of them: the whole model
+> layer for §13 and parts of §2 — statuses, `areas`, `placements`, `media`,
+> `measurements`, the `MedicalRecord` additions — plus rules, indexes, 47 unit
+> tests, and the §13.7 outbreak trace **verified against live Firestore with
+> known data**, which §13.7 explicitly demanded over a green deploy.
+
 Nothing below can ship until these land, and they are already the top of
 `CLAUDE.md`'s queue. This plan does not replace them, it sits on top of them:
 
