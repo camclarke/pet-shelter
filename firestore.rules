@@ -125,6 +125,43 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // ── media — photos and video ─────────────────────────────────────────
+      // THE ONE PLACE a tier is a field rather than a document, and the only
+      // rule here that reads `resource.data`. Media is many-per-pet and
+      // unbounded: an array inside one document would be rewritten on every
+      // upload and would approach the 1 MiB ceiling on a pet with 40 photos
+      // plus video derivatives.
+      //
+      // ⚠️ On a QUERY this is evaluated against the query's CONSTRAINTS, not
+      // its results. An unauthenticated client must issue
+      // `where('tier','==','public')` or the entire query is rejected —
+      // Firestore does not return a filtered subset. It will look like a
+      // broken query rather than a permission decision.
+      match /media/{mediaId} {
+        allow read: if resource.data.tier == 'public' || signedIn();
+        allow write: if isAdmin();
+      }
+
+      // ── measurements — weight and body condition ─────────────────────────
+      // Authenticated rather than public: an adopter deciding on an animal
+      // should see it, a casual browser has no need. Admin-write because a
+      // weight feeds mg/kg dosing, and a number that a drug dose is computed
+      // against is not something an unverified account may set.
+      match /measurements/{measurementId} {
+        allow read: if signedIn();
+        allow write: if isAdmin();
+      }
+
+      // ── placements — the outbreak ledger ─────────────────────────────────
+      // Where the animal has been INSIDE THIS FACILITY, as intervals. Note
+      // what this is not: a foster home is never an area, so a volunteer's
+      // home address cannot reach this collection by any path. That is why it
+      // can sit in the authenticated tier while `location` cannot.
+      match /placements/{placementId} {
+        allow read: if signedIn();
+        allow write: if isAdmin();
+      }
+
       // ── sightings — public read AND public create, by design ─────────────
       // Someone who spots a lost pet must be able to report it in seconds,
       // with no account. That openness is the feature, so every constraint
@@ -188,6 +225,16 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // The outbreak trace and the area occupancy count both run
+    // collectionGroup('placements') filtered by areaId. Admin-only: this is
+    // operational data about the whole facility, and a signed-in adopter has
+    // no business enumerating every animal's movements. Deliberately narrower
+    // than the per-pet rule above, which an adopter legitimately reads for
+    // their own animal.
+    match /{path=**}/placements/{placementId} {
+      allow read: if isAdmin();
+    }
+
     // ── users/{uid} ────────────────────────────────────────────────────────
     match /users/{uid} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
@@ -217,6 +264,16 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (signedIn() && resource.data.ownerUid == request.auth.uid);
       allow write: if isAdmin();
+    }
+
+    // ── areas/{areaId} ─────────────────────────────────────────────────────
+    // The shelter's own pens and yards. Admin-only in BOTH directions, which
+    // is stricter than it first looks: an area list plus a placement ledger
+    // is a map of the facility, and the layout of a building that houses
+    // volunteers and animals is not public information. Nothing on the public
+    // site needs it — the wall shows animals, never where they sleep.
+    match /areas/{areaId} {
+      allow read, write: if isAdmin();
     }
 
     // ── default deny ───────────────────────────────────────────────────────
