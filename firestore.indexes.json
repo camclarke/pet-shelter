@@ -92,8 +92,36 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "reportedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "//": "THE OUTBREAK TRACE. Every placement in one area, ordered in time, across all pets. Same shape as the microchip lookup whose non-deployment broke findPetByMicrochip() in 2026-08-12 — and a silently-empty result here is strictly worse, because it reads as 'no animals were exposed'. src/lib/__tests__/placements.test.ts covers the LOGIC against known data; this index is what makes the FETCH return anything at all. Both are required and neither substitutes for the other.",
+      "collectionGroup": "placements",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "areaId", "order": "ASCENDING" },
+        { "fieldPath": "startedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "Current occupancy of an area: the placements with no end. Drives the capacity figure the manager sees before accepting another animal, which the ASV guidelines argue is the cheapest disease-risk intervention available.",
+      "collectionGroup": "placements",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "areaId", "order": "ASCENDING" },
+        { "fieldPath": "endedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "//": "The expediente's gallery: where('tier','==','public').orderBy('order'). An equality filter plus an order on a DIFFERENT field is the case that genuinely needs a composite. Note for whoever writes the client: an UNAUTHENTICATED caller MUST issue the tier constraint or the whole query is rejected — on a query Firestore evaluates rules against the constraints, not the results, and does not silently return a filtered subset.",
+      "collectionGroup": "media",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tier", "order": "ASCENDING" },
+        { "fieldPath": "order", "order": "ASCENDING" }
+      ]
     }
   ],
+  "//deliberately-absent": "A pet's own placement timeline (orderBy startedAt) and its measurement trend (orderBy measuredAt) are SINGLE-FIELD orderings, which Firestore indexes automatically. Declaring them as composites is not harmless — the 2026-08-12 deploy was rejected outright with 'this index is not necessary, configure using single field index controls', and the whole file fails, not just the offending entry.",
   "fieldOverrides": [
     {
       "//": "THE MICROCHIP LOOKUP. findPetByMicrochip() runs a collectionGroup('identity').where('code','==',…) query, and a collection-group scope on a SINGLE field is a field-level setting, not an index. It was declared in `indexes` above until 2026-08-12, when the first-ever deploy rejected it: 'this index is not necessary, configure using single field index controls'.",
