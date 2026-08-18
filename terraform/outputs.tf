@@ -45,3 +45,32 @@ output "storage_bucket" {
   description = "Bucket backing Storage for Firebase — matches storage.rules' bucket."
   value       = google_storage_bucket.app.name
 }
+
+// ── Firebase web app config ─────────────────────────────────────────────────
+// The four values .env.local has carried as empty placeholders since it was
+// created, plus the two already known from the project itself.
+//
+// NOT marked sensitive, and that is correct rather than an oversight. Every
+// NEXT_PUBLIC_* value is compiled into the browser bundle by `next build` and
+// served to anyone who loads the site — a Firebase web API key identifies the
+// project, it does not authorise anything. firestore.rules is what protects
+// the data. Marking these sensitive would hide them from `terraform output`
+// while changing nothing about who can see them, and would only make the one
+// step that needs them harder.
+//
+// This is a genuinely different case from the sibling stack's leaked salt,
+// which was a real secret that appeared in plan output and had to be rotated.
+// The distinction is worth keeping sharp: public-by-design is not the same as
+// low-risk-in-practice.
+
+output "firebase_web_config" {
+  description = "Fill these into .env.local AND into the GitHub repository variables the deploy workflow reads. They are BUILD-time values inlined by `next build`, not Cloud Run env vars — setting them on the service does nothing at all."
+  value = {
+    NEXT_PUBLIC_FIREBASE_API_KEY             = data.google_firebase_web_app_config.web.api_key
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN         = data.google_firebase_web_app_config.web.auth_domain
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID          = var.project_id
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET      = google_storage_bucket.app.name
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID = data.google_firebase_web_app_config.web.messaging_sender_id
+    NEXT_PUBLIC_FIREBASE_APP_ID              = google_firebase_web_app.web.app_id
+  }
+}

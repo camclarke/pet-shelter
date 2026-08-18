@@ -38,19 +38,30 @@ scanned chip resolves to a name and a phone call.
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
 | **Live site** | ✅ **https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app** — HTTP 200, real Spanish HTML, wall reading live Firestore. No custom domain yet |
 | GCP project | ✅ **`wawitas`** (`181094228409`), region **`us-east1`**, personal account `israel.rocha.clarke@gmail.com`. **No org parent.** Replaces `wawitas-pet-shelter` (employer's org, deleted same day) — see log |
-| Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial ($300 / 90 days). **Trial expires ~2026-11-10; upgrade to a paid account before then or services stop** |
+| Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial. **Blaze plan via the trial. Expires 2026-11-11 exactly** (read off the Firebase console: 85 days, $300.00 remaining, as of 2026-08-17). Upgrade before then or services stop |
 | ADC | ✅ Verified reaching `wawitas`. One global file, **two identities** — see the switch ritual below |
 | Firestore | ✅ **Live** — `(default)`, `us-east1`, PITR on, daily + weekly backups, delete protection |
 | **Firestore rules** | ✅ **Deployed 2026-08-12** — `firestore.rules` compiled and released. Enforcement itself is still **untested**: no client can reach Firestore yet |
 | Firestore indexes | ✅ **Deployed** — 10 composite + the `identity.code` collection-group field override that `findPetByMicrochip()` needs |
-| Storage rules | 🟡 **Not deployed** — needs a Firebase *default* bucket (console-only "Get Started"). **Not an exposure:** `wawitas-app` has no `allUsers` binding and uniform access is on |
+| **Firebase project** | ✅ **ADDED 2026-08-16** — `projects/wawitas`, ACTIVE. Was never added until this session. **Google Analytics deliberately declined.** Imported into Terraform (`google_firebase_project.default`) |
+| Storage rules | ✅ **DEPLOYED 2026-08-16** — but **not** by the Firebase CLI, which cannot do it. `npm run deploy:storage-rules`. See the row below and `scripts/release-storage-rules.mjs` |
+| `firebase deploy --only storage` | ❌ **Will never work here, and that is fine.** It demands a Firebase *default* bucket; this project uses a named Terraform-managed one. Adding the Firebase project did **not** fix it — that was a wrong guess too. Use the npm script |
 | Firebase emulator suite | ❌ **Not used — decided 2026-08-08.** Also cannot run here (no Java) |
-| Firebase web app | ⬜ Not registered — the four empty `NEXT_PUBLIC_FIREBASE_*` values need it |
-| Auth flows | ⬜ Not started |
-| Admin publishing UI | ⬜ Not started |
+| Firebase web app | ✅ **Registered 2026-08-16** by Terraform (`google_firebase_web_app.web`). The four `NEXT_PUBLIC_*` values are in `.env.local`, from `terraform output firebase_web_config` — never copied from a console |
+| Firebase Auth | 🟡 **Initialized 2026-08-16, Email/Password ON.** Subtype is **`IDENTITY_PLATFORM`**, not legacy Firebase Auth. **Google provider still off** — needs an OAuth consent screen. No UI exists yet, so rules remain unenforced |
+| Auth flows (UI) | ⬜ Not started — **step 2 of the build plan**, and the first real test of `firestore.rules` |
+| Admin publishing UI | ⬜ Not started — **fully specified**, [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md) §3 |
 | Maps + sightings | ⬜ Not started |
 | Reporting (BigQuery mirror) | ⬜ **Decided 2026-08-09, deliberately not built** — add when a real report is asked for |
-| LLM vaccination-card parsing | ⬜ Stage 2 — deliberately deferred |
+| **Intake / medical / food / areas plan** | ✅ **Written 2026-08-16** — [`PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md). 14 sections |
+| Arrival pipeline — model layer | ✅ **Built + tested 2026-08-16.** Statuses, `areas`, `placements`, rules, indexes. **Outbreak trace verified against live Firestore with known data**, not just deployed |
+| Arrival pipeline — UI | ⬜ Not started — blocked on auth |
+| Veterinary record standards | ✅ **Researched 2026-08-16** — [`veterinary-records-standards.md`](docs/veterinary-records-standards.md). No international EMR standard exists; modelled on the EU passport + WSAVA 2024 |
+| LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
+| LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
+| Arrival pipeline + shelter areas | ⬜ Planned, plan §13. Placement intervals for outbreak tracing, not a current-area field |
+| Food: donations → pot → rations | ⬜ Planned, plan §12. LLM parses, **deterministic code does the arithmetic** |
+| Social syndication | ⏸ **Deferred 2026-08-16 at the user's direction.** Facebook + Instagram only when resumed; X and TikTok are *out* |
 
 ### Progress log
 
@@ -78,6 +89,18 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-12** — **Swept for vulnerabilities and confirmed everything deployable was already deployed.** Nothing needed fixing: `npm audit` is clean on both the production and dev trees, and the nanoid advisory found hours earlier is in the running image — the Docker build log for `app:7c62d54…` shows `found 0 vulnerabilities`, which is a stronger check than auditing the working tree. Terraform needed no apply: `plan` proposes exactly one action, the known-benign `scaling` no-op, and nothing else is drifting. Firebase needed no deploy either, and this was **verified rather than inferred from git history** — the released ruleset was pulled from the Rules API and diffed against `firestore.rules` byte-for-byte (identical), and the 10 deployed composite indexes plus the `identity/code` field override match the declared set. `storage.rules` is still blocked, re-confirmed by running the deploy rather than trusting the note: *"Firebase Storage has not been set up."* The Rules API shows only a `cloud.firestore` release and the project has no default bucket, only `wawitas-app`, `wawitas-terraform-state`, and a now-orphaned `wawitas_cloudbuild` left over from the bootstrap build. **The one real gap found was that Dependabot alerts were disabled** — CI's audit step only runs when someone pushes, so a new advisory during a quiet week would go unseen, which is exactly how the nanoid one nearly slipped by. Alerts *and* automated security updates are now on, verified by API (`{"enabled":true,"paused":false}`, 0 open alerts). Dependabot's fix PRs run through `ci.yml` like any other, so nothing merges unverified. Note the interaction to watch: this project pins transitive fixes with `overrides`, and Dependabot does not manage those — a PR bumping a direct dependency may leave a stale override behind.
 
+- **2026-08-16** — **Planned the next phase end to end, and wrote down the standards it rests on.** No code; the output is `docs/PLAN-intake-and-syndication.md` plus `docs/veterinary-records-standards.md`, on `feature/pet-intake-and-social-syndication`. The research produced one **negative** headline that shapes everything else: **there is no international standard for a companion animal's electronic medical record** — nothing in veterinary medicine corresponds to FHIR/SNOMED/LOINC, so the schema is ours to design. It is anchored to the **EU pet passport's section structure** (the only published field schema for this data) plus **WSAVA 2024**'s certificate fields, which between them produced four `MedicalRecord` additions we lacked — `manufacturer`, and `validFrom`/`validUntil` as genuinely distinct from `performedAt`/`nextDueAt`, because for rabies the date protection *begins* is 21 days after injection and is the one with legal force. Clinical terminology (VeNom, SNOMED VetSCT) is **deliberately deferred with an empty `codes[]` socket**: neither survives contact with a volunteer transcribing a handwritten card, and free text is backfillable. **Corrected a stale claim in `rfid-microchips.md` §5** — Regulation (EU) 576/2013 was superseded on **22 April 2026** by Delegated Regulation (EU) 2026/131 under the Animal Health Law. Every rule the code depends on survived, so `rabiesVaccinationIsValid()` is still right; one rule was *added* (≥12 weeks at rabies vaccination) that we do not validate. For **Bolivia** the answer is that nothing here is nationally mandated, but the choice is forced anyway by SENASAG's ISO-based export paperwork, the ISO hardware sold locally, and keeping internationally adopted animals eligible — with **WOAH Ch. 7.7** added as the legitimacy argument rather than a schema. Two platform findings killed most of the social-media request on the facts: **X discontinued its free tier on 6 February 2026** and charges ~$0.20 per post carrying a URL, which every post of ours would; and **TikTok forces unaudited posts to `SELF_ONLY`**. Facebook and Instagram are free and avoid App Review entirely, because posting only to the shelter's own accounts lets the Meta app stay in Development mode indefinitely. The user then **deferred social work altogether** and scoped it to those two.
+
+- **2026-08-16** — **Three directed reversals and three new subsystems, same day.** (1) **Gemini goes through AI Studio with an API key, not Vertex AI**, at the user's direction, following `docs/gemini-api-playbook.md` — ~4 months of production experience on that exact surface, carried from the sibling stack. This reversed a recommendation made hours earlier that had argued for Vertex on the grounds that the runtime service account avoids managing a key; the playbook wins because adopting Vertex would discard a document cataloguing a **$665/month surprise bill** and a metering layer that was **9× wrong**. Infrastructure got *simpler* — no `aiplatform` API, no IAM grant, no ADC involvement, so an AI call can no longer resolve to the wrong project because it does not resolve to a project at all — at the cost of one new credential in Secret Manager. **Grounded search is ruled out as a standing constraint, not a deferral**: it is billed per search query, was 73% of one month's bill, carries zero tokens so token-based metering is structurally blind to it, and nothing here needs the web. (2) **Veterinary voice dictation** is now the highest-consequence path in the system and is designed accordingly — one call returns *both* a verbatim transcript and the structured extraction, the transcript is the record, and **two-extractor consensus is mandatory** because *"medio mililitro"* and *"cinco mililitros"* differ by one syllable in spoken Spanish and a factor of ten in the animal. The system may display `mg/kg × weight` as a labelled aid but must never write a computed dose as though prescribed. (3) **Food management reverses the requested design on purpose:** the LLM parses donation descriptions into structured stock, and **deterministic code does the yield arithmetic** — an LLM is non-deterministic on numbers, so the same stock could give two answers on two days with no way to tell which was wrong. The raw→cooked→ladle conversion is **measured, not computed**: rice triples, meat shrinks, water is unmeasured, and the first N cook batches *are* the calibration dataset. Grounded rations in `RER = 70 × kg^0.75`, which surfaces something the ladle heuristic hides — energy need scales **sub-linearly**, so a linear ladle rule systematically underfeeds large dogs. Body condition uses the **WSAVA 9-point scale**, from the same body whose vaccination guidelines this project already follows. All of which exposed a real gap: **there is no weight field** — `Pet.size` is a wall filter, not a clinical quantity — so a `measurements` subcollection was added, as a subcollection rather than two fields because *"reduce the fat ones"* is a feedback loop and a loop needs a trend.
+
+- **2026-08-16** — **Arrival pipeline and shelter areas planned, replacing a WhatsApp message with a record.** Caught a naming collision worth knowing about: **`PetStatus.transito` already means "hogar de tránsito" — a foster home** — so the new en-route state is **`en-camino`**, because the two are opposites and colliding them in the only language the staff use would be a lasting mistake. The wall needed no change at all, since `getWall()` filters to `adopcion`: an allowlist, not a denylist. **Deliberately did not replace the WhatsApp ping — wrapped it.** WhatsApp works because everyone has it and it pushes; an in-app notification gets missed, staff revert to the group chat, and the system holds empty records while the real information lives in a thread. So the record moves to the app and the app emits a pre-filled `wa.me` link, making the group message *point at* a record rather than *be* it — the same mechanism the public site already converts through. The central design point is that **placements are an interval ledger, not a `currentArea` field**: outbreak isolation is always asked retrospectively, a dog diagnosed today was infectious before it looked sick, and **canine distemper incubation reaches six weeks** (parvovirus two), which sets the minimum lookback. Kept **quarantine and isolation as distinct area kinds** per the **ASV Guidelines for Standards of Care in Animal Shelters** — merging them means the UI cannot warn when a sick animal is about to go in among healthy ones — and modelled area capacity because those guidelines are explicit that crowding is itself a disease risk. `currentAreaId` is **not** denormalised onto `Pet`, because that document is public-read and where an animal is housed has no reason to be. Flagged that the required collection-group index is the same shape as the one whose non-deployment broke `findPetByMicrochip()`, and that **an outbreak trace silently returning nothing is the worst version of that bug** — so it needs a test with known data, not a green deploy.
+
+- **2026-08-16** — **Started executing the plan, and the first act was finding that a load-bearing assumption in this file was false: the GCP project had never been added to Firebase.** `firebase projects:list` returns *"No projects found"*, and the Management API answers `searchApps` with *"Firebase project 181094228409 not found"*. **This is the real cause of the undeployable `storage.rules`**, which this file had recorded for four days as *"needs a Firebase default bucket (console-only Get Started)"* — a plausible diagnosis that sent the previous session hunting for the wrong thing. The reason the gap survived undetected is worth keeping, because it will recur: **several Firebase-branded things work fine without a Firebase project.** `firestore.rules` and `firestore.indexes.json` deploy through `firebaserules.googleapis.com`, and `google_firebase_storage_bucket` applies through `firebasestorage.googleapis.com` — both plain GCP APIs. `wawitas-app` really is registered as a Firebase Storage bucket, confirmed by querying the API rather than inferring it from Terraform state. So "the Firebase CLI deployed something successfully" was never evidence the project existed. **`addFirebase` cannot be automated here:** it returns a bare `403 PERMISSION_DENIED` for `israel.rocha.clarke@gmail.com` *holding `roles/owner`*, and returns the identical 403 with a raw `gcloud` token rather than the Firebase CLI's — so it is not a scope or credential problem. It is the un-accepted Firebase Terms of Service, which needs a human in the console once per account. Declared `google_firebase_project` + `google_firebase_web_app` in a new `terraform/firebase.tf` with an **import-do-not-create** warning, and added a `firebase_web_config` output so the four `NEXT_PUBLIC_*` values come out of `terraform output` instead of being copied from a console. That output is deliberately **not** marked sensitive: every `NEXT_PUBLIC_*` value is compiled into the browser bundle and served to anyone who loads the site, so hiding it from `terraform output` would change nothing about who can read it. Public-by-design is a different category from the sibling stack's leaked salt, and conflating the two makes the real rule harder to follow. Also **corrected the ADC state**: it was silently holding the *work* identity again — caught not by inspection but by a `terraform state list` failing as `israel.rocha@trustcertllc.com`. The user re-ran the login and it now resolves the personal account with `quota_project_id: wawitas`, verified against the oauth2 userinfo endpoint rather than trusting the command's output.
+
+- **2026-08-16** — **Built and verified the arrival pipeline's model layer — and the outbreak trace is the first thing in this project proven against live data rather than deployed and hoped for.** `PetStatus` gained `en-camino`, `cuarentena` and `cancelado`; the claim that the wall needed no change was **checked rather than trusted** (`getWall()` filters `status == 'adopcion'`, and `Muro.tsx` only tests `perdido` — no exhaustive switch exists anywhere, so nothing broke). Added `Area`, `Placement`, `PetMedia`, `PetMeasurement`, the four EU-passport/WSAVA `MedicalRecord` fields, `serologia`, and the `extractedByModel` provenance pair. The decision logic lives in `src/lib/placements.ts` as **pure functions over epoch milliseconds with no Firestore import**, precisely so it can be tested without a database — 23 tests, plus 14 for the status machine in `arrival.ts`, 47 total. **Then it was run against real Firestore**: seeded five animals with hand-computed intervals across two areas, ran the real `collectionGroup('placements')` query through the Admin SDK, and asserted the trace returned `resident (10d), luna (5d)` in that order while correctly excluding an animal that left before the window and one in a different area — then deleted the fixtures and confirmed the collection was empty again. Three findings. (1) **Two composite indexes I first wrote were unnecessary** — single-field orderings that Firestore indexes automatically — and declaring them would have had the *whole file* rejected, not just the offending entry, which is exactly the 2026-08-12 failure. Removed before deploying, and the reason is now recorded in the file so they do not get re-added. (2) **The missing-index failure is loud, not silent.** The first run hit `9 FAILED_PRECONDITION: the query requires an index... currently building`, which is genuinely reassuring: this file's standing fear was a broken collection-group query returning an empty result indistinguishable from "no contacts." It does not — it throws. The remaining silent-failure risk is *missing data*, so `traceOutbreak()` returns an explicit `noPlacementData` flag rather than leaving a caller to infer it from an empty array. (3) Interval overlap is **closed, not half-open, on purpose**: a contact trace fails toward *including*, the opposite of the LLM extraction gate's fail-toward-dropping, because a false positive costs one examination while a false negative leaves an infected animal in general population — and touching intervals are a real exposure route, since parvovirus survives on surfaces for months.
+
+- **2026-08-16** — **Unblocked Firebase end to end, and two of this file's own diagnoses turned out to be wrong along the way.** The user accepted the Firebase Terms in the console (the un-scriptable step) and the project is now `projects/wawitas`, ACTIVE — **with Google Analytics deliberately declined.** Worth recording how that decision nearly went the other way: the "add Firebase to an existing GCP project" flow puts the **Enable Google Analytics toggle on one screen and the mandatory-looking GA terms on the next**, so clicking Continue past the toggle lands you on a screen where accepting GA terms is the *only* way forward and the button is greyed out. It reads as compulsory and is not. Going back one step and switching the toggle off changed the button from "Continue" to "Add Firebase" and skipped the GA terms entirely — no GA account, no linked property. The rationale for declining is the 2026-08-09 BigQuery precedent (a second data pipeline arrives when a named report justifies it) plus a concrete objection: the conversion this project optimises is an outbound `wa.me` jump, which Analytics can log and then goes blind on, so it cannot measure the one thing that matters — and on an EU fork it would add a consent banner sitting directly between the landing page and the WhatsApp button. **Then `terraform import` + `apply` registered the web app**, so the four `NEXT_PUBLIC_*` values came out of `terraform output firebase_web_config` rather than being copied from a console; they are in `.env.local`, and `deploy.yml` already passes all eight as build args so the pipeline needed no change. **The `storage.rules` diagnosis was wrong twice.** This file said "needs a default bucket" (wrong), the previous entry said "there is no Firebase project" (also wrong, or rather incomplete) — the truth is that the **CLI** demands a default bucket while the **Rules API does not**, and adding the Firebase project did not change the error by one character. The fix is `scripts/release-storage-rules.mjs` (`npm run deploy:storage-rules`), which creates a ruleset and releases it under `firebase.storage/{bucket}` — the bucket lives in the *release name*, which is exactly the hook a named bucket needs. It reads the bucket out of `firebase.json` so a forking shelter cannot silently inherit `wawitas-app`, and it verifies by reading the live ruleset back and diffing it rather than trusting the write. Deliberately not in CI, same reasoning as `firestore.rules`. **Also initialized Firebase Auth**, which had never been touched: `initializeAuth` succeeded over the API, Email/Password is on, and the subtype is **`IDENTITY_PLATFORM`** rather than legacy Firebase Auth — same 50k MAU free allowance for email and social, but it is the upgraded product and its pricing page is the one to read. The trap found there: **`authorizedDomains` contained only `wawitas.firebaseapp.com` and `wawitas.web.app`** — no `localhost`, no Cloud Run URL — so sign-in would have failed in dev *and* production with an error pointing at the domain rather than at this list. Added both plus `wawitas.org`. Two smaller things: the Firebase console reports the trial expiring **2026-11-11** exactly (85 days, $300.00 remaining), replacing this file's "~2026-11-10"; and **PowerShell 5.1's `Get-Content -Raw` decodes a BOM-less UTF-8 file as ANSI**, which made a byte-identical ruleset look like a 570-character mismatch — every rules diff in this repo must be done in Node, because the file headers are full of multi-byte box-drawing characters.
+
 ---
 
 ## Next session — start here
@@ -88,9 +111,70 @@ Cloud Run live, and the Muro rendering a real Firestore query in production.
 
 **https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app**
 
-Every ✅ below was *executed*, not inferred. The remaining gaps are narrow and
-named: **no security rules deployed, 11 of 12 indexes missing, and no pet
-documents.**
+Every ✅ below was *executed*, not inferred. Rules and indexes *are* deployed —
+the rules have simply never been enforced against a client, because no client
+can reach Firestore yet.
+
+### ✅ THE FIREBASE BLOCKER IS GONE — 2026-08-16
+
+**Firebase is on the project, the web app is registered, the four
+`NEXT_PUBLIC_*` values are in `.env.local`, and `storage.rules` is deployed.**
+Five days of "blocked on Storage" is over.
+
+**The one remaining human action is the Google sign-in provider.** Email/Password
+is enabled; Google needs an OAuth consent screen, which is a console task and
+was already on this file's "later, not now" list. Email/Password alone is enough
+to build and test step 2.
+
+**Two corrections this session earned, both worth keeping:**
+
+1. **`firebase deploy --only storage` will never work on this project**, and the
+   Firebase project was *not* the reason. It checks for a Firebase **default**
+   bucket — the one the console's "Get Started" button creates — and we
+   deliberately use a named, Terraform-managed bucket. Adding the Firebase
+   project did not change that error by one character. Setting `storage.bucket`
+   in `firebase.json` does not satisfy it either.
+
+   **Use `npm run deploy:storage-rules`.** It does what the CLI does underneath
+   — create a ruleset, then release it under a name that encodes the bucket
+   (`firebase.storage/wawitas-app`) — and the API has no default-bucket
+   precondition at all. The CLI is simply stricter than the service.
+
+2. **The Firebase console can now delete the GCP project.** "Deleting a Firebase
+   project deletes the Google Cloud project too, and all contained resources."
+   That is new blast radius: one button now reaches all 41 Terraform-managed
+   resources *and* Firestore, including the PITR window and backup schedules,
+   since those live inside the thing being deleted.
+
+**Why the original gap went unnoticed for four days, which is the transferable
+part:** several Firebase-branded things work fine *without* a Firebase project.
+`firestore.rules` and the indexes deploy via `firebaserules.googleapis.com`;
+`google_firebase_storage_bucket` applies via `firebasestorage.googleapis.com`.
+Both are plain GCP APIs. **"The Firebase CLI deployed something successfully"
+was never evidence that the Firebase project existed.**
+
+### 📋 There is now a written build plan. Read it before starting.
+
+**[`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md)**
+— written 2026-08-16, covering the arrival pipeline and shelter areas, the admin
+intake flow, Gemini card parsing and veterinary voice dictation, adoption, QR
+identity tags, and food management. **Its §0.1 is a concrete first-session
+checklist** and §9 is the 14-step build order.
+
+Nothing in it is built. It is a plan, and per this file's own most-repeated
+lesson, **a plan that reads well is not a plan that works.**
+
+Two supporting documents:
+
+- [`docs/veterinary-records-standards.md`](docs/veterinary-records-standards.md)
+  — the standards research. §6 answers "we are in Bolivia, what should we
+  follow?" **Also corrects a stale citation in `rfid-microchips.md`:** EU
+  576/2013 was superseded by Reg. (EU) 2026/131 on 22 April 2026.
+- [`docs/gemini-api-playbook.md`](docs/gemini-api-playbook.md) — **read before
+  writing any AI code.** All LLM work is Gemini via **AI Studio**, never Vertex.
+
+The four-item list further down this section is superseded by that plan's build
+order. It is kept because its constraints and warnings are still accurate.
 
 ### Verified state, as of 2026-08-12
 
@@ -109,7 +193,10 @@ documents.**
 | Billing | `gcloud billing projects describe wawitas` | ✅ `billingEnabled: true` — trial expires ~2026-11-10 |
 | ADC | `google-auth-library` probe | ✅ resolves `wawitas` with no `.env.local` help |
 | Build | `npm run build` | ✅ 8 routes *(last local run 2026-08-08; Cloud Build has since built it twice)* |
-| Tests | `npm test` | ✅ 10/10 (microchip validation) |
+| Tests | `npm test` | ✅ **47/47** — 10 microchip, 23 placement/outbreak, 14 arrival state machine |
+| Typecheck | `npm run typecheck` | ✅ clean |
+| **Outbreak trace** | seeded fixtures → live `collectionGroup` query → asserted → deleted | ✅ **PROVEN AGAINST LIVE FIRESTORE**, not just deployed. Contacts, ordering, area isolation, window clipping and occupancy all returned hand-computed answers |
+| Terraform | `terraform plan` after this session | ✅ 2 to add (both Firebase), **1 to change = the documented benign `cloud_run` `scaling` diff and nothing else** |
 | Dependencies | `npm audit --omit=dev` | ✅ 0 vulnerabilities |
 | **Firestore rules** | `firebase deploy` | ✅ **compiled + released** — but enforcement never exercised (no client) |
 | **Indexes** | `gcloud firestore indexes composite list` | ✅ **10 composite + 1 field override** |
@@ -204,6 +291,14 @@ registered Firebase **web app**, which does not exist yet.
 
 ### The next four things, in order
 
+> **Superseded 2026-08-16 by
+> [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md)
+> §0.1 and §9**, which expand this into a 14-step order covering the arrival
+> pipeline, medical records, AI extraction, food and adoption. The four items
+> below are still steps 1–4 of that order and their constraints are all still
+> accurate — the plan adds sequence and definitions of done around them, it does
+> not contradict them. Read this for the *why*, the plan for the *order*.
+
 1. **Put one real pet in Firestore and load the wall.** This is now the shortest
    path to a proven end-to-end system and the last unverified link in the core
    loop: `pets-server.ts` → `Muro.tsx` → rendered HTML has never once run with
@@ -252,14 +347,28 @@ registered Firebase **web app**, which does not exist yet.
 4. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
    `MICROCHIP_ERROR_ES` are built and tested, ready to wire into a form.
 
-### Two open questions awaiting a decision
+### Open questions awaiting a decision
 
 - **Scan-history retention.** Currently indefinite — because nothing deletes it,
   not because anyone chose that. A rolling 24-month window (keeping intake and
   adoption permanently as `custody` records) would preserve every recovery use
-  case while shrinking the surveillance surface. See concern #3.
+  case while shrinking the surveillance surface. See concern #3. **Note the
+  contrast with `placements`** (plan §13.6), which is also indefinite but for a
+  sound reason: it records a pen inside one facility, not a person's movements.
 - **The `LICENSE` copyright line** reads "pet-shelter contributors" rather than a
   named person or company, deliberately. Change it if a specific holder is wanted.
+
+**Eleven more are open in the plan** ([§11](docs/PLAN-intake-and-syndication.md)).
+Six of them are things only the shelter can answer, and they block real work:
+
+| Needed from the shelter | Blocks |
+|---|---|
+| Pot and ladle measurements | Any food yield estimate — constants stay `null` until then |
+| The real area list — names/numbers, kinds, capacities | The arrival pipeline. Seed from reality, don't invent "Cuarentena 1–3" |
+| Their actual quarantine period | Whether the system shows a target they will meet or one they will learn to ignore |
+| **Do they weigh the dogs?** | Every `mg/kg` dose and every ration. If there is no scale, say so in the UI rather than hiding it behind a computed number |
+| Who dictates — the vet, or a volunteer relaying? | Who is professionally responsible for a dictated medical record |
+| Their existing adoption screening questions | The application form. They ask these over WhatsApp today |
 
 ### Things that will bite whoever picks this up
 
@@ -554,6 +663,53 @@ users/{uid}                           SELF READ
 adoptions/{petId}                     RESTRICTED — keyed by petId so
   petId, ownerUid, adoptedAt          ownsPet() resolves in one get()
 ```
+
+**Planned additions, none built.** Specified in
+[`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md) §2,
+§12.5 and §13; listed here so this stays the one place the whole shape is
+visible:
+
+```
+pets/{petId}/media/{mediaId}          public|auth — REPLACES detail.photos[]
+  kind, tier, path, derivatives       photos AND video. Tier is a FIELD here,
+  alt, order, uploadedAt              not a document — the one deliberate
+                                      exception, see plan §2.2
+
+pets/{petId}/measurements/{id}        AUTHENTICATED
+  weightKg, bcs (WSAVA 1–9), mcs      the model has NO weight today, and both
+  measuredAt, measuredBy              mg/kg dosing and kg^0.75 energy need it
+
+pets/{petId}/placements/{id}          AUTHENTICATED — the outbreak ledger
+  areaId, areaName, startedAt         INTERVALS, not a currentArea field.
+  endedAt (null = here now), reason   Distemper incubation reaches 6 weeks
+
+areas/{areaId}                        ADMIN
+  name ("Cuarentena 2" | "3"), kind   cuarentena|aislamiento|general|
+  capacity, active                    medica|maternidad — ASV keeps
+                                      quarantine and isolation SEPARATE
+
+petDrafts/{draftId}                   ADMIN — half-finished wizard state,
+                                      deliberately OUTSIDE pets/
+
+adoptionApplications/{id}             applicant + admin. internalNotes must
+                                      NOT be readable by the applicant
+
+qrTokens/{token}                      PUBLIC READ — resolves to public tier
+                                      only, like findPetByMicrochip()
+
+api_usage_daily/{date__proc__model}   SERVER ONLY — playbook §4.1 rollup,
+                                      wired at the FIRST AI call site
+
+foodDonations/{id} · foodStock/{key}  ADMIN — LLM parses the donation text,
+cookBatches/{id} · feedingLog/{date}  deterministic code does the arithmetic
+
+socialPosts/{postId}                  ⏸ DEFERRED — do not create
+```
+
+Three enum changes go with these: `PetStatus` gains `en-camino`, `cuarentena`
+and `cancelado` (**not** "en tránsito" — `transito` already means *hogar de
+tránsito*, a foster home); `MedicalRecordKind` gains `serologia`; and
+`FeedingUnit` gains `cucharones`.
 
 ### The RFID microchip — what it is and is not
 
