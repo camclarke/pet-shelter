@@ -167,6 +167,18 @@ were correct at handoff and are the least likely thing to have broken.
 **Do not put `wawitas.org` on flyers, the Instagram bio, or the WhatsApp
 profile until that curl returns 200.**
 
+⚠️ **AS OF 2026-08-22 18:22 UTC (80+ minutes after DNS entry):** The apex is
+still 404 despite cert becoming `CERT_ACTIVE` (not just propagating). Normal
+rollout is measured in minutes, not hours. **If it is still 404 after ~24h,
+something is stuck** — this is no longer a "wait and check back" situation. At
+that point:
+1. Confirm Firebase's own 404 (no `X-Powered-By`), not our app's
+2. Run `terraform apply` (domain resources are idempotent) and re-check
+   `requiredDnsUpdates` on the Hosting API — very unlikely to have changed,
+   but rules it out before touching Spaceship
+3. Check if the release is still FINALIZED on the site
+4. Escalate to Firebase if all of the above are correct
+
 ### ✅ THE FIREBASE BLOCKER IS GONE — 2026-08-16
 
 **Firebase is on the project, the web app is registered, the four
