@@ -4,7 +4,7 @@ Open-source adoption and rescue platform for animal shelters — dogs, cats, rab
 Reference deployment: **Wawitas Red de Apoyo**, a transitional shelter in Cochabamba, Bolivia.
 
 - Repo: https://github.com/camclarke/pet-shelter
-- Domain (target): `wawitas.org`
+- Domain: **`wawitas.org`** — purchased at Spaceship, DNS managed there, pointed at Firebase Hosting 2026-08-22. Live host today is **`wawitas.web.app`** until the edge rollout completes
 - Facebook: `profile.php?id=61563998952145` · Instagram: `@wawitas_2025` · WhatsApp: `77903553`
 - Language: **Spanish** (site copy). English only in code, comments, and docs.
 
@@ -36,7 +36,9 @@ scanned chip resolves to a name and a phone call.
 | **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf` |
 | Dependency security | ✅ **0 vulnerabilities** in both the production and dev trees. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
-| **Live site** | ✅ **https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app** — HTTP 200, real Spanish HTML, wall reading live Firestore. No custom domain yet |
+| **Live site** | ✅ **https://wawitas.web.app** and the Cloud Run URL — both HTTP 200, real Spanish HTML, wall reading live Firestore |
+| **Firebase Hosting** | ✅ **DEPLOYED 2026-08-22 — the first release ever.** `sites/wawitas/releases` had been `{}` since the project began, so `wawitas.web.app` 404'd. Cause: `firebase.json`'s hosting block had `rewrites` + `headers` but **no `public`/`source`**, so there was no document root to upload. A rewrite is not a deployable artifact |
+| **Custom domain** | 🟡 **DNS, ownership and certificate all DONE 2026-08-22 — edge rollout is the only thing left.** `wawitas.org` + `www` both `HOST_ACTIVE`, `OWNERSHIP_ACTIVE`, **0 issues**; cert issued and valid (`CN=wawitas.org`, Google Trust Services, expires 2026-11-20). Records verified against `launch1.spaceship.net`, not the registrar UI. `cert` sits at `TEMPORARY/CERT_PROPAGATING`, and until that finishes the apex returns Firebase's generic **"Site Not Found"** page. **Nothing is misconfigured and nothing is pending on a human** — see the section below before debugging it |
 | GCP project | ✅ **`wawitas`** (`181094228409`), region **`us-east1`**, personal account `israel.rocha.clarke@gmail.com`. **No org parent.** Replaces `wawitas-pet-shelter` (employer's org, deleted same day) — see log |
 | Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial. **Blaze plan via the trial. Expires 2026-11-11 exactly** (read off the Firebase console: 85 days, $300.00 remaining, as of 2026-08-17). Upgrade before then or services stop |
 | ADC | ✅ Verified reaching `wawitas`. One global file, **two identities** — see the switch ritual below |
@@ -101,6 +103,8 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-16** — **Unblocked Firebase end to end, and two of this file's own diagnoses turned out to be wrong along the way.** The user accepted the Firebase Terms in the console (the un-scriptable step) and the project is now `projects/wawitas`, ACTIVE — **with Google Analytics deliberately declined.** Worth recording how that decision nearly went the other way: the "add Firebase to an existing GCP project" flow puts the **Enable Google Analytics toggle on one screen and the mandatory-looking GA terms on the next**, so clicking Continue past the toggle lands you on a screen where accepting GA terms is the *only* way forward and the button is greyed out. It reads as compulsory and is not. Going back one step and switching the toggle off changed the button from "Continue" to "Add Firebase" and skipped the GA terms entirely — no GA account, no linked property. The rationale for declining is the 2026-08-09 BigQuery precedent (a second data pipeline arrives when a named report justifies it) plus a concrete objection: the conversion this project optimises is an outbound `wa.me` jump, which Analytics can log and then goes blind on, so it cannot measure the one thing that matters — and on an EU fork it would add a consent banner sitting directly between the landing page and the WhatsApp button. **Then `terraform import` + `apply` registered the web app**, so the four `NEXT_PUBLIC_*` values came out of `terraform output firebase_web_config` rather than being copied from a console; they are in `.env.local`, and `deploy.yml` already passes all eight as build args so the pipeline needed no change. **The `storage.rules` diagnosis was wrong twice.** This file said "needs a default bucket" (wrong), the previous entry said "there is no Firebase project" (also wrong, or rather incomplete) — the truth is that the **CLI** demands a default bucket while the **Rules API does not**, and adding the Firebase project did not change the error by one character. The fix is `scripts/release-storage-rules.mjs` (`npm run deploy:storage-rules`), which creates a ruleset and releases it under `firebase.storage/{bucket}` — the bucket lives in the *release name*, which is exactly the hook a named bucket needs. It reads the bucket out of `firebase.json` so a forking shelter cannot silently inherit `wawitas-app`, and it verifies by reading the live ruleset back and diffing it rather than trusting the write. Deliberately not in CI, same reasoning as `firestore.rules`. **Also initialized Firebase Auth**, which had never been touched: `initializeAuth` succeeded over the API, Email/Password is on, and the subtype is **`IDENTITY_PLATFORM`** rather than legacy Firebase Auth — same 50k MAU free allowance for email and social, but it is the upgraded product and its pricing page is the one to read. The trap found there: **`authorizedDomains` contained only `wawitas.firebaseapp.com` and `wawitas.web.app`** — no `localhost`, no Cloud Run URL — so sign-in would have failed in dev *and* production with an error pointing at the domain rather than at this list. Added both plus `wawitas.org`. Two smaller things: the Firebase console reports the trial expiring **2026-11-11** exactly (85 days, $300.00 remaining), replacing this file's "~2026-11-10"; and **PowerShell 5.1's `Get-Content -Raw` decodes a BOM-less UTF-8 file as ANSI**, which made a byte-identical ruleset look like a 570-character mismatch — every rules diff in this repo must be done in Node, because the file headers are full of multi-byte box-drawing characters.
 
+- **2026-08-22** — **Firebase Hosting deployed for the very first time, and `wawitas.org` pointed at it.** The blocker was one missing key: `firebase.json`'s hosting block carried `rewrites` and `headers` but **no `public` and no `source`**, so `firebase deploy --only hosting` had no document root, `sites/wawitas/releases` stayed `{}`, and `wawitas.web.app` returned 404 — while the Cloud Run URL served fine, which is exactly why it went unnoticed. **A rewrite is not a deployable artifact; a Hosting version needs a file root even when almost every path proxies away.** Fixed with `"public": "public"`, which also puts `robots.txt` on the CDN edge instead of proxying it. **Confirmed Firebase Hosting is still the right front end rather than porting to a Cloud Run domain mapping**, and this time by measurement: domain mappings *are* available in `us-east1` (the API answers), so the alternative was real — it loses because it has **no CDN** (every hashed chunk and photo would cross ~5,000 km to an audience on mobile data in Cochabamba) and because Google steers production to an HTTPS Load Balancer at ~$18/mo, which breaks the $0 constraint the whole Architecture section descends from. **`/_next/static` is deliberately proxied, not uploaded**: Next stamps `max-age=31536000, immutable` on it so Hosting's CDN caches it after one hit, and that hit lands on an instance the visitor's own HTML request just warmed — serving it from Hosting instead would need CI to deploy Hosting in lockstep with the image, and a build-id/chunk mismatch is a new outage class. That review found a real defect: the existing `**/*.@(…|woff2)` header rule matches `/_next/static/media/*.woff2` and **downgraded content-hashed immutable fonts to 7 days**; a `/_next/static/**` rule now precedes it, and *which rule wins was verified by fetching a chunk* (`max-age=31536000, immutable`) rather than assumed from ordering. Domains are in `terraform/hosting.tf` with `wait_dns_verification = false`, since the records they require cannot exist until a human enters them at the registrar — apply would otherwise block on an action apply cannot take. The Hosting **site** is deliberately *not* imported: it is a byproduct of `google_firebase_project`, its id always equals the project id, and importing it would hand `terraform destroy` a way to delete the site out from under the domain. **Apex is canonical, `www` 301s to it** via Firebase's own `redirect_target`, so no app code is involved. Four findings from the registrar work. (1) **The Firebase CLI was logged in as the work account again** — second occurrence — and it **ignores `GOOGLE_APPLICATION_CREDENTIALS`**, re-verified by setting it and watching nothing change; only `firebase logout` / `firebase login` fixes it. (2) **Spaceship showed "DNS Records (0)" while `wawitas.org` resolved to two AWS IPs** — the parking A records are *implicit*, not rows in the panel, and there is no URL-redirect config either. Adding an explicit apex A record displaced them, confirmed by querying `launch1.spaceship.net` directly rather than trusting the UI. (3) **Spaceship's Host field rejects empty for the apex** — the `@` shown is a placeholder, and leaving it blank fails validation with a bare *"Invalid host value"*; `@` must be typed in. (4) **A catch-all `**` rewrite does not break ACME**: probing `/.well-known/acme-challenge/…` on `wawitas.web.app` returns Cloud Run's 404 with `X-Powered-By: Next.js`, which looks alarming, but the same path on `wawitas.org` is answered by `Server: Varnish` — Hosting's own edge — because interception only applies to a domain actually in provisioning. **The claim earned here is "DNS, ownership and certificate are verified," not "the site serves on wawitas.org."** Watched to ground truth rather than trusted: `CERT_VALIDATING` → `CERT_PROPAGATING` at 17:03, TLS handshake started succeeding at 17:05 (the 404 that replaced the cert error is *progress*, not a regression), `OWNERSHIP_MISSING` → `OWNERSHIP_ACTIVE` at 17:09. At handoff both domains were `HOST_ACTIVE` + `OWNERSHIP_ACTIVE` with **`issues: 0`**, `reconciling: false`, a FINALIZED release on the site, and a genuine `CN=wawitas.org` certificate from Google Trust Services — with the apex still answering 404 for ~45 minutes. **That 404 is Firebase's own "Site Not Found" page, not Cloud Run's and not the app's**, which is the distinguishing detail: it means the hostname→site binding has not reached that edge node yet, and it is the difference between "wait" and "something is wrong." `X-Powered-By: Next.js` on a 404 would have meant the opposite.
+
 ---
 
 ## Next session — start here
@@ -109,11 +113,59 @@ scanned chip resolves to a name and a phone call.
 it had been sitting on since it started: infrastructure applied, image built,
 Cloud Run live, and the Muro rendering a real Firestore query in production.
 
-**https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app**
+**https://wawitas.web.app** ← use this one. The Cloud Run URL
+(`https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app`) still works and
+is the origin, but Hosting is now the front door.
 
 Every ✅ below was *executed*, not inferred. Rules and indexes *are* deployed —
 the rules have simply never been enforced against a client, because no client
 can reach Firestore yet.
+
+### 🟡 wawitas.org — CHECK THIS FIRST IF IT IS STILL 404 — 2026-08-22
+
+**Do not start debugging. Read this paragraph first, then run one command.**
+
+Everything that can be configured *is* configured and was verified against the
+source of truth rather than a dashboard:
+
+| Gate | State at handoff | How it was checked |
+|---|---|---|
+| DNS records | ✅ all 4 live | queried `launch1.spaceship.net` directly |
+| Parking IPs displaced | ✅ apex resolves only to `199.36.158.100` | same |
+| Ownership | ✅ `OWNERSHIP_ACTIVE` | Hosting API |
+| Certificate | ✅ issued, `CN=wawitas.org`, exp. 2026-11-20 | `openssl s_client` |
+| Hosting release | ✅ FINALIZED, type DEPLOY | Hosting API |
+| Reported issues | ✅ **zero** | Hosting API |
+| **Edge rollout** | 🟡 `TEMPORARY/CERT_PROPAGATING` | Hosting API |
+
+Only the last row was outstanding, and **it is not actionable** — Google is
+still telling its edge nodes that `wawitas.org` belongs to this site. Firebase
+documents this as up to 24 hours.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}
+' https://wawitas.org
+```
+
+**`200` means done.** If it is still `404`, the one diagnostic that matters is
+*whose* 404 it is:
+
+```bash
+curl -sSI https://wawitas.org | grep -i -E '^(HTTP|x-powered-by|server)'
+```
+
+- **Body says "Site Not Found", no `X-Powered-By`** → Firebase's own page. The
+  hostname has not reached that edge node. **Still just waiting.**
+- **`X-Powered-By: Next.js`** → the request reached our app and *our* app 404'd.
+  That is a completely different bug — routing, not DNS. Do not conflate them.
+
+If it is still Firebase's 404 after ~24h, re-run
+`terraform apply` (the domain resources are idempotent) and re-check
+`requiredDnsUpdates` on the Hosting API before touching Spaceship — the records
+were correct at handoff and are the least likely thing to have broken.
+
+**Do not put `wawitas.org` on flyers, the Instagram bio, or the WhatsApp
+profile until that curl returns 200.**
 
 ### ✅ THE FIREBASE BLOCKER IS GONE — 2026-08-16
 
@@ -176,7 +228,7 @@ Two supporting documents:
 The four-item list further down this section is superseded by that plan's build
 order. It is kept because its constraints and warnings are still accurate.
 
-### Verified state, as of 2026-08-12
+### Verified state, as of 2026-08-22
 
 | Check | Command | Result |
 |---|---|---|
@@ -200,7 +252,13 @@ order. It is kept because its constraints and warnings are still accurate.
 | Dependencies | `npm audit --omit=dev` | ✅ 0 vulnerabilities |
 | **Firestore rules** | `firebase deploy` | ✅ **compiled + released** — but enforcement never exercised (no client) |
 | **Indexes** | `gcloud firestore indexes composite list` | ✅ **10 composite + 1 field override** |
-| Storage rules | `firebase deploy --only storage` | ❌ blocked on a Firebase default bucket; bucket is private regardless |
+| Storage rules | `firebase deploy --only storage` | ❌ blocked on a Firebase default bucket; bucket is private regardless — use `npm run deploy:storage-rules` |
+| **Firebase Hosting** | `firebase deploy --only hosting` | ✅ **released 2026-08-22** — `sites/wawitas/releases/1787431703816000`, FINALIZED. First release in the project's life |
+| **wawitas.web.app** | `GET /` | ✅ **HTTP 200 with real Spanish HTML** — `lang="es"`, the tagline, the WhatsApp link. `X-Powered-By: Next.js` proves the rewrite reaches Cloud Run rather than serving a static file |
+| **`/_next/static` cache header** | `curl -I` on a real chunk | ✅ `public, max-age=31536000, immutable` — the specific rule wins over the `woff2` rule. **Measured, not inferred from ordering** |
+| **DNS for wawitas.org** | `nslookup` against `launch1.spaceship.net` | ✅ all 4 records authoritative; apex resolves **only** to `199.36.158.100` (parking IPs displaced) |
+| **Certificate** | `openssl s_client` | ✅ `CN=wawitas.org`, Google Trust Services, valid to 2026-11-20 |
+| **wawitas.org serving** | `GET /` | 🟡 **404 (Firebase's own "Site Not Found")** — edge rollout incomplete. The one thing on this page NOT yet earned |
 | Real data | any pet document | ❌ none exists |
 
 Still not covered by any green check: server-side validation at apply (retention
@@ -389,6 +447,34 @@ Found by running it (2026-08-08):
 - **Do not add mock/fallback data to `pets-server.ts`** to make the wall look
   populated. It was tried on 2026-08-08, collided with the image-host rule
   above, and was reverted. Seed real documents instead.
+
+From Hosting and the custom domain (2026-08-22):
+
+- **A Hosting block with `rewrites` but no `public`/`source` deploys nothing,
+  silently.** The CLI prints no warning, `releases` stays `{}`, and the site
+  404s while the Cloud Run origin serves perfectly — so the symptom points away
+  from the cause. If `wawitas.web.app` ever 404s again, check for a document
+  root before anything else.
+- **The Firebase CLI has now been on the wrong Google account twice.** It is a
+  third credential store, it does **not** read `GOOGLE_APPLICATION_CREDENTIALS`
+  (re-verified 2026-08-22 by setting it and observing no change), and `gcloud`
+  being correct tells you nothing. Run `firebase login:list` before any deploy.
+- **Spaceship's DNS panel can show "DNS Records (0)" while the domain
+  resolves.** Registrar parking is implicit — not a row you can see or delete.
+  Adding an explicit record displaces it. Never trust the panel; query
+  `launch1.spaceship.net` directly.
+- **Spaceship rejects a blank Host field for the apex.** The `@` is a
+  placeholder, not a value. Leaving it empty fails with a bare *"Invalid host
+  value"* that does not say which field is wrong.
+- **A 404 on a custom domain has two completely different causes, and the
+  response headers tell them apart.** Firebase's "Site Not Found" page (no
+  `X-Powered-By`) means the hostname has not reached that edge node — wait.
+  `X-Powered-By: Next.js` means the request arrived and *our* app 404'd — a
+  routing bug. Conflating these wastes hours.
+- **`/.well-known/acme-challenge/…` returning Next.js's 404 on `web.app` is a
+  red herring.** Hosting only intercepts that path for a domain actually in
+  cert provisioning; on `wawitas.org` it is answered by `Server: Varnish`. A
+  catch-all `**` rewrite does not break certificate issuance.
 
 From the CI/CD pipeline (2026-08-12):
 
@@ -1022,7 +1108,7 @@ everything else. **Set a reminder for ~2026-11-01.**
 
 **3. Terraform is installed** (v1.14.8 verified). `terraform >= 1.9` is assumed.
 
-**4. Later, not now:** DNS for `wawitas.org`, the Maps API key restricted by HTTP
+**4. Later, not now:** ~~DNS for `wawitas.org`~~ (**done 2026-08-22** — records live at Spaceship, ownership verified, certificate issued; only Firebase's edge rollout outstanding), the Maps API key restricted by HTTP
 referrer, the Google OAuth consent screen, and the reCAPTCHA Enterprise key for
 App Check.
 

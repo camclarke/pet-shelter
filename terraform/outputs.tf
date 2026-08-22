@@ -74,3 +74,35 @@ output "firebase_web_config" {
     NEXT_PUBLIC_FIREBASE_APP_ID              = google_firebase_web_app.web.app_id
   }
 }
+
+// ── Custom domain (wawitas.org) ─────────────────────────────────────────────
+// The records that have to be entered by hand at Spaceship, where wawitas.org's
+// DNS is managed. Firebase computes these; they are not guessable, because the
+// ownership TXT value is unique per site and per domain.
+//
+// Read them AFTER `terraform apply`. Both domains are created with
+// `wait_dns_verification = false`, so apply returns immediately and Firebase
+// reconciles once the records resolve — meaning this output is the handoff
+// point between the part Terraform can do and the part it cannot.
+//
+//   terraform output -json custom_domain_dns_records
+//
+// `host_state` and `ownership_state` are the two fields to watch. They go
+// PENDING -> ACTIVE / OWNERSHIP_ACTIVE as DNS propagates. A domain showing
+// ACTIVE is still not proof the site serves — the certificate is provisioned
+// separately and takes longer. Verify by fetching the URL over HTTPS.
+
+output "custom_domain_dns_records" {
+  description = "DNS records to create at the registrar, per domain. Enter these in Spaceship's DNS panel."
+  value = {
+    for d in [
+      google_firebase_hosting_custom_domain.apex,
+      google_firebase_hosting_custom_domain.www,
+      ] : d.custom_domain => {
+      host_state           = d.host_state
+      ownership_state      = d.ownership_state
+      cert_state           = try(d.cert[0].state, null)
+      required_dns_updates = d.required_dns_updates
+    }
+  }
+}
