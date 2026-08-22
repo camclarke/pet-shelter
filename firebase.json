@@ -1,6 +1,12 @@
 {
   "hosting": {
     "//": "Firebase Hosting fronts the Cloud Run service: CDN caching and a custom domain for free, SSR compute on Cloud Run. serviceId and region MUST match what terraform/cloud_run.tf actually creates — serviceId is \"${app_name}-${environment}\", not app_name alone, and the region is var.region. Both were wrong until 2026-08-12 and would have silently broken the rewrite.",
+
+    "//public": "REQUIRED, and its absence was the whole reason Hosting had never deployed. Until 2026-08-22 this block had `rewrites` and `headers` but no `public` and no `source`, so `firebase deploy --only hosting` had no document root to upload and sites/wawitas/releases stayed {} — https://wawitas.web.app returned 404. A rewrite is not a deployable artifact on its own; a Hosting VERSION needs a file root, even an almost-empty one. Point it at Next's own public/ dir so robots.txt is served from the CDN edge rather than proxied to Cloud Run.",
+    "public": "public",
+
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+
     "rewrites": [
       {
         "source": "**",
@@ -10,7 +16,15 @@
         }
       }
     ],
+
+    "//_next_static": "DELIBERATE DEFERRAL, not an oversight. /_next/static/** is PROXIED to Cloud Run rather than uploaded here. It could be served straight from the Hosting edge by staging .next/static into the document root at deploy time, and that would save one origin hop on a cold edge — but it would require CI to deploy Hosting in lockstep with the container image, and a mismatch between the HTML's build id and the uploaded chunks is a new class of outage. Proxying is safe because Next stamps `Cache-Control: public, max-age=31536000, immutable` on everything under /_next/static, so Hosting's CDN caches it at the edge after the first hit, and that first hit lands on an instance the visitor's own HTML request just warmed. Revisit if origin latency from South America proves to matter; the fallback is inherently safe, since Hosting serves a static file when one exists at the path and applies the rewrite when one does not.",
+
     "headers": [
+      {
+        "//": "Must come before the image rule below, which would otherwise match /_next/static/media/*.woff2 and downgrade a content-hashed, immutable asset to 7 days. These filenames carry a content hash, so a year is correct.",
+        "source": "/_next/static/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      },
       {
         "source": "**/*.@(jpg|jpeg|png|webp|avif|svg|woff2)",
         "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
