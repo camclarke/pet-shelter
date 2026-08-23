@@ -47,7 +47,8 @@ scanned chip resolves to a name and a phone call.
 | **Firestore rules** | ✅ **Deployed 2026-08-12** — `firestore.rules` compiled and released. Enforcement itself is still **untested**: no client can reach Firestore yet |
 | Firestore indexes | ✅ **Deployed** — 10 composite + the `identity.code` collection-group field override that `findPetByMicrochip()` needs |
 | **Firebase project** | ✅ **ADDED 2026-08-16** — `projects/wawitas`, ACTIVE. Was never added until this session. **Google Analytics deliberately declined.** Imported into Terraform (`google_firebase_project.default`) |
-| Storage rules | ✅ **DEPLOYED 2026-08-16** — but **not** by the Firebase CLI, which cannot do it. `npm run deploy:storage-rules`. See the row below and `scripts/release-storage-rules.mjs` |
+| Storage rules | ✅ **DEPLOYED 2026-08-16, and PROVEN ENFORCING 2026-08-23** — the only rules in this project that have been. Same bucket, same upload: `pets/**` reads 200, `medical/**` reads **403**. Deployed by `npm run deploy:storage-rules`, **not** the Firebase CLI, which cannot do it — see the row below and `scripts/release-storage-rules.mjs` |
+| **Pet seeding tool** | ✅ **Built + tested 2026-08-23** — `npm run seed:pet`, `scripts/seed-pet.mjs`, template in `seed/EXAMPLE-pet.json`. Validates, strips EXIF, uploads, and derives `coverPhoto`. **Never run against real data — `pets` is still empty** |
 | `firebase deploy --only storage` | ❌ **Will never work here, and that is fine.** It demands a Firebase *default* bucket; this project uses a named Terraform-managed one. Adding the Firebase project did **not** fix it — that was a wrong guess too. Use the npm script |
 | Firebase emulator suite | ❌ **Not used — decided 2026-08-08.** Also cannot run here (no Java) |
 | Firebase web app | ✅ **Registered 2026-08-16** by Terraform (`google_firebase_web_app.web`). The four `NEXT_PUBLIC_*` values are in `.env.local`, from `terraform output firebase_web_config` — never copied from a console |
@@ -110,24 +111,30 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-23** — **PR #3 merged, deployed, and verified in production; and the `wawitas.org` diagnosis in this file turned out to be wrong.** The English rename shipped: CI green (47/47, 44s), CD green (2m24s), and the running Cloud Run image tag **equals `git rev-parse HEAD`** rather than merely being newer — checked, because "a deploy ran" and "the deploy that ran is this commit" are different claims. Live production behaviour was verified rather than inferred from a green pipeline: all six English routes return 200, all six legacy Spanish paths 308 with the slug preserved on `/adopta/:slug`, on both `wawitas.web.app` and the apex. **The more useful finding is that this file's `wawitas.org` runbook was actively misleading.** It offered exactly two branches — Firebase's 404 means *wait*, `X-Powered-By: Next.js` means *routing bug* — and escalation to Firebase after 24h. Reality was a third case neither branch covers: the domain is **fully provisioned** (`HOST_ACTIVE`, `OWNERSHIP_ACTIVE`, **`CERT_ACTIVE`**, `DNS_MATCH`, zero issues, confirmed independently by Terraform's own refresh recording `CERT_VALIDATING → CERT_ACTIVE` and dropping `required_dns_updates`), **every route serves 200**, and only the bare `/` returns 404 — a *stale Fastly cache entry* holding the "Site Not Found" page from the provisioning window. `X-Cache: HIT` across six different `cache-lim-*` (Lima) edge nodes, and the cache key includes the query string, which is why `/?cb=1` misses the cache and returns the real page while `/` does not. So the actionable fix is a cache invalidation, not a wait and not an escalation — and the diagnostic that separates them is `X-Cache`, which the old runbook never mentioned. Left unrun because it publishes to the live site. The lesson generalises past this incident: **"Firebase's own 404" was treated as a single condition when it is at least two**, and the one that mattered was distinguishable only by a header nobody had thought to look at. Also confirmed for the handover: Firestore is still **0 documents in every collection**, Email/Password auth is enabled with `authorizedDomains` already covering localhost, Cloud Run, both Firebase hosts and `wawitas.org`, and all six `NEXT_PUBLIC_FIREBASE_*` values are populated — so **step 3 (seed one pet) and step 2 (auth UI) are both fully unblocked**, and nothing is waiting on a human.
 
+- **2026-08-23** — **Built the seeding tool and measured every constraint step 3 depends on — but deliberately did NOT seed a pet, so Firestore is still 0 documents.** The stop was the user's call and the reason is worth keeping: a real animal needs the *shelter's* name, breed, age and photograph, and `wawitas.org` is a live public adoption site, so a fabricated pet is outward-facing content on a real organisation's site — with a WhatsApp CTA pre-filled with the invented animal's name. The tool is `scripts/seed-pet.mjs` (`npm run seed:pet`), plus a self-describing `seed/EXAMPLE-pet.json`. **The constraint that killed the 2026-08-08 mock-data attempt is now measured rather than feared:** a generated JPEG was uploaded to `pets/_pipeline-check/cover.jpg` in `wawitas-app` and the resulting `firebasestorage.googleapis.com` URL fetched **unauthenticated — 200, `image/jpeg`, exact byte count** — then deleted, leaving the bucket at 0 objects. **Both URL forms work**, with a `?token=` download token and without one; the tokenless form works because `storage.rules` grants `allow read: if true` on `pets/{petId}/{fileName}`. So a named, Terraform-managed bucket needs no Firebase *default* bucket to serve public images, and `next.config.ts`'s single-host allowlist is satisfiable exactly as written. **The bigger result is the first proof that any security rule in this project enforces anything.** Same bucket, same Admin SDK upload, two paths: `pets/**` (public rule) returned **200** and `medical/**` (admin-only rule) returned **403**. Identical everything except the rule, which is what isolates the *rule* as the thing denying it rather than IAM or a bucket ACL. This file has said since 2026-08-12 that rules "compiled and released, which is not the same as being correct" — that still holds for **`firestore.rules`**, which remains unexercised, but `storage.rules` is now tested on both its allow *and* its deny branch. Three things about the seeder itself. (1) It **derives `coverPhoto` from the upload and refuses a hand-typed one**, because the 2026-08-08 failure was a URL on the wrong host and the fix is to make that URL unwritable by hand. It also rejects the pre-rename Spanish enum values (`adopcion`, `perro`, `hembra`), which is the live legacy trap now that stored values are English. (2) It **strips EXIF, and that is a privacy control rather than an optimisation** — a photo taken in a foster home carries GPS coordinates, so publishing it publishes a volunteer's home address. That is concern #2 arriving through the *image pipeline* instead of the location field, which is where this file had been watching for it. `seed/*` is gitignored except the template for the same reason: the seeder strips EXIF on **upload**, which is too late if the original was committed. (3) **A guard that silently disabled itself was caught before it shipped, and only because the check was checked.** The enum-drift guard reads the real `PetStatus`/`Species`/`PetSex`/`PetSize` out of `src/lib/types.ts` and compares them to the script's copies — but its `if (!theirs) continue` meant that if the parser ever stopped matching, it would skip every comparison and report success forever. Now it fails loudly instead, and both branches were verified by breaking them on purpose. **A false negative nearly caused the opposite mistake:** a throwaway `bash` heredoc test reported the guard was dead code, because a quoted heredoc mangled `[\\s\\S]` down to `[sS]` — the test was broken, not the script. Re-running it from a properly written file showed all four enums parsing correctly. **Escaping-sensitive code cannot be tested through a shell heredoc; write the probe to a file.** Verified at the end: typecheck clean, 47/47 tests, `pets`/`areas`/`users`/`adoptions` all still 0 documents, bucket back to 0 objects, and nothing published.
+
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-23. PR #3 merged — every identifier, route, and stored
-enum value is now English. Deployed and verified in production.**
+**Last session: 2026-08-23. The seeding tool for step 3 is built and tested;
+step 3 itself is deliberately NOT done. Firestore is still 0 documents.**
 
-**The next task is step 3 of the build order: put one real pet in Firestore.**
-It is unblocked, needs no new code, and is the last unverified link in the core
-loop. Details in §"Do this next" below.
+**The next task is still step 3: put one real pet in Firestore — and the only
+thing missing is the shelter's own data.** No code is needed. Run:
+
+```bash
+npm run seed:pet -- seed/luna.json
+```
 
 **https://wawitas.org** and **https://wawitas.web.app** both serve. The Cloud
 Run URL (`https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app`) is the
 origin behind them.
 
-Every ✅ below was *executed*, not inferred. Rules and indexes *are* deployed —
-they have simply never been enforced against a client, because no client can
-reach Firestore yet.
+Every ✅ below was *executed*, not inferred. `firestore.rules` is deployed but
+has **never been enforced against a client**, because no client can reach
+Firestore yet. **`storage.rules` is now the exception** — it was exercised on
+both its allow and its deny branch on 2026-08-23, and it works.
 
 ### ▶ Do this next — step 3: seed one real pet
 
@@ -135,28 +142,41 @@ reach Firestore yet.
 Firestore query, the composite index, Cloud Run and Hosting are all live and
 proven — and **not one of them has ever run with an animal in it.**
 `pets-server.ts` → `AdoptionWall.tsx` → rendered HTML is the project's primary
-objective end to end, and it is the only link never exercised. It costs about
-an hour and needs no auth, no admin UI, and no new code.
+objective end to end, and it is the only link never exercised.
 
-Write one document to `pets/{id}` with:
+**What is already done** (2026-08-23), so do not redo it:
 
-| Field | Constraint |
+- `scripts/seed-pet.mjs` — validates the document, strips EXIF, uploads the
+  photo, and **derives `coverPhoto` from the upload**. Tested: it rejects the
+  legacy Spanish enums, a hand-typed `coverPhoto`, a non-kebab slug, a missing
+  `formerNames`, and a non-boolean `hasMicrochip`. `--dry-run` and `--delete`
+  both work. Idempotent by `slug`, so re-running corrects rather than duplicates
+- `seed/EXAMPLE-pet.json` — the template, with every constraint explained
+  inline. `seed/*` is gitignored except that file
+- The image-host constraint is **measured, not assumed**: a
+  `firebasestorage.googleapis.com` URL for `wawitas-app` serves 200
+  unauthenticated, with or without a `?token=`. See the log entry
+
+**What is missing is not technical.** It is one animal's real details and one
+real photograph, which only the shelter has:
+
+| Needed | Notes |
 |---|---|
-| `status` | **must be `'available'`** — `getWall()` filters on it. Note this is the NEW English value, renamed 2026-08-23 |
-| `createdAt` | must exist, or the wall query returns nothing |
-| `slug` | the `/adopt/{slug}` URL segment |
-| `coverPhoto` | **must be hosted on `firebasestorage.googleapis.com`** or the page throws `E231 Invalid src prop` and 500s (`next.config.ts` `images.remotePatterns`). This is what killed the 2026-08-08 mock-data attempt |
-| `species` | `'dog'` \| `'cat'` \| `'rabbit'` \| `'other'` |
-| `sex` | `'male'` \| `'female'` — displayed via `t.sexLabel()`, never raw |
-| `size` | `'small'` \| `'medium'` \| `'large'` |
-| `formerNames` | `[]` at minimum — `.length` is read unguarded |
+| `name`, `breed` | "mestizo" / "mestiza" is an honest answer for a street rescue |
+| `sex` | drives Spanish gender agreement everywhere — never decorative |
+| `size`, `ageMonths` | `ageMonths` may be `null` if genuinely unknown |
+| `hasMicrochip` | boolean only. The **number** never goes in this document |
+| a photo | any local image file; the seeder resizes and strips EXIF |
 
-Then confirm it renders **in production**, not just locally. The homepage is
-ISR at 300s, so allow one revalidation window.
+**Do not invent a pet to make the wall look populated.** `wawitas.org` is a
+live public adoption site and the dossier's CTA opens WhatsApp pre-filled with
+the animal's name — a fabricated animal sends a stranger to message the shelter
+about a dog that does not exist. This is also why **mock/fallback data must not
+go in `pets-server.ts`**: that was tried on 2026-08-08, collided with the
+image-host rule, and was reverted.
 
-**Do not add mock/fallback data to `pets-server.ts`** to make the wall look
-populated. It was tried on 2026-08-08, collided with the image-host rule, and
-was reverted.
+Once seeded, confirm it renders **in production**, not just locally. The
+homepage is ISR at 300s, so allow one revalidation window.
 
 ### ✅ The English rename — done 2026-08-23, PR #3
 
@@ -332,9 +352,11 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Outbreak trace** | seeded fixtures → live `collectionGroup` query → asserted → deleted | ✅ **PROVEN AGAINST LIVE FIRESTORE**, not just deployed. Contacts, ordering, area isolation, window clipping and occupancy all returned hand-computed answers |
 | Terraform | `terraform plan` after this session | ✅ 2 to add (both Firebase), **1 to change = the documented benign `cloud_run` `scaling` diff and nothing else** |
 | Dependencies | `npm audit --omit=dev` | ✅ 0 vulnerabilities |
-| **Firestore rules** | `firebase deploy` | ✅ **compiled + released** — but enforcement never exercised (no client) |
+| **Firestore rules** | `firebase deploy` | ✅ **compiled + released** — but enforcement **still never exercised** (no client). Note the contrast with `storage.rules` below, which now *has* been: these are two different rulesets and only one of them is proven |
 | **Indexes** | `gcloud firestore indexes composite list` | ✅ **10 composite + 1 field override** |
 | Storage rules | `firebase deploy --only storage` | ❌ blocked on a Firebase default bucket; bucket is private regardless — use `npm run deploy:storage-rules` |
+| **Storage rules ENFORCEMENT** | unauthenticated `curl` of two paths in `wawitas-app` | ✅ **PROVEN 2026-08-23** — `pets/**` → **200**, `medical/**` → **403**. Same bucket, same Admin SDK upload, so the *rule* is what differs. The first security rule in this project shown to enforce anything |
+| **Public image URL** | unauthenticated `curl` of a `firebasestorage.googleapis.com` URL | ✅ **200, `image/jpeg`, exact bytes** — with **and** without a `?token=`. Resolves the constraint that killed the 2026-08-08 mock-data attempt. Probe objects deleted; bucket back to 0 |
 | **Firebase Hosting** | `firebase deploy --only hosting` | ✅ **released 2026-08-22** — `sites/wawitas/releases/1787431703816000`, FINALIZED. First release in the project's life |
 | **wawitas.web.app** | `GET /` | ✅ **HTTP 200 with real Spanish HTML** — `lang="es"`, the tagline, the WhatsApp link. `X-Powered-By: Next.js` proves the rewrite reaches Cloud Run rather than serving a static file |
 | **`/_next/static` cache header** | `curl -I` on a real chunk | ✅ `public, max-age=31536000, immutable` — the specific rule wins over the `woff2` rule. **Measured, not inferred from ordering** |
@@ -348,7 +370,8 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Deployed image ↔ HEAD** | `gcloud run services describe` | ✅ tag `8abe308c` **equals `git rev-parse HEAD`** |
 | **Firebase Auth** | Identity Toolkit admin API | ✅ Email/Password **enabled**; `authorizedDomains` covers localhost, Cloud Run, both Firebase hosts and `wawitas.org` |
 | **Client config** | `.env.local` | ✅ all six `NEXT_PUBLIC_FIREBASE_*` **populated**. Maps + App Check keys still empty (not needed yet) |
-| Real data | any pet document | ❌ **none exists — `pets`, `areas`, `users`, `adoptions` all 0 docs.** This is the next task |
+| **Pet seeder** | `npm run seed:pet -- <file> --dry-run` | ✅ **validated 2026-08-23** — rejects legacy Spanish enums, hand-typed `coverPhoto`, bad slug, missing `formerNames`, non-boolean `hasMicrochip`. Enum-drift guard fires on both drift *and* a broken parser |
+| Real data | any pet document | ❌ **none exists — `pets`, `areas`, `users`, `adoptions` all 0 docs.** Still the next task, and it needs the **shelter's** animal + photo, not a technical fix |
 
 Still not covered by any green check: server-side validation at apply (retention
 bounds, immutable locations) and `docker build`. Org policy has dropped off this
@@ -542,6 +565,33 @@ Found by running it (2026-08-08):
 - **Do not add mock/fallback data to `pets-server.ts`** to make the wall look
   populated. It was tried on 2026-08-08, collided with the image-host rule
   above, and was reverted. Seed real documents instead.
+
+From building the seeder (2026-08-23):
+
+- **Escaping-sensitive code cannot be tested through a shell heredoc.** A
+  quoted `<<'EOF'` heredoc silently rewrote `[\\s\\S]` to `[sS]`, so a probe
+  reported the enum-drift guard was dead code when the guard was fine. The
+  test was broken, not the thing under test. Two wasted diagnoses in a row
+  came out of it — first "the guard never runs," then nearly "fix" working
+  code. **Write the probe to a file and run the file.**
+- **A guard that skips silently reads as a passing check forever.** The drift
+  guard's original `if (!theirs) continue` meant a reformat of `types.ts`
+  would disable it with no signal. It now fails loudly. This is the project's
+  own *validated-is-not-verified* lesson applied to a validator: the check
+  itself needed a check, and breaking it on purpose is the only way to earn
+  the claim.
+- **`coverPhoto` is derived, never accepted.** The seeder errors if the pet
+  file contains one. The 2026-08-08 outage was a URL on the wrong host, and
+  the durable fix is making that URL impossible to type by hand rather than
+  documenting the hostname again.
+- **EXIF stripping is a privacy control here, not an optimisation.** A photo
+  taken in a foster home carries GPS. The seeder strips it on **upload**,
+  which is too late if the original was committed — hence `seed/*` being
+  gitignored except the template.
+- **`sharp` is present but only as a transitive Next.js dependency**, pinned
+  by an `overrides` entry. `require('sharp')` works; `require('sharp/package.json')`
+  does not (`exports` blocks the subpath), which is a misleading way to
+  conclude it is missing.
 
 From the English rename (2026-08-22):
 

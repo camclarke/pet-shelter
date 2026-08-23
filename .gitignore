@@ -36,3 +36,11 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/
+
+# seed data
+# Real pet files and their photos are the shelter's own content, not the
+# template's — and a photo straight off a phone carries EXIF the seeder
+# strips on UPLOAD, which is too late if the original is already committed.
+# Only the filled-in-by-you template is tracked.
+seed/*
+!seed/EXAMPLE-pet.json
