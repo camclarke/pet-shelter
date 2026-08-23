@@ -140,16 +140,8 @@ export function validateIsoMicrochip(raw: string): MicrochipValidation {
   return { valid: true, parsed: { code, prefix, prefixKind, nationalId } };
 }
 
-/** Human-readable, Spanish, for admin form feedback. */
-export const MICROCHIP_ERROR_ES: Record<MicrochipError, string> = {
-  empty: 'Ingresa el número del microchip.',
-  'non-numeric': 'El número del microchip solo puede contener dígitos.',
-  'wrong-length':
-    'Un microchip ISO tiene exactamente 15 dígitos. Si tiene 9 o 10, es un chip no-ISO: cámbialo en el tipo de estándar.',
-  'test-transponder':
-    'Los códigos que empiezan con 999 son transponders de prueba y no identifican a un animal real.',
-  'national-id-overflow': 'Ese número no corresponde a un código ISO 11784 válido.',
-};
+// Human-readable validation messages live in `src/i18n` (`t.microchipError`),
+// not here. This module owns the RULES; the wording is language.
 
 /** Grouped for display: 985 112 001 234 5678 reads far better than 15 loose digits. */
 export function formatMicrochipCode(code: string): string {

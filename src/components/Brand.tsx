@@ -10,7 +10,7 @@
  * state — a Server Component, so it costs nothing on the client bundle.
  */
 
-interface MarcaProps {
+interface BrandProps {
   size?: number;
   /** Any CSS colour. Defaults to the brand jade. */
   color?: string;
@@ -19,7 +19,7 @@ interface MarcaProps {
   className?: string;
 }
 
-export function Marca({ size = 48, color = 'var(--jade)', title, className }: MarcaProps) {
+export function Brand({ size = 48, color = 'var(--jade)', title, className }: BrandProps) {
   return (
     <svg
       width={size}

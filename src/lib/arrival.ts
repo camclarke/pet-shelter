@@ -18,46 +18,48 @@
  */
 
 import type { Pet, PetStatus } from './types';
+import { whatsappLink } from './pets';
+import { t } from '@/i18n';
 
 /**
  * Which status changes are legal.
  *
- * ⚠️ Isolation is NOT in this table, and that is not an omission. `aislamiento`
+ * ⚠️ Isolation is NOT in this table, and that is not an omission. `isolation`
  * is an AREA KIND (see `AreaKind`), not a status — moving a sick animal into
  * isolation is a new `placement`, while its status stays whatever it was. The
- * two axes are independent on purpose: an animal can be in `adopcion` and
+ * two axes are independent on purpose: an animal can be `available` and
  * temporarily in the medical pen without losing its place on the wall. Folding
  * isolation into this enum would force a choice between those and lose one.
  */
 export const PET_STATUS_TRANSITIONS: Record<PetStatus, readonly PetStatus[]> = {
   // Announced but not here yet. It either arrives or it does not.
-  'en-camino': ['cuarentena', 'cancelado'],
+  inbound: ['quarantine', 'cancelled'],
 
   // Arrived. Quarantine ends with an explicit, attributed veterinary
   // clearance — never a timer. It can also go straight to a foster home if
   // one is waiting.
-  cuarentena: ['refugio', 'transito', 'perdido'],
+  quarantine: ['shelter', 'foster', 'lost'],
 
   // General population.
-  refugio: ['adopcion', 'transito', 'cuarentena', 'perdido', 'adoptado'],
+  shelter: ['available', 'foster', 'quarantine', 'lost', 'adopted'],
 
   // In a foster home (hogar de tránsito) — a HOME, not a journey.
-  transito: ['adopcion', 'refugio', 'adoptado', 'perdido'],
+  foster: ['available', 'shelter', 'adopted', 'lost'],
 
   // On the wall, actively seeking a family.
-  adopcion: ['adoptado', 'refugio', 'transito', 'perdido'],
+  available: ['adopted', 'shelter', 'foster', 'lost'],
 
   /**
-   * Placed. `refugio` is reachable again because returns happen, and a return
+   * Placed. `shelter` is reachable again because returns happen, and a return
    * is a RE-ADMISSION, not a new animal — the chip is a deduplication key and
-   * the existing record is reopened rather than duplicated. `cuarentena` is
+   * the existing record is reopened rather than duplicated. `quarantine` is
    * reachable for the same reason: a returned animal usually goes back into
    * quarantine before rejoining the population.
    */
-  adoptado: ['refugio', 'cuarentena', 'perdido'],
+  adopted: ['shelter', 'quarantine', 'lost'],
 
   // Missing. Activates the public sighting reporter.
-  perdido: ['refugio', 'cuarentena', 'transito', 'adoptado'],
+  lost: ['shelter', 'quarantine', 'foster', 'adopted'],
 
   /**
    * The rescue fell through. Kept as a record rather than deleted: "we were
@@ -65,7 +67,7 @@ export const PET_STATUS_TRANSITIONS: Record<PetStatus, readonly PetStatus[]> = {
    * the same source does it repeatedly. Reopenable, because a rescue that
    * fell through on Tuesday can be back on by Friday.
    */
-  cancelado: ['en-camino'],
+  cancelled: ['inbound'],
 };
 
 /** Is this status change legal? A same-status write is a no-op, not a move. */
@@ -78,15 +80,15 @@ export function canTransition(from: PetStatus, to: PetStatus): boolean {
  * Statuses meaning "physically inside the shelter's facility", i.e. the ones
  * that should have an open `placement`.
  *
- * `transito` is deliberately absent: a foster home is not an area. An animal
- * in a hogar de tránsito has custody and possibly a location, and NO open
+ * `foster` is deliberately absent: a foster home is not an area. An animal in
+ * a hogar de tránsito has custody and possibly a location, and NO open
  * placement — which is precisely what keeps a volunteer's home address out of
  * the operational area list.
  */
 export const STATUSES_INSIDE_FACILITY: readonly PetStatus[] = [
-  'cuarentena',
-  'refugio',
-  'adopcion',
+  'quarantine',
+  'shelter',
+  'available',
 ];
 
 export function shouldHaveOpenPlacement(status: PetStatus): boolean {
@@ -110,25 +112,27 @@ export interface ArrivalAnnouncement {
 }
 
 const SPECIES_EMOJI: Record<Pet['species'], string> = {
-  perro: '🐕',
-  gato: '🐈',
-  conejo: '🐇',
-  otro: '🐾',
+  dog: '🐕',
+  cat: '🐈',
+  rabbit: '🐇',
+  other: '🐾',
 };
 
+/**
+ * Assembles the announcement. The WORDING lives in `src/i18n`; what this
+ * function owns is which facts are known and therefore worth sending.
+ */
 export function arrivalAnnouncementText(a: ArrivalAnnouncement): string {
-  const emoji = SPECIES_EMOJI[a.pet.species];
-
-  // Only the parts that are actually known. "Nuevo ingreso en camino: ?" reads
-  // as a broken system and trains people to ignore it.
   const descriptors = [a.pet.name?.trim(), a.pet.breed?.trim()].filter(
     (v): v is string => !!v && v.length > 0,
   );
 
-  const who = descriptors.length > 0 ? descriptors.join(', ') : 'sin datos aún';
-  const from = a.origin?.trim() ? `\nViene de: ${a.origin.trim()}` : '';
-
-  return `${emoji} Nuevo ingreso en camino: ${who}${from}\nFicha: ${a.recordUrl}`;
+  return t.arrivalAnnouncement({
+    emoji: SPECIES_EMOJI[a.pet.species],
+    descriptors,
+    origin: a.origin?.trim() || null,
+    recordUrl: a.recordUrl,
+  });
 }
 
 /**
@@ -137,5 +141,5 @@ export function arrivalAnnouncementText(a: ArrivalAnnouncement): string {
  * number would follow another shelter into their copy.
  */
 export function arrivalAnnouncementLink(a: ArrivalAnnouncement, phone: string): string {
-  return `https://wa.me/${phone}?text=${encodeURIComponent(arrivalAnnouncementText(a))}`;
+  return whatsappLink(phone, arrivalAnnouncementText(a));
 }

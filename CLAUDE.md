@@ -105,6 +105,8 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-22** — **Firebase Hosting deployed for the very first time, and `wawitas.org` pointed at it.** The blocker was one missing key: `firebase.json`'s hosting block carried `rewrites` and `headers` but **no `public` and no `source`**, so `firebase deploy --only hosting` had no document root, `sites/wawitas/releases` stayed `{}`, and `wawitas.web.app` returned 404 — while the Cloud Run URL served fine, which is exactly why it went unnoticed. **A rewrite is not a deployable artifact; a Hosting version needs a file root even when almost every path proxies away.** Fixed with `"public": "public"`, which also puts `robots.txt` on the CDN edge instead of proxying it. **Confirmed Firebase Hosting is still the right front end rather than porting to a Cloud Run domain mapping**, and this time by measurement: domain mappings *are* available in `us-east1` (the API answers), so the alternative was real — it loses because it has **no CDN** (every hashed chunk and photo would cross ~5,000 km to an audience on mobile data in Cochabamba) and because Google steers production to an HTTPS Load Balancer at ~$18/mo, which breaks the $0 constraint the whole Architecture section descends from. **`/_next/static` is deliberately proxied, not uploaded**: Next stamps `max-age=31536000, immutable` on it so Hosting's CDN caches it after one hit, and that hit lands on an instance the visitor's own HTML request just warmed — serving it from Hosting instead would need CI to deploy Hosting in lockstep with the image, and a build-id/chunk mismatch is a new outage class. That review found a real defect: the existing `**/*.@(…|woff2)` header rule matches `/_next/static/media/*.woff2` and **downgraded content-hashed immutable fonts to 7 days**; a `/_next/static/**` rule now precedes it, and *which rule wins was verified by fetching a chunk* (`max-age=31536000, immutable`) rather than assumed from ordering. Domains are in `terraform/hosting.tf` with `wait_dns_verification = false`, since the records they require cannot exist until a human enters them at the registrar — apply would otherwise block on an action apply cannot take. The Hosting **site** is deliberately *not* imported: it is a byproduct of `google_firebase_project`, its id always equals the project id, and importing it would hand `terraform destroy` a way to delete the site out from under the domain. **Apex is canonical, `www` 301s to it** via Firebase's own `redirect_target`, so no app code is involved. Four findings from the registrar work. (1) **The Firebase CLI was logged in as the work account again** — second occurrence — and it **ignores `GOOGLE_APPLICATION_CREDENTIALS`**, re-verified by setting it and watching nothing change; only `firebase logout` / `firebase login` fixes it. (2) **Spaceship showed "DNS Records (0)" while `wawitas.org` resolved to two AWS IPs** — the parking A records are *implicit*, not rows in the panel, and there is no URL-redirect config either. Adding an explicit apex A record displaced them, confirmed by querying `launch1.spaceship.net` directly rather than trusting the UI. (3) **Spaceship's Host field rejects empty for the apex** — the `@` shown is a placeholder, and leaving it blank fails validation with a bare *"Invalid host value"*; `@` must be typed in. (4) **A catch-all `**` rewrite does not break ACME**: probing `/.well-known/acme-challenge/…` on `wawitas.web.app` returns Cloud Run's 404 with `X-Powered-By: Next.js`, which looks alarming, but the same path on `wawitas.org` is answered by `Server: Varnish` — Hosting's own edge — because interception only applies to a domain actually in provisioning. **The claim earned here is "DNS, ownership and certificate are verified," not "the site serves on wawitas.org."** Watched to ground truth rather than trusted: `CERT_VALIDATING` → `CERT_PROPAGATING` at 17:03, TLS handshake started succeeding at 17:05 (the 404 that replaced the cert error is *progress*, not a regression), `OWNERSHIP_MISSING` → `OWNERSHIP_ACTIVE` at 17:09. At handoff both domains were `HOST_ACTIVE` + `OWNERSHIP_ACTIVE` with **`issues: 0`**, `reconciling: false`, a FINALIZED release on the site, and a genuine `CN=wawitas.org` certificate from Google Trust Services — with the apex still answering 404 for ~45 minutes. **That 404 is Firebase's own "Site Not Found" page, not Cloud Run's and not the app's**, which is the distinguishing detail: it means the hostname→site binding has not reached that edge node yet, and it is the difference between "wait" and "something is wrong." `X-Powered-By: Next.js` on a 404 would have meant the opposite.
 
+- **2026-08-22** — **Renamed every Spanish identifier, route, and stored enum value to English, at the user's direction — and reversed this file's own convention to match.** The rule is now *everything a machine reads is English; everything a person reads is not*, with visitor-facing language confined to a new `src/i18n/`. The previous convention explicitly permitted Spanish enum values because they "mirror the shelter's own vocabulary"; that vocabulary is not lost, it moved — `shelter` renders as "refugio", `foster` as "hogar de tránsito". **The timing is the whole reason this was cheap: `PetStatus` and friends are STORED values, so renaming them is a data migration — and Firestore holds 0 documents in every collection, so there was nothing to migrate.** Doing this after the first real pet exists would have meant a backfill script plus a dual-read window. Four things worth keeping. (1) **The security layer needed no change at all**, which was checked rather than assumed: `firestore.rules` and `firestore.indexes.json` contain no enum values — rules gate on paths and auth, indexes on field *names*. The blast radius was `src/` alone. (2) **A mechanical token rename silently corrupted display copy.** Replacing the CSS class `muro` → `wall` also rewrote the Spanish sentence *"Mira el muro"* into *"Mira el wall"* in the homepage's step list — a token rename cannot tell a class name from a noun in prose. Caught by diffing every added line that was neither a `className` nor an `import`, which is the check to repeat next time, not the sed itself. (3) **The rename forced the i18n seam into existence rather than merely suggesting it.** `formatMeta()` rendered `pet.sex` raw, so the moment the value became `'male'` the Spanish UI would have read "male" — there was no choice but to build a label layer. `src/i18n/messages.ts` is an interface of *functions*, not tables, because Spanish inflects for gender ("pequeña"/"pequeño", "la gata"/"el gato") and English does not; a `Record<PetSize, string>` can express one language or the other but not both. (4) **Renaming public URLs without redirects is a defect**, so all six Spanish paths 308 to their English equivalents from `next.config.ts`, `/adopta/:slug` listed first because a bare `/adopta` rule does not carry the slug. Verified in a browser, not just compiled: all 6 English routes 200, all 6 legacy routes redirect, the renamed custom properties resolve (`--jade` `#31907a`, `--space-4`, `--shadow`, `--ease`), Fraunces still loads, and the `data-tema`→`data-theme` rename toggles light/dark with no console errors. One scare worth recording: after toggling, `getComputedStyle(document.body).backgroundColor` still reported the dark value while `--cream` reported the light one. That was **not** a broken cascade — `body` carries `transition: background 0.5s` and the tab was backgrounded and throttled, so the transition had stalled mid-flight. A no-transition probe element resolved the light cream immediately. **Computed style during a CSS transition is not the resolved value**, and in a background tab it can stay wrong indefinitely.
+
 ---
 
 ## Next session — start here
@@ -245,7 +247,7 @@ order. It is kept because its constraints and warnings are still accurate.
 | Check | Command | Result |
 |---|---|---|
 | **Live site** | `GET /` | ✅ **HTTP 200**, correct Spanish copy, wall shows its empty state from a live query |
-| **Live site** | `GET /adopta` | ✅ HTTP 200, empty state correct |
+| **Live site** | `GET /adopt` | ✅ HTTP 200, empty state correct |
 | Container image | GitHub Actions `docker buildx` | ✅ **built + pushed**, tag = commit SHA. `gcloud builds submit` was the bootstrap path and is now the fallback, not the norm |
 | Infra | `terraform apply` | ✅ **40 resources live**, GCS backend |
 | Infra | `terraform plan` | 🟡 one **known-benign** diff on `cloud_run` `scaling` — see `cloud_run.tf`. Anything else is real |
@@ -371,7 +373,7 @@ registered Firebase **web app**, which does not exist yet.
 
 1. **Put one real pet in Firestore and load the wall.** This is now the shortest
    path to a proven end-to-end system and the last unverified link in the core
-   loop: `pets-server.ts` → `Muro.tsx` → rendered HTML has never once run with
+   loop: `pets-server.ts` → `AdoptionWall.tsx` → rendered HTML has never once run with
    data in it. Everything underneath it is live — database, rules, indexes,
    Cloud Run.
 
@@ -380,7 +382,7 @@ registered Firebase **web app**, which does not exist yet.
      page throws `E231 Invalid src prop` and 500s (`next.config.ts`
      `images.remotePatterns`). This is the constraint that killed the mock-data
      attempt on 2026-08-08.
-   - `status` must be `adopcion` and `createdAt` must exist, or the wall query
+   - `status` must be `available` and `createdAt` must exist, or the wall query
      will not return it.
 
    Then confirm it renders in **production**, not just locally. Note the
@@ -411,7 +413,7 @@ registered Firebase **web app**, which does not exist yet.
    **build-time** values baked into the bundle by `next build` (see the
    Dockerfile ARGs), not Cloud Run runtime env vars.
 3. **Auth flows** (email + Google). Everything gated is currently a placeholder —
-   `/cuenta` renders static text and the expediente's sign-in prompt is not a
+   `/account` renders static text and the dossier's sign-in prompt is not a
    working gate. The `detail`, `medical`, and `care/feeding` tiers have rules
    written but no UI can reach them yet.
 4. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
@@ -459,6 +461,24 @@ Found by running it (2026-08-08):
 - **Do not add mock/fallback data to `pets-server.ts`** to make the wall look
   populated. It was tried on 2026-08-08, collided with the image-host rule
   above, and was reverted. Seed real documents instead.
+
+From the English rename (2026-08-22):
+
+- **Stored enum values are data, not code.** `PetStatus`, `AreaKind`,
+  `Species` and the rest are written into Firestore. Renaming one now is free
+  only while `pets` is empty; once a single document exists it is a backfill,
+  and once production traffic exists it is a dual-read window. If more renames
+  are wanted, they are cheapest today and get monotonically more expensive.
+- **Never token-rename across files that mix identifiers and prose.** The CSS
+  class `muro` and the Spanish noun *muro* are the same string. The sweep that
+  catches it: diff every added line, drop the ones containing `className`,
+  `href=` or `import`, and read what is left.
+- **`src/i18n` is the only place Spanish belongs.** If a translated string
+  appears in a component, a lib module, or a type, it is in the wrong file —
+  that is what made `pet.sex` renderable as raw data in the first place.
+- **The legacy Spanish routes redirect from `next.config.ts`.** They are not
+  dead weight: `/adopta` was live on both hosts. Drop them only when server
+  logs show no traffic, not on sight.
 
 From Hosting and the custom domain (2026-08-22):
 
@@ -708,7 +728,7 @@ pets/{petId}                          PUBLIC READ
   slug, species, name, formerNames[]  current name + every previous name
   breed, ageMonths, birthdateApprox
   sex, size
-  status        refugio | transito | adopcion | adoptado | perdido
+  status        shelter | foster | available | adopted | lost
   hasMicrochip  boolean ONLY — never the number
   coverPhoto
   createdAt, updatedAt
@@ -782,9 +802,11 @@ pets/{petId}/placements/{id}          AUTHENTICATED — the outbreak ledger
   endedAt (null = here now), reason   Distemper incubation reaches 6 weeks
 
 areas/{areaId}                        ADMIN
-  name ("Cuarentena 2" | "3"), kind   cuarentena|aislamiento|general|
-  capacity, active                    medica|maternidad — ASV keeps
-                                      quarantine and isolation SEPARATE
+  name ("Cuarentena 2" | "3"), kind   quarantine|isolation|general|
+  capacity, active                    medical|maternity — ASV keeps
+                                      quarantine and isolation SEPARATE.
+                                      `name` stays as the shelter says it:
+                                      it is data they type, not an enum
 
 petDrafts/{draftId}                   ADMIN — half-finished wizard state,
                                       deliberately OUTSIDE pets/
@@ -804,10 +826,10 @@ cookBatches/{id} · feedingLog/{date}  deterministic code does the arithmetic
 socialPosts/{postId}                  ⏸ DEFERRED — do not create
 ```
 
-Three enum changes go with these: `PetStatus` gains `en-camino`, `cuarentena`
-and `cancelado` (**not** "en tránsito" — `transito` already means *hogar de
-tránsito*, a foster home); `MedicalRecordKind` gains `serologia`; and
-`FeedingUnit` gains `cucharones`.
+Three enum changes go with these: `PetStatus` gains `inbound`, `quarantine`
+and `cancelled` (`inbound`, **not** anything built on "tránsito" — `foster`
+already means *hogar de tránsito*, a foster home, and the two are opposites);
+`MedicalRecordKind` gains `serology`; and `FeedingUnit` gains `ladles`.
 
 ### The RFID microchip — what it is and is not
 
@@ -1129,7 +1151,20 @@ App Check.
 ## Conventions
 
 - **Spanish** for anything a visitor reads; **English** for code, comments, commits, and docs.
-- Firestore: collection names plural and English; document *field* values may be Spanish enums (`refugio`, `transito`) since they mirror the shelter's own vocabulary.
+- **Everything a machine reads is English. Everything a person reads is not.**
+  That means route segments, component names, CSS classes and custom
+  properties, variables, function names, Firestore collection names **and
+  stored enum values** are all English — `status: 'available'`, not
+  `'adopcion'`. Reversed 2026-08-22 at the user's direction; the previous rule
+  allowed Spanish enum values and is gone.
+- **Visitor-facing language lives in `src/i18n/` and nowhere else.** Every
+  identifier in that directory is English and every value is Spanish. Adding a
+  language is adding one file that satisfies the `Messages` interface — never
+  editing a query, a status value, or a component. The shelter's own
+  vocabulary is not lost, just moved: `shelter` still displays as "refugio",
+  `foster` as "hogar de tránsito".
+- Page-level JSX copy is still inline and is the one exception left. Moving it
+  into `src/i18n` is the follow-up that makes a second locale real.
 - No secrets in the repo. Firebase Web config is public by design; anything else goes in Secret Manager.
 - Commit messages: imperative mood, no attribution trailers.
 - Every new visibility tier is a **new document**, never a new field. Rules cannot protect a field.

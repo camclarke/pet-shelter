@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { Header, Cinta, Footer } from '@/components/SiteChrome';
+import { Header, Ticker, Footer } from '@/components/SiteChrome';
 import { SHELTER } from '@/config/shelter';
 
 export const metadata: Metadata = {
@@ -21,9 +21,11 @@ export const metadata: Metadata = {
 
 // Resolve the theme before first paint so a night visitor never sees a flash
 // of cream. Inlined deliberately — a stylesheet round trip would defeat it.
-const TEMA_SCRIPT = `(() => {
-  const guardado = localStorage.getItem('tema');
-  if (guardado) document.documentElement.dataset.tema = guardado;
+// The `theme` key and its light/dark values are shared with ThemeToggle.tsx
+// and globals.css; all three must agree.
+const THEME_SCRIPT = `(() => {
+  const stored = localStorage.getItem('theme');
+  if (stored) document.documentElement.dataset.theme = stored;
 })();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -36,15 +38,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..900,0..100,0..1;1,9..144,300..900,0..100,0..1&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap"
         />
-        <script dangerouslySetInnerHTML={{ __html: TEMA_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body>
-        <a href="#principal" className="saltar">
+        <a href="#main" className="skip-link">
           Saltar al contenido
         </a>
         <Header />
-        <Cinta />
-        <main id="principal">{children}</main>
+        <Ticker />
+        <main id="main">{children}</main>
         <Footer />
       </body>
     </html>
