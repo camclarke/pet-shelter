@@ -15,11 +15,11 @@ Reading the live page, the content falls into five repeating shapes. The website
 
 | Content type | Example from FB | Site destination |
 |---|---|---|
-| **Adoption post** | "¡ADOPTA A MOCCA! …cachorro de aprox. 3 MESES… COMPROMISOS: castración gratuita a sus 6/7 meses. Se hará seguimiento. Ref. 72281566" | `/adopta` + `/adopta/mocca` |
-| **Lost pet** | "URGENTE, SE BUSCA A NUBBY — RECOMPENSA 500 $US", "PERRITA PERDIDA KUKA" | `/perdidos` |
+| **Adoption post** | "¡ADOPTA A MOCCA! …cachorro de aprox. 3 MESES… COMPROMISOS: castración gratuita a sus 6/7 meses. Se hará seguimiento. Ref. 72281566" | `/adopt` + `/adopt/mocca` |
+| **Lost pet** | "URGENTE, SE BUSCA A NUBBY — RECOMPENSA 500 $US", "PERRITA PERDIDA KUKA" | `/lost` |
 | **Adoption fair** | "GRAN FERIA DE ADOPCIONES — Encuentra tu Amor Verdadero, 1 y 2 de agosto, Parqueo Vergara" | `/eventos` |
 | **Education** | "La Regla 3-3-3", tenencia responsable | `/aprende` |
-| **Rescue case / appeal** | "NOS ESCRIBEN…" | `/ayuda` + home feed |
+| **Rescue case / appeal** | "NOS ESCRIBEN…" | `/help` + home feed |
 
 Two things stand out and shape the whole design:
 
@@ -75,13 +75,13 @@ Full spec, rendered: [design/estilo.html](design/estilo.html)
 | Route | Purpose |
 |---|---|
 | `/` | Hero + mission, the **Muro de Adopción** (latest 8–12 dogs), how adoption works in 3 steps, impact numbers, ways to help |
-| `/adopta` | Full wall, filtered by tamaño · edad · sexo · urgencia, searchable |
-| `/adopta/[slug]` | The **expediente**: photos, story, stats, commitments, big WhatsApp CTA. Also opens as an overlay from the wall without losing scroll position |
-| `/perdidos` | Lost & found. Real community value, and strong local SEO |
-| `/eventos` | Adoption fairs — they run these regularly and partner with other rescues |
-| `/ayuda` | Donate (QR), foster (*hogar de tránsito*), volunteer, supplies wishlist |
-| `/nosotros` | Who they are, the team, transparency |
-| `/aprende` | Regla 3-3-3, adopción responsable, castración, primeros días |
+| `/adopt` | Full wall, filtered by tamaño · edad · sexo · urgencia, searchable |
+| `/adopt/[slug]` | The **dossier** (*el expediente*): photos, story, stats, commitments, big WhatsApp CTA. Also opens as an overlay from the wall without losing scroll position |
+| `/lost` | Lost & found. Real community value, and strong local SEO |
+| `/events` | Adoption fairs — they run these regularly and partner with other rescues |
+| `/help` | Donate (QR), foster (*hogar de tránsito*), volunteer, supplies wishlist |
+| `/about` | Who they are, the team, transparency |
+| `/learn` | Regla 3-3-3, adopción responsable, castración, primeros días |
 
 **Language: Spanish only for v1.** The audience is Cochabamba. English would dilute the copy and double the maintenance for near-zero benefit. Structured for i18n later if it's ever wanted.
 
@@ -126,8 +126,8 @@ What that changes for the sync: the destination is no longer a markdown file in 
 2. `Pet` schema + 6–8 real animals from the Facebook page as seed content
 3. The **Muro de Adopción** and the expediente overlay — the core loop, built first
 4. Home page around the wall
-5. `/adopta` with filters, `/adopta/[slug]`
-6. `/perdidos`, `/eventos`, `/ayuda`, `/aprende`, `/nosotros`
+5. `/adopt` with filters, `/adopt/[slug]`
+6. `/lost`, `/events`, `/help`, `/learn`, `/about`
 7. SEO — `Pet`/`Organization` structured data, OG images per dog, sitemap, Spanish meta
 8. Accessibility + performance pass (contrast, `prefers-reduced-motion`, Lighthouse)
 9. Phase 2: the Facebook sync job

@@ -63,12 +63,15 @@ Full research notes, including regulatory requirements by jurisdiction:
    enforced against public sighting reports, so both need to change together.
 
 3. **Replace the brand** — the logo mark is
-   [`src/components/Marca.tsx`](src/components/Marca.tsx) (inline SVG) and the
+   [`src/components/Brand.tsx`](src/components/Brand.tsx) (inline SVG) and the
    colour/type tokens are at the top of
    [`src/app/globals.css`](src/app/globals.css).
 
-4. **Translate, if you need to.** Visitor-facing copy is Spanish throughout;
-   code, comments, and docs are English.
+4. **Translate, if you need to.** Visitor-facing copy is Spanish; code,
+   routes, comments, docs, and stored Firestore values are English. Language
+   lives in [`src/i18n/`](src/i18n/) — add a file satisfying the `Messages`
+   interface and register it in `index.ts`. You should never have to touch a
+   query or a status value to change language.
 
 ---
 
@@ -178,8 +181,10 @@ one:
 
 - **Every new visibility tier is a new document, never a new field.** Rules
   cannot protect a field.
-- **Spanish** for anything a visitor reads; **English** for code, comments,
-  commits, and docs.
+- **Everything a machine reads is English; everything a person reads is not.**
+  Routes, components, CSS classes, variables, and stored Firestore enum values
+  (`status: 'available'`) are English. Visitor-facing language lives only in
+  `src/i18n/` — where every identifier is English and every value is not.
 
 ## License
 

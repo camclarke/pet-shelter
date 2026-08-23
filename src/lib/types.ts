@@ -15,33 +15,39 @@ import type { MicrochipStandard } from './microchip';
  * What kind of animal. Kept open-ended: shelters take in whatever arrives,
  * and a rescue that starts with dogs will eventually be handed a rabbit.
  */
-export type Species = 'perro' | 'gato' | 'conejo' | 'otro';
+export type Species = 'dog' | 'cat' | 'rabbit' | 'other';
 
 /**
- * Where the pet is in its journey. Values mirror shelters' own vocabulary.
+ * Where the pet is in its journey.
  *
- * ⚠️ `transito` means "in a foster home (hogar de tránsito)" — a HOME, not a
- * journey. The en-route state is therefore `en-camino`, never "en tránsito":
- * the two are opposites (a fostered animal has a home, an incoming one has
- * nowhere yet) and colliding them in the only language the staff actually use
- * would be a lasting mistake.
+ * These are STORED VALUES as well as code identifiers — they are written into
+ * Firestore — so they are English like every other identifier in this
+ * codebase. The shelter's own Spanish vocabulary is not lost: it lives in
+ * `src/i18n/`, which maps each value to the word the staff actually say
+ * ("refugio", "hogar de tránsito"). One value, many languages.
+ *
+ * ⚠️ `foster` means "in a foster home (hogar de tránsito)" — a HOME, not a
+ * journey. The en-route state is therefore `inbound`. The two are opposites
+ * (a fostered animal has a home, an incoming one has nowhere yet), and the
+ * Spanish words for them are near-identical, which is exactly why the stored
+ * value must not be Spanish.
  *
  * Adding values here is safe by construction: getWall() filters
- * `status == 'adopcion'`, an allowlist rather than a denylist, so a new value
+ * `status == 'available'`, an allowlist rather than a denylist, so a new value
  * is excluded from the public wall automatically and no query needs changing.
  */
 export type PetStatus =
-  | 'en-camino' // announced by the manager, not yet physically here
-  | 'cuarentena' // arrived, in a quarantine area, not yet cleared by a vet
-  | 'refugio' // at the shelter, in general population
-  | 'transito' // in a foster home (hogar de tránsito)
-  | 'adopcion' // available, actively seeking a family
-  | 'adoptado' // placed
-  | 'perdido' // missing — activates the public sighting reporter
-  | 'cancelado'; // announced but never arrived — the rescue fell through
+  | 'inbound' // announced by the manager, not yet physically here
+  | 'quarantine' // arrived, in a quarantine area, not yet cleared by a vet
+  | 'shelter' // at the shelter, in general population
+  | 'foster' // in a foster home (hogar de tránsito)
+  | 'available' // available, actively seeking a family
+  | 'adopted' // placed
+  | 'lost' // missing — activates the public sighting reporter
+  | 'cancelled'; // announced but never arrived — the rescue fell through
 
-export type PetSex = 'macho' | 'hembra';
-export type PetSize = 'pequeno' | 'mediano' | 'grande';
+export type PetSex = 'male' | 'female';
+export type PetSize = 'small' | 'medium' | 'large';
 
 /** How precisely a location may be revealed. Never widen without owner consent. */
 export type LocationPrecision = 'exact' | 'approx';
@@ -160,7 +166,7 @@ export interface PetMedia {
    * image.
    */
   alt: string | null;
-  /** Ordering on the expediente. The cover is order 0 with tier 'public'. */
+  /** Ordering on the pet's dossier. The cover is order 0 with tier 'public'. */
   order: number;
 
   uploadedAt: Timestamp;
@@ -182,7 +188,7 @@ export interface PetMedia {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** WSAVA Muscle Condition Score — a separate axis from fat, not a synonym. */
-export type MuscleCondition = 'normal' | 'leve' | 'moderada' | 'marcada';
+export type MuscleCondition = 'normal' | 'mild' | 'moderate' | 'marked';
 
 export interface PetMeasurement {
   id: string;
@@ -344,18 +350,19 @@ export interface CustodyEvent {
 // openly harms the animal's chances more than it helps.
 // ─────────────────────────────────────────────────────────────────────────────
 export type MedicalRecordKind =
-  | 'vacuna'
-  | 'desparasitacion'
-  | 'cirugia'
-  | 'consulta'
-  | 'tratamiento'
-  | 'esterilizacion'
+  | 'vaccination'
+  | 'deworming'
+  | 'surgery'
+  | 'consultation'
+  | 'treatment'
+  | 'sterilization'
   /**
-   * Antibody titre testing. Its own kind rather than a `consulta` with a note:
-   * it is §VI of the EU pet passport and is WSAVA-endorsed, and it answers a
-   * different question from a vaccination (is this animal protected NOW).
+   * Antibody titre testing. Its own kind rather than a `consultation` with a
+   * note: it is §VI of the EU pet passport and is WSAVA-endorsed, and it
+   * answers a different question from a vaccination (is this animal protected
+   * NOW).
    */
-  | 'serologia';
+  | 'serology';
 
 export interface MedicalRecord {
   id: string;
@@ -433,7 +440,7 @@ export interface MedicalRecord {
 // pet was already on avoids the digestive upset that a sudden diet change
 // causes, which is a common and avoidable reason for a return.
 // ─────────────────────────────────────────────────────────────────────────────
-export type FeedingUnit = 'gramos' | 'tazas' | 'latas' | 'ml';
+export type FeedingUnit = 'grams' | 'cups' | 'cans' | 'ml';
 
 export interface FeedingPlan {
   /** Amount per serving. */
@@ -518,11 +525,11 @@ export interface Adoption {
  * warn anyone that it is about to happen.
  */
 export type AreaKind =
-  | 'cuarentena' // healthy, newly admitted or exposed — under observation
-  | 'aislamiento' // sick or suspected — infectious
+  | 'quarantine' // healthy, newly admitted or exposed — under observation
+  | 'isolation' // sick or suspected — infectious
   | 'general' // general population
-  | 'medica' // recovering from surgery or under treatment
-  | 'maternidad'; // pregnant or nursing
+  | 'medical' // recovering from surgery or under treatment
+  | 'maternity'; // pregnant or nursing
 
 export interface Area {
   id: string;
@@ -566,12 +573,12 @@ export interface Area {
 // what stops a volunteer's home address from ever reaching an area list.
 // ─────────────────────────────────────────────────────────────────────────────
 export type PlacementReason =
-  | 'ingreso' // first placement on arrival
-  | 'fin-cuarentena' // cleared by a vet, moving to general population
-  | 'traslado' // ordinary move
-  | 'medico' // moved for treatment or recovery
-  | 'brote' // moved because of an outbreak
-  | 'salida'; // left the facility — adopted, fostered, transferred out
+  | 'intake' // first placement on arrival
+  | 'quarantine-cleared' // cleared by a vet, moving to general population
+  | 'transfer' // ordinary move
+  | 'medical' // moved for treatment or recovery
+  | 'outbreak' // moved because of an outbreak
+  | 'exit'; // left the facility — adopted, fostered, transferred out
 
 export interface Placement {
   id: string;

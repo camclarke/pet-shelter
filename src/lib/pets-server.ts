@@ -33,7 +33,7 @@ export interface WallFilters {
  */
 export async function getWall(filters: WallFilters = {}): Promise<Pet[]> {
   const db = getAdminDb();
-  let q = db.collection('pets').where('status', '==', filters.status ?? 'adopcion');
+  let q = db.collection('pets').where('status', '==', filters.status ?? 'available');
 
   if (filters.species) q = q.where('species', '==', filters.species);
   if (filters.size) q = q.where('size', '==', filters.size);
