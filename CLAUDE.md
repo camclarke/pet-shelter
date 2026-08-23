@@ -37,9 +37,9 @@ scanned chip resolves to a name and a phone call.
 | **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf` |
 | Dependency security | ✅ **0 vulnerabilities** in both the production and dev trees. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
-| **Live site** | ✅ **https://wawitas.org**, **https://wawitas.web.app** and the Cloud Run URL — all serving, real Spanish HTML, wall reading live Firestore. Only the bare apex `/` is a stale cached 404 |
+| **Live site** | ✅ **https://wawitas.org**, **https://wawitas.web.app** and the Cloud Run URL — all serving on **every** route including the bare apex, real Spanish HTML, wall reading live Firestore |
 | **Firebase Hosting** | ✅ **DEPLOYED 2026-08-22 — the first release ever.** `sites/wawitas/releases` had been `{}` since the project began, so `wawitas.web.app` 404'd. Cause: `firebase.json`'s hosting block had `rewrites` + `headers` but **no `public`/`source`**, so there was no document root to upload. A rewrite is not a deployable artifact |
-| **Custom domain** | 🟡 **FULLY PROVISIONED 2026-08-23 and serving — one stale cache entry aside.** `wawitas.org` + `www`: `HOST_ACTIVE`, `OWNERSHIP_ACTIVE`, **`CERT_ACTIVE`**, `DNS_MATCH`, **0 issues**. Every route returns 200; **only the bare `/` returns a 404 held in Fastly's cache** from the provisioning window (`X-Cache: HIT`). Fix is a cache invalidation, **not** a wait and **not** a Firebase escalation — the old advice in this file was wrong. See the section below |
+| **Custom domain** | ✅ **FULLY SERVING 2026-08-23, apex included.** `wawitas.org` + `www`: `HOST_ACTIVE`, `OWNERSHIP_ACTIVE`, **`CERT_ACTIVE`**, `DNS_MATCH`, **0 issues**. Every route returns 200 **including the bare `/`**, which had 404'd since provisioning — cleared by a `firebase deploy --only hosting` that purged the edge. Safe to publish on flyers and social profiles |
 | GCP project | ✅ **`wawitas`** (`181094228409`), region **`us-east1`**, personal account `israel.rocha.clarke@gmail.com`. **No org parent.** Replaces `wawitas-pet-shelter` (employer's org, deleted same day) — see log |
 | Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial. **Blaze plan via the trial. Expires 2026-11-11 exactly** (read off the Firebase console: 85 days, $300.00 remaining, as of 2026-08-17). Upgrade before then or services stop |
 | ADC | ✅ Verified reaching `wawitas`. One global file, **two identities** — see the switch ritual below |
@@ -117,13 +117,16 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-23** — **PR #6 merged, and following the deploy through found a production defect that had been latent since the project began: four routes were pinned in the CDN for a YEAR, and a deploy does not invalidate them.** The pipeline was green, and the running Cloud Run image tag **equalled `git rev-parse HEAD`** — yet `https://wawitas.web.app/account` still served the *old placeholder*, "El inicio de sesión con correo y Google está en construcción." The container was right; the edge was stale. **The distinguishing measurement is one request:** `/account` returns `X-Cache: HIT` with the old HTML, while `/account?cb=1` returns `X-Cache: MISS` and the new page from the origin — the Hosting cache key includes the query string. **Cause:** a fully-static App Router page makes Next.js send `Cache-Control: s-maxage=31536000`. On Vercel that is safe because a deployment purges the edge; **Firebase Hosting has no idea the Cloud Run revision behind its rewrite changed**, so it honours the year. Surveying every route made the split obvious: `/` and `/adopt` carry `export const revalidate = 300` and therefore send `s-maxage=300, stale-while-revalidate` — they self-heal — while `/about`, `/help`, `/lost` and `/account` had no `revalidate` and sent the year. **This is the 2026-08-12 homepage-`revalidate` defect again, in its second form.** That entry fixed `/` and stopped there, because a page whose content never changes cannot reveal that it is frozen. `/account` is simply **the first page in this project's history to change after being cached**, which is why four years-long entries sat undetected. Fixed by giving all four the same `revalidate = 300` the other two already had, and the fix was **measured from a real `next start` response header** (`s-maxage=300, stale-while-revalidate=31535700` on every route) rather than read off the build table. **Note what this does NOT explain:** the apex `/` 404. That one is Firebase's own "Site Not Found" page with **no `X-Powered-By`**, cached during the provisioning window — same family (a Hosting edge entry that a deploy does not purge) but a different cause, and `/` already had a correct 300s header throughout. Do not merge the two diagnoses. **The already-poisoned entries still need flushing** — the code fix only governs what gets cached from now on — and the documented way to do that is a fresh `firebase deploy --only hosting`, which publishes to the live site.
 
+- **2026-08-23** — **Flushed the Hosting edge, and both the year-long cache defect and the apex 404 are gone. `wawitas.org` now serves completely.** Order mattered and was deliberate: the `revalidate` fix (PR #7) had to reach Cloud Run **before** the flush, because purging while the origin still sent `s-maxage=31536000` would simply have re-poisoned every entry for another year. So the sequence was — merge, wait for CD, confirm the deployed tag equals `git rev-parse HEAD`, **verify the origin's own header via `?cb=` on all six routes**, and only then `firebase deploy --only hosting`. Results, measured on both hosts rather than inferred: the stale "en construcción" placeholder is gone and `/account` serves the real auth page; every route returns 200 with `s-maxage=300, stale-while-revalidate`; all six legacy Spanish paths still 308 with the slug preserved. **The apex `/` returns 200 across five consecutive requests with `X-Cache: HIT`** — the cache now holds the correct page — carrying `X-Powered-By: Next.js`, `lang="es"`, the tagline and the WhatsApp link. **The flyers warning is lifted.** Two production-only facts were confirmed that no local check could establish. (1) **The `NEXT_PUBLIC_FIREBASE_*` Docker build args really do reach the bundle** — the API key, `authDomain` and `identitytoolkit` are all present in `/account`'s 11 chunks, so auth genuinely works in production and not merely on localhost. This check had been *inconclusive earlier in the day and looked like a failure*: it reported the config missing, but it was reading the **stale cached chunks** from the old build — a reminder that during a cache incident every derived measurement is suspect until the cache is cleared. (2) **The bundle split holds in production**: the homepage's 9 chunks contain no firebase. Also confirmed by API rather than by trusting this file: `authorizedDomains` covers all five hosts including `wawitas.org`, email/password is enabled, and **`enableImprovedEmailPrivacy` is `true`** — so the enumeration protection measured behaviourally earlier is confirmed at the config level too. ⚠️ **One handling note:** the `admin/v2/projects/wawitas/config` response embeds `signIn.hashConfig.signerKey`, the SCRYPT signer key for password hashes. Query that endpoint with a field filter; do not dump the whole document.
+
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-23. Step 2 (email/password auth) is DONE and verified
-in a browser, and `firestore.rules` is now PROVEN ENFORCING. Step 3 is still
-NOT done: Firestore is still 0 documents, because it needs the shelter's own
+**Last session: 2026-08-23. Step 2 (email/password auth) is DONE, deployed,
+and verified in production. `firestore.rules` is now PROVEN ENFORCING, and
+`wawitas.org` serves completely — the apex 404 is gone. Step 3 is still NOT
+done: Firestore is still 0 documents, because it needs the shelter's own
 animal and photograph, not a technical fix.**
 
 **The next task is still step 3: put one real pet in Firestore — and the only
@@ -214,46 +217,36 @@ lands.** If anything else is misnamed, say so before seeding a pet.
 the route files. Moving it into `src/i18n` — and adding `/[locale]/…` route
 segments — is what makes a second language real. Not started.
 
-### 🟡 wawitas.org — the bare apex `/` serves a STALE CACHED 404
+### ✅ wawitas.org — FULLY SERVING, apex included. Resolved 2026-08-23
 
-**Read this before debugging. The site is not broken.**
+**The bare apex `/` returns 200.** It had returned 404 since the domain was
+provisioned. Resolved by running `firebase deploy --only hosting`, which
+publishes a new Hosting release and purges the edge — confirmed by five
+consecutive requests returning `200` with `X-Cache: HIT` (the cache now holds
+the *correct* page) and `X-Powered-By: Next.js`, serving `lang="es"`, the
+tagline, and the WhatsApp link.
 
-As of 2026-08-23 the domain is fully provisioned and **every route works**:
+Every route on **both** hosts returns 200 with
+`s-maxage=300, stale-while-revalidate`, and all six legacy Spanish paths still
+308 with the slug preserved.
 
-```bash
-curl -sS -o /dev/null -w '%{http_code}\n' "https://wawitas.org/adopt"
-```
+**`wawitas.org` is safe to put on flyers, the Instagram bio, and the WhatsApp
+profile.** The warning this file carried since 2026-08-22 is lifted.
 
-That returns `200`. So does `https://wawitas.org/?cb=1`. **Only the bare `/`
-with no query string returns 404**, and it is Fastly's cached copy of the
-"Site Not Found" page from the provisioning window — `X-Cache: HIT` across
-multiple `cache-lim-*` (Lima) edge nodes, on a cache key that includes the
-query string, which is why any `?x=y` misses the cache and hits the origin.
-
-| Gate | State | Checked via |
-|---|---|---|
-| `hostState` | `HOST_ACTIVE` | Hosting API |
-| `ownershipState` | `OWNERSHIP_ACTIVE` | Hosting API |
-| `cert.state` | **`CERT_ACTIVE`** | Hosting API |
-| `dnsStatus` | `DNS_MATCH` | Hosting API |
-| Issues | **zero** | Hosting API |
-
-**This file previously said "wait, then escalate to Firebase." That advice is
-wrong now** — nothing is pending on Google and nothing is misconfigured. The
-fix is to invalidate that one cache entry; a fresh `firebase deploy --only
-hosting` is the normal way. It was not run because it publishes to the live
-site and needed the user's call.
+**Keep the diagnostic — the two 404s are still different things:**
 
 ```bash
 curl -sSI https://wawitas.org | grep -i -E '^(HTTP|x-cache|x-powered-by)'
 ```
 
-- **404 + `X-Cache: HIT`, no `X-Powered-By`** → the stale cache above.
-- **`X-Powered-By: Next.js`** → the request reached our app and *our* app 404'd.
-  A routing bug, completely different. Do not conflate them.
+- **404, `X-Cache: HIT`, no `X-Powered-By`** → Firebase's own "Site Not Found"
+  held at the edge. A Hosting release purges it. Not a wait, not an escalation.
+- **404 with `X-Powered-By: Next.js`** → the request reached our app and *our*
+  app 404'd. A routing bug, completely different. Do not conflate them.
 
-**Do not put `wawitas.org` on flyers, the Instagram bio, or the WhatsApp
-profile until a bare `curl https://wawitas.org` returns 200.**
+**Note what the apex 404 was NOT:** it was not the year-long `s-maxage` defect
+fixed in PR #7. `/` always carried `revalidate = 300`. Same family — a Hosting
+edge entry that a Cloud Run deploy does not purge — but a different cause.
 
 ### ✅ Step 2 — email/password auth. DONE 2026-08-23
 
@@ -410,7 +403,11 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Certificate** | `openssl s_client` | ✅ `CN=wawitas.org`, Google Trust Services, valid to 2026-11-20 |
 | **Custom domain gates** | Hosting API | ✅ **2026-08-23: `HOST_ACTIVE` + `OWNERSHIP_ACTIVE` + `CERT_ACTIVE` + `DNS_MATCH`, zero issues** on apex and `www` |
 | **wawitas.org routes** | `GET /adopt`, `GET /?cb=1` | ✅ **HTTP 200** — the domain serves |
-| **wawitas.org bare `/`** | `GET /` | 🟡 **404 from a STALE FASTLY CACHE**, not a misconfiguration. `X-Cache: HIT`. See the section above before touching anything |
+| **wawitas.org bare `/`** | `GET /` | ✅ **200 — RESOLVED 2026-08-23** by `firebase deploy --only hosting`. Five consecutive requests, `X-Cache: HIT` on the *correct* page, `X-Powered-By: Next.js`, real Spanish HTML. Safe for flyers |
+| **HTML cache headers** | `curl -I` every route, both hosts | ✅ **`s-maxage=300, stale-while-revalidate`** everywhere. Was `s-maxage=31536000` (one year) on `/about` `/help` `/lost` `/account` until PR #7 |
+| **Prod Firebase config** | fetch `/account`'s 11 chunks and grep | ✅ **API key + `authDomain` + `identitytoolkit` all baked in** — the Docker build args reach the bundle, so auth works in production |
+| **Prod bundle split** | fetch the homepage's 9 chunks and grep | ✅ **no firebase on the homepage** — the `AuthProvider` dynamic import holds in production, not just locally |
+| **authorizedDomains** | Identity Toolkit admin API | ✅ all five hosts incl. `wawitas.org`; email/password on; **`enableImprovedEmailPrivacy: true`** |
 | **English routes** | `GET /adopt /help /about /lost /account` | ✅ **all 200 in production**, 2026-08-23 |
 | **Legacy redirects** | `GET /adopta /ayuda /nosotros /perdidos /cuenta` | ✅ **all 308**, slug preserved on `/adopta/:slug` |
 | **Deployed image ↔ HEAD** | `gcloud run services describe` | ✅ tag `8abe308c` **equals `git rev-parse HEAD`** |
