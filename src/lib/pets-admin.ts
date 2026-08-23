@@ -29,6 +29,7 @@
 
 import {
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
@@ -45,8 +46,18 @@ import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage
 import type { User } from 'firebase/auth';
 
 import { getFirebase } from './firebase-client';
-import { validateMicrochip } from './microchip';
+import { normalizeMicrochipCode, validateMicrochip } from './microchip';
 import { disambiguateSlug, toAgeMonths, type DraftMedia, type PetDraft } from './intake';
+import {
+  custodyKindForStatus,
+  planReadmission,
+  readChipMatches,
+  type ChipMatch,
+  type ChipVerdict,
+  type ReadmissionInput,
+  type ReadmissionPlan,
+} from './readmission';
+import { SHELTER } from '@/config/shelter';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drafts
@@ -387,4 +398,175 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
 
   await batch.commit();
   return { petId: draft.id, slug };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Re-admission — plan section 3.1
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve a scanned chip to an existing pet, as an admin.
+ *
+ * ── Why a second lookup exists at all ──────────────────────────────────────
+ * `findPetByMicrochip()` in `pets-server.ts` is the FINDER's path: it runs on
+ * the server through the Admin SDK and deliberately returns the public tier, so
+ * a stranger who scans a stray gets a name and a way to make contact without
+ * being able to enumerate the registry. This one is the SHELTER's path. It runs
+ * in the browser under `firestore.rules`, which already grants
+ * `match /{path=**}/identity/{docId} { allow read: if isAdmin(); }` — so an
+ * admin client can run the collection-group query and a signed-in adopter
+ * cannot. No rules change was needed for this; the decision was already made.
+ *
+ * The `identity.code` collection-group scope comes from the `fieldOverrides`
+ * entry in `firestore.indexes.json`, which is deployed. A missing index here
+ * throws `failed-precondition` rather than returning nothing, which is the one
+ * mercy in this failure mode — see the 2026-08-16 outbreak-trace entry.
+ *
+ * ── Two reads, not one ─────────────────────────────────────────────────────
+ * `limit(2)` on purpose. One document means one animal; two means the same
+ * credential is on two records, and picking the first would hide exactly the
+ * condition the caller most needs to be told about. See `ChipVerdict`.
+ */
+export async function findPetByMicrochipAdmin(rawCode: string): Promise<ChipVerdict> {
+  const { db } = getFirebase();
+  const code = normalizeMicrochipCode(rawCode);
+  if (!code) return { kind: 'unregistered' };
+
+  const snap = await getDocs(
+    query(collectionGroup(db, 'identity'), where('code', '==', code), limit(2)),
+  );
+  if (snap.empty) return { kind: 'unregistered' };
+
+  // identity docs live at pets/{petId}/identity/microchip — walk back up.
+  const matches = await Promise.all(
+    snap.docs.map(async (identityDoc) => {
+      const petRef = identityDoc.ref.parent.parent;
+      if (!petRef) return null;
+      const petSnap = await getDoc(petRef);
+      if (!petSnap.exists()) return null;
+
+      const data = petSnap.data();
+      return {
+        id: petSnap.id,
+        slug: data.slug,
+        name: data.name,
+        // Defensive: a record written before `formerNames` existed would make
+        // the confirmation card throw on `.length`, and a lookup that crashes
+        // is a lookup that gets skipped.
+        formerNames: data.formerNames ?? [],
+        status: data.status,
+        coverPhoto: data.coverPhoto ?? null,
+        species: data.species,
+        sex: data.sex,
+        size: data.size,
+        breed: data.breed,
+        ageMonths: data.ageMonths ?? null,
+      } as ChipMatch;
+    }),
+  );
+
+  // An identity document whose parent pet is gone is an orphan — Firestore does
+  // not cascade deletes. It must not count as a match, or a chip would resolve
+  // to a record that cannot be opened.
+  return readChipMatches(matches.filter((m): m is ChipMatch => m !== null));
+}
+
+export interface ReopenResult {
+  petId: string;
+  slug: string;
+  plan: ReadmissionPlan;
+}
+
+/**
+ * Record that an animal already in the system has come back.
+ *
+ * ── What this deliberately does NOT do ─────────────────────────────────────
+ * It does not touch `medical`, `identity`, `detail` or `media`. The whole point
+ * of resolving the chip was to avoid creating a second record, so overwriting
+ * the first one's history would throw away the thing we just went to the
+ * trouble of finding. The public document gets the few fields that legitimately
+ * move — name, `formerNames`, status — and everything else is an APPEND:
+ *
+ *   - a `CustodyEvent`, because responsibility for the animal changed hands
+ *   - a `ScanEvent` with `context: 'intake'` and `codeRead` set, because a chip
+ *     was physically read at a place and a time and that is worth keeping
+ *
+ * ── Closing the previous custody interval ──────────────────────────────────
+ * Any custody record still open is ended at the same instant the new one
+ * begins. Without that, an animal adopted out and then returned has two open
+ * intervals and the chain no longer answers "who had it in March" — the same
+ * failure `placements.ts` is built to avoid, one collection over. This is why
+ * the function reads before it writes.
+ *
+ * One `writeBatch`, so a re-admission that fails leaves nothing half-applied.
+ */
+export async function reopenPet(
+  pet: ChipMatch,
+  input: ReadmissionInput,
+  codeRead: string,
+  user: User,
+): Promise<ReopenResult> {
+  const { db } = getFirebase();
+  const plan = planReadmission(pet, input);
+  const petRef = doc(db, 'pets', pet.id);
+
+  const openCustody = await getDocs(
+    query(collection(petRef, 'custody'), where('endedAt', '==', null)),
+  );
+
+  const batch = writeBatch(db);
+
+  // ── public tier: only what actually moves ────────────────────────────────
+  batch.set(
+    petRef,
+    {
+      name: plan.name,
+      formerNames: plan.formerNames,
+      status: plan.status,
+      updatedAt: serverTimestamp(),
+    },
+    // Merge, not replace. A plain set() here would delete every field this
+    // object does not mention — the breed, the cover photo, `createdAt`, which
+    // getWall() orders by. That would look like the animal vanishing.
+    { merge: true },
+  );
+
+  openCustody.docs.forEach((custodyDoc) => {
+    batch.update(custodyDoc.ref, { endedAt: serverTimestamp() });
+  });
+
+  // ── the chain of responsibility ──────────────────────────────────────────
+  const custodyRef = doc(collection(petRef, 'custody'));
+  batch.set(custodyRef, {
+    kind: custodyKindForStatus(plan.status),
+    holder: SHELTER.name,
+    holderUid: null,
+    startedAt: serverTimestamp(),
+    endedAt: null,
+    note: plan.note,
+    recordedBy: user.uid,
+  });
+
+  // ── the scan ledger ──────────────────────────────────────────────────────
+  const scanRef = doc(collection(petRef, 'scans'));
+  batch.set(scanRef, {
+    // No geolocation is captured. The scan happened at the shelter, whose
+    // address is already public, and asking the browser for coordinates during
+    // an intake would collect a volunteer's position for no recovery benefit.
+    geo: null,
+    precision: 'approx',
+    scannedByOrg: SHELTER.name,
+    scannedByUid: user.uid,
+    context: 'intake',
+    note: plan.note,
+    // The code as actually read, recorded per-scan rather than inferred from
+    // the identity document. A future scan returning a DIFFERENT number is a
+    // real signal — a second chip, or a mis-linked record — and it is only
+    // visible if each scan keeps its own answer.
+    codeRead: normalizeMicrochipCode(codeRead),
+    scannedAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+  return { petId: pet.id, slug: pet.slug, plan };
 }
