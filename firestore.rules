@@ -276,6 +276,28 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ── petDrafts/{draftId} ────────────────────────────────────────────────
+    // Half-finished intake wizard state. Admin-only in both directions, and
+    // deliberately OUTSIDE pets/ — a draft is not a pet. Keeping it in its own
+    // top-level collection means an incomplete animal can never appear on the
+    // public wall by accident, because getWall() reads `pets` and nothing
+    // else. A `published: false` flag on a real pet document would put one
+    // boolean between a half-typed record and the front page.
+    //
+    // ⚠️ A draft may carry a microchip number, which on a published pet lives
+    // in the RESTRICTED tier (admin | owner). Admin-only here is strictly
+    // narrower than that, so the tier is not weakened while a record is in
+    // progress. It does mean a draft is not merely "unfinished data" — it is
+    // restricted data, and the publish step is what moves each field into the
+    // tier it belongs to.
+    //
+    // The draft id is minted client-side and becomes the petId on publish, so
+    // photos uploaded to storage at pets/{petId}/… during the wizard already
+    // sit at their final path. No move, no rewrite, no second URL.
+    match /petDrafts/{draftId} {
+      allow read, write: if isAdmin();
+    }
+
     // ── default deny ───────────────────────────────────────────────────────
     // Anything not matched above is inaccessible. New collections must opt in
     // deliberately rather than inherit access by accident.

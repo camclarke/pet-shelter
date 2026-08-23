@@ -45,7 +45,7 @@ const INTRO: Record<Mode, string> = {
 };
 
 export function AccountPanel() {
-  const { user, loading, refresh } = useAuth();
+  const { user, loading, isAdmin, refresh } = useAuth();
 
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
@@ -178,6 +178,17 @@ export function AccountPanel() {
         </p>
 
         <div className="auth__actions">
+          {/* Only shown to admins, and only as a shortcut — /admin gates itself,
+              and firestore.rules gates everything behind it. Hiding the link is
+              tidiness, not access control. `isAdmin` comes from the cached ID
+              token here, so a just-promoted admin may not see it until the
+              token rotates; navigating to /admin directly still works, because
+              AdminGate forces a refresh on mount. */}
+          {isAdmin && (
+            <Link href="/admin" className="btn btn--action">
+              Panel del refugio
+            </Link>
+          )}
           <Link href="/adopt" className="btn btn--brand">
             Ver el muro
           </Link>
