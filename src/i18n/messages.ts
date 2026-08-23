@@ -27,6 +27,7 @@ import type {
   Species,
 } from '@/lib/types';
 import type { MicrochipError } from '@/lib/microchip';
+import type { AuthError } from '@/lib/auth';
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -63,6 +64,17 @@ export interface Messages {
 
   /** Validation message for a rejected microchip code. */
   microchipError(error: MicrochipError): string;
+
+  /**
+   * Why a sign-in, sign-up, or password reset was refused.
+   *
+   * ⚠️ `invalid-credentials` must not name which half was wrong. Identity
+   * Platform's email enumeration protection deliberately hides whether the
+   * address has an account at all, so "contraseña incorrecta" would be a
+   * guess presented as a fact — and "no existe esa cuenta" would leak the
+   * very thing the protection exists to hide.
+   */
+  authError(error: AuthError): string;
 
   /** Pre-filled WhatsApp body for an adoption enquiry. */
   adoptionInquiry(petName: string): string;
