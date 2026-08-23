@@ -63,7 +63,7 @@ export default async function PetPage({ params }: Props) {
           <h1 className="t-name dossier__name">{pet.name}</h1>
           {pet.formerNames.length > 0 && (
             <p className="dossier__former-names">
-              Antes {t.pastParticiple('conoc', pet.sex)} como {pet.formerNames.join(', ')}
+              Antes {t.pastParticiple('conocid', pet.sex)} como {pet.formerNames.join(', ')}
             </p>
           )}
           <p className="t-data dossier__meta">
@@ -73,7 +73,7 @@ export default async function PetPage({ params }: Props) {
 
           {pet.hasMicrochip && (
             <p className="dossier__chip-note">
-              <span aria-hidden="true">🔒</span> Está {t.pastParticiple('identific', pet.sex)} con
+              <span aria-hidden="true">🔒</span> Está {t.pastParticiple('identificad', pet.sex)} con
               microchip. Si {t.article(pet.sex)} encuentras{' '}
               {t.pastParticiple('perdid', pet.sex)}, cualquier veterinaria puede leerlo y
               avisarnos.
