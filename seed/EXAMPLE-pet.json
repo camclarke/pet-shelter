@@ -1,0 +1,34 @@
+{
+  "_comment": "Copy this file, fill it in with a REAL animal, and run: npm run seed:pet -- seed/your-file.json — every value below is a placeholder. Fields marked in scripts/seed-pet.mjs as required are validated before anything is written, so a wrong value fails loudly instead of producing a pet nobody can see.",
+
+  "slug": "luna",
+  "_slug": "The /adopt/{slug} URL segment. Lowercase kebab-case. Changing it later breaks any link already shared on WhatsApp, so pick it once.",
+
+  "name": "Luna",
+  "formerNames": [],
+  "_formerNames": "Every previous name, oldest first. [] if none. Rescued animals get renamed by the finder, then the shelter, then the adopter — keeping the chain is how an owner searching for a lost pet recognises it later.",
+
+  "species": "dog",
+  "_species": "dog | cat | rabbit | other",
+
+  "sex": "female",
+  "_sex": "male | female — drives Spanish gender agreement everywhere (la gata pequeña vs el gato pequeño), so it is never merely decorative.",
+
+  "size": "medium",
+  "_size": "small | medium | large",
+
+  "breed": "mestiza",
+  "_breed": "The shelter's honest best guess. Most street rescues are mixes; 'mestizo' / 'mestiza' is a real answer.",
+
+  "ageMonths": 18,
+  "_ageMonths": "Whole months, or null if genuinely unknown. Displayed as '18 meses' / '1 año'.",
+
+  "status": "available",
+  "_status": "inbound | quarantine | shelter | foster | available | adopted | lost | cancelled. ONLY 'available' appears on the public wall — getWall() filters on it.",
+
+  "hasMicrochip": false,
+  "_hasMicrochip": "Whether the animal is chipped. The NUMBER never goes in this document: it is the credential by which ownership is asserted to vets and registries, and lives in the restricted pets/{id}/identity/microchip tier.",
+
+  "photo": "./luna.jpg",
+  "_photo": "Path to a local image file, relative to THIS json file. It is resized to 1200x1500, re-encoded as progressive JPEG, and uploaded — which is also what strips the EXIF. That matters: a photo taken in a foster home carries GPS coordinates, and publishing those publishes a volunteer's home address. Do not set coverPhoto yourself; the script derives it."
+}
