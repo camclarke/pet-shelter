@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Brand } from './Brand';
 import { ThemeToggle } from './ThemeToggle';
+import { AccountLink } from './AccountLink';
 import { SHELTER } from '@/config/shelter';
 
 /**
@@ -39,9 +40,7 @@ export function Header() {
 
         <div className="header__actions">
           <ThemeToggle />
-          <Link href="/account" className="btn btn--muted header__account">
-            Mi cuenta
-          </Link>
+          <AccountLink />
         </div>
       </div>
     </header>
