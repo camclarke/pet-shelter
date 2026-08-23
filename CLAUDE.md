@@ -26,8 +26,9 @@ scanned chip resolves to a name and a phone call.
 | GitHub repo | ✅ Created (public, `camclarke/pet-shelter`) |
 | Data model + security rules | ✅ Written — `src/lib/types.ts`, `firestore.rules`, `storage.rules` |
 | **Frontend** | ✅ **Next.js — builds clean, 0 vulnerabilities.** See below |
+| **Naming convention** | ✅ **English code/routes/enums, i18n split — PR #3, merged + deployed 2026-08-23.** Visitor language lives only in `src/i18n/`. Page-level JSX copy is the one remaining exception |
 | Local dev server | ✅ **Runs and renders** — all 5 routes verified in a browser 2026-08-08 |
-| Muro de Adopción | ✅ **Live in production, reading real Firestore** — renders its empty state from an actual query. Still **never shown a real pet**, because no pet document exists |
+| Adoption wall (`AdoptionWall.tsx`) | ✅ **Live in production, reading real Firestore** — renders its empty state from an actual query. Still **never shown a real pet**, because no pet document exists. Renamed from `Muro.tsx` 2026-08-23 |
 | Pet identity (RFID microchip) | ✅ Modelled + validated, 10/10 unit tests — `src/lib/microchip.ts` |
 | Medical history + feeding | ✅ Modelled — not yet surfaced in any UI |
 | Template config for other shelters | ✅ `src/config/shelter.ts`, `README.md`, MIT licensed |
@@ -36,9 +37,9 @@ scanned chip resolves to a name and a phone call.
 | **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf` |
 | Dependency security | ✅ **0 vulnerabilities** in both the production and dev trees. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
-| **Live site** | ✅ **https://wawitas.web.app** and the Cloud Run URL — both HTTP 200, real Spanish HTML, wall reading live Firestore |
+| **Live site** | ✅ **https://wawitas.org**, **https://wawitas.web.app** and the Cloud Run URL — all serving, real Spanish HTML, wall reading live Firestore. Only the bare apex `/` is a stale cached 404 |
 | **Firebase Hosting** | ✅ **DEPLOYED 2026-08-22 — the first release ever.** `sites/wawitas/releases` had been `{}` since the project began, so `wawitas.web.app` 404'd. Cause: `firebase.json`'s hosting block had `rewrites` + `headers` but **no `public`/`source`**, so there was no document root to upload. A rewrite is not a deployable artifact |
-| **Custom domain** | 🟡 **DNS, ownership and certificate all DONE 2026-08-22 — edge rollout is the only thing left.** `wawitas.org` + `www` both `HOST_ACTIVE`, `OWNERSHIP_ACTIVE`, **0 issues**; cert issued and valid (`CN=wawitas.org`, Google Trust Services, expires 2026-11-20). Records verified against `launch1.spaceship.net`, not the registrar UI. `cert` sits at `TEMPORARY/CERT_PROPAGATING`, and until that finishes the apex returns Firebase's generic **"Site Not Found"** page. **Nothing is misconfigured and nothing is pending on a human** — see the section below before debugging it |
+| **Custom domain** | 🟡 **FULLY PROVISIONED 2026-08-23 and serving — one stale cache entry aside.** `wawitas.org` + `www`: `HOST_ACTIVE`, `OWNERSHIP_ACTIVE`, **`CERT_ACTIVE`**, `DNS_MATCH`, **0 issues**. Every route returns 200; **only the bare `/` returns a 404 held in Fastly's cache** from the provisioning window (`X-Cache: HIT`). Fix is a cache invalidation, **not** a wait and **not** a Firebase escalation — the old advice in this file was wrong. See the section below |
 | GCP project | ✅ **`wawitas`** (`181094228409`), region **`us-east1`**, personal account `israel.rocha.clarke@gmail.com`. **No org parent.** Replaces `wawitas-pet-shelter` (employer's org, deleted same day) — see log |
 | Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial. **Blaze plan via the trial. Expires 2026-11-11 exactly** (read off the Firebase console: 85 days, $300.00 remaining, as of 2026-08-17). Upgrade before then or services stop |
 | ADC | ✅ Verified reaching `wawitas`. One global file, **two identities** — see the switch ritual below |
@@ -51,7 +52,7 @@ scanned chip resolves to a name and a phone call.
 | Firebase emulator suite | ❌ **Not used — decided 2026-08-08.** Also cannot run here (no Java) |
 | Firebase web app | ✅ **Registered 2026-08-16** by Terraform (`google_firebase_web_app.web`). The four `NEXT_PUBLIC_*` values are in `.env.local`, from `terraform output firebase_web_config` — never copied from a console |
 | Firebase Auth | 🟡 **Initialized 2026-08-16, Email/Password ON.** Subtype is **`IDENTITY_PLATFORM`**, not legacy Firebase Auth. **Google provider still off** — needs an OAuth consent screen. No UI exists yet, so rules remain unenforced |
-| Auth flows (UI) | ⬜ Not started — **step 2 of the build plan**, and the first real test of `firestore.rules` |
+| Auth flows (UI) | ⬜ Not started — **step 2 of the build plan**, and the first real test of `firestore.rules`. Backend fully ready: provider on, `authorizedDomains` correct, client config populated. Zero `signInWith*` calls exist in `src/` |
 | Admin publishing UI | ⬜ Not started — **fully specified**, [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md) §3 |
 | Maps + sightings | ⬜ Not started |
 | Reporting (BigQuery mirror) | ⬜ **Decided 2026-08-09, deliberately not built** — add when a real report is asked for |
@@ -107,79 +108,146 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-22** — **Renamed every Spanish identifier, route, and stored enum value to English, at the user's direction — and reversed this file's own convention to match.** The rule is now *everything a machine reads is English; everything a person reads is not*, with visitor-facing language confined to a new `src/i18n/`. The previous convention explicitly permitted Spanish enum values because they "mirror the shelter's own vocabulary"; that vocabulary is not lost, it moved — `shelter` renders as "refugio", `foster` as "hogar de tránsito". **The timing is the whole reason this was cheap: `PetStatus` and friends are STORED values, so renaming them is a data migration — and Firestore holds 0 documents in every collection, so there was nothing to migrate.** Doing this after the first real pet exists would have meant a backfill script plus a dual-read window. Four things worth keeping. (1) **The security layer needed no change at all**, which was checked rather than assumed: `firestore.rules` and `firestore.indexes.json` contain no enum values — rules gate on paths and auth, indexes on field *names*. The blast radius was `src/` alone. (2) **A mechanical token rename silently corrupted display copy.** Replacing the CSS class `muro` → `wall` also rewrote the Spanish sentence *"Mira el muro"* into *"Mira el wall"* in the homepage's step list — a token rename cannot tell a class name from a noun in prose. Caught by diffing every added line that was neither a `className` nor an `import`, which is the check to repeat next time, not the sed itself. (3) **The rename forced the i18n seam into existence rather than merely suggesting it.** `formatMeta()` rendered `pet.sex` raw, so the moment the value became `'male'` the Spanish UI would have read "male" — there was no choice but to build a label layer. `src/i18n/messages.ts` is an interface of *functions*, not tables, because Spanish inflects for gender ("pequeña"/"pequeño", "la gata"/"el gato") and English does not; a `Record<PetSize, string>` can express one language or the other but not both. (4) **Renaming public URLs without redirects is a defect**, so all six Spanish paths 308 to their English equivalents from `next.config.ts`, `/adopta/:slug` listed first because a bare `/adopta` rule does not carry the slug. Verified in a browser, not just compiled: all 6 English routes 200, all 6 legacy routes redirect, the renamed custom properties resolve (`--jade` `#31907a`, `--space-4`, `--shadow`, `--ease`), Fraunces still loads, and the `data-tema`→`data-theme` rename toggles light/dark with no console errors. One scare worth recording: after toggling, `getComputedStyle(document.body).backgroundColor` still reported the dark value while `--cream` reported the light one. That was **not** a broken cascade — `body` carries `transition: background 0.5s` and the tab was backgrounded and throttled, so the transition had stalled mid-flight. A no-transition probe element resolved the light cream immediately. **Computed style during a CSS transition is not the resolved value**, and in a background tab it can stay wrong indefinitely.
 
+- **2026-08-23** — **PR #3 merged, deployed, and verified in production; and the `wawitas.org` diagnosis in this file turned out to be wrong.** The English rename shipped: CI green (47/47, 44s), CD green (2m24s), and the running Cloud Run image tag **equals `git rev-parse HEAD`** rather than merely being newer — checked, because "a deploy ran" and "the deploy that ran is this commit" are different claims. Live production behaviour was verified rather than inferred from a green pipeline: all six English routes return 200, all six legacy Spanish paths 308 with the slug preserved on `/adopta/:slug`, on both `wawitas.web.app` and the apex. **The more useful finding is that this file's `wawitas.org` runbook was actively misleading.** It offered exactly two branches — Firebase's 404 means *wait*, `X-Powered-By: Next.js` means *routing bug* — and escalation to Firebase after 24h. Reality was a third case neither branch covers: the domain is **fully provisioned** (`HOST_ACTIVE`, `OWNERSHIP_ACTIVE`, **`CERT_ACTIVE`**, `DNS_MATCH`, zero issues, confirmed independently by Terraform's own refresh recording `CERT_VALIDATING → CERT_ACTIVE` and dropping `required_dns_updates`), **every route serves 200**, and only the bare `/` returns 404 — a *stale Fastly cache entry* holding the "Site Not Found" page from the provisioning window. `X-Cache: HIT` across six different `cache-lim-*` (Lima) edge nodes, and the cache key includes the query string, which is why `/?cb=1` misses the cache and returns the real page while `/` does not. So the actionable fix is a cache invalidation, not a wait and not an escalation — and the diagnostic that separates them is `X-Cache`, which the old runbook never mentioned. Left unrun because it publishes to the live site. The lesson generalises past this incident: **"Firebase's own 404" was treated as a single condition when it is at least two**, and the one that mattered was distinguishable only by a header nobody had thought to look at. Also confirmed for the handover: Firestore is still **0 documents in every collection**, Email/Password auth is enabled with `authorizedDomains` already covering localhost, Cloud Run, both Firebase hosts and `wawitas.org`, and all six `NEXT_PUBLIC_FIREBASE_*` values are populated — so **step 3 (seed one pet) and step 2 (auth UI) are both fully unblocked**, and nothing is waiting on a human.
+
 ---
 
 ## Next session — start here
 
-**IT IS DEPLOYED AND IT SERVES.** As of 2026-08-12 this project crossed the line
-it had been sitting on since it started: infrastructure applied, image built,
-Cloud Run live, and the Muro rendering a real Firestore query in production.
+**Last session: 2026-08-23. PR #3 merged — every identifier, route, and stored
+enum value is now English. Deployed and verified in production.**
 
-**https://wawitas.web.app** ← use this one. The Cloud Run URL
-(`https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app`) still works and
-is the origin, but Hosting is now the front door.
+**The next task is step 3 of the build order: put one real pet in Firestore.**
+It is unblocked, needs no new code, and is the last unverified link in the core
+loop. Details in §"Do this next" below.
+
+**https://wawitas.org** and **https://wawitas.web.app** both serve. The Cloud
+Run URL (`https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app`) is the
+origin behind them.
 
 Every ✅ below was *executed*, not inferred. Rules and indexes *are* deployed —
-the rules have simply never been enforced against a client, because no client
-can reach Firestore yet.
+they have simply never been enforced against a client, because no client can
+reach Firestore yet.
 
-### 🟡 wawitas.org — CHECK THIS FIRST IF IT IS STILL 404 — 2026-08-22
+### ▶ Do this next — step 3: seed one real pet
 
-**Do not start debugging. Read this paragraph first, then run one command.**
+**Why this and not auth:** the wall, the dossier, `pets-server.ts`, the
+Firestore query, the composite index, Cloud Run and Hosting are all live and
+proven — and **not one of them has ever run with an animal in it.**
+`pets-server.ts` → `AdoptionWall.tsx` → rendered HTML is the project's primary
+objective end to end, and it is the only link never exercised. It costs about
+an hour and needs no auth, no admin UI, and no new code.
 
-Everything that can be configured *is* configured and was verified against the
-source of truth rather than a dashboard:
+Write one document to `pets/{id}` with:
 
-| Gate | State at handoff | How it was checked |
+| Field | Constraint |
+|---|---|
+| `status` | **must be `'available'`** — `getWall()` filters on it. Note this is the NEW English value, renamed 2026-08-23 |
+| `createdAt` | must exist, or the wall query returns nothing |
+| `slug` | the `/adopt/{slug}` URL segment |
+| `coverPhoto` | **must be hosted on `firebasestorage.googleapis.com`** or the page throws `E231 Invalid src prop` and 500s (`next.config.ts` `images.remotePatterns`). This is what killed the 2026-08-08 mock-data attempt |
+| `species` | `'dog'` \| `'cat'` \| `'rabbit'` \| `'other'` |
+| `sex` | `'male'` \| `'female'` — displayed via `t.sexLabel()`, never raw |
+| `size` | `'small'` \| `'medium'` \| `'large'` |
+| `formerNames` | `[]` at minimum — `.length` is read unguarded |
+
+Then confirm it renders **in production**, not just locally. The homepage is
+ISR at 300s, so allow one revalidation window.
+
+**Do not add mock/fallback data to `pets-server.ts`** to make the wall look
+populated. It was tried on 2026-08-08, collided with the image-host rule, and
+was reverted.
+
+### ✅ The English rename — done 2026-08-23, PR #3
+
+**The convention is now: everything a machine reads is English; everything a
+person reads is not.** This reversed what this file used to say. If you are
+reading an older note that permits Spanish enum values, it is stale.
+
+- Routes: `/adopt`, `/help`, `/about`, `/lost`, `/account` (+ `/adopt/[slug]`)
+- The six legacy Spanish paths **308 redirect** from `next.config.ts`. They
+  were live on both hosts; drop them only when logs show no traffic
+- Components: `AdoptionWall` (was `Muro`), `PetPoster` (was `Cartel`), `Brand`,
+  `ThemeToggle`. CSS: `.wall`, `.poster`, `.container`, `.dossier`, `.hero`,
+  `--space-N`, `--cream`, `--shadow`, `--ease`. `data-theme` = `light`/`dark`
+- **Stored enum values changed**: `available` (was `adopcion`), `foster` (was
+  `transito`), `shelter` (was `refugio`), `inbound` (was `en-camino`), plus
+  `Species`, `PetSex`, `PetSize`, `MedicalRecordKind`, `FeedingUnit`,
+  `AreaKind`, `PlacementReason`, `MuscleCondition`
+- **All visitor-facing language lives in `src/i18n/`.** Every identifier there
+  is English, every value is Spanish. `Messages` is an interface of
+  *functions*, not tables, because Spanish inflects for gender and English does
+  not. Adding a locale = one file + one line in `index.ts`
+
+**The one thing that made this free was timing:** enum values are *stored
+data*, and Firestore holds 0 documents. It is still 0. **Any further renames
+are cheapest right now and get monotonically more expensive the moment step 3
+lands.** If anything else is misnamed, say so before seeding a pet.
+
+**Known gap, deliberately deferred:** page-level JSX copy is still inline in
+the route files. Moving it into `src/i18n` — and adding `/[locale]/…` route
+segments — is what makes a second language real. Not started.
+
+### 🟡 wawitas.org — the bare apex `/` serves a STALE CACHED 404
+
+**Read this before debugging. The site is not broken.**
+
+As of 2026-08-23 the domain is fully provisioned and **every route works**:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' "https://wawitas.org/adopt"
+```
+
+That returns `200`. So does `https://wawitas.org/?cb=1`. **Only the bare `/`
+with no query string returns 404**, and it is Fastly's cached copy of the
+"Site Not Found" page from the provisioning window — `X-Cache: HIT` across
+multiple `cache-lim-*` (Lima) edge nodes, on a cache key that includes the
+query string, which is why any `?x=y` misses the cache and hits the origin.
+
+| Gate | State | Checked via |
 |---|---|---|
-| DNS records | ✅ all 4 live | queried `launch1.spaceship.net` directly |
-| Parking IPs displaced | ✅ apex resolves only to `199.36.158.100` | same |
-| Ownership | ✅ `OWNERSHIP_ACTIVE` | Hosting API |
-| Certificate | ✅ issued, `CN=wawitas.org`, exp. 2026-11-20 | `openssl s_client` |
-| Hosting release | ✅ FINALIZED, type DEPLOY | Hosting API |
-| Reported issues | ✅ **zero** | Hosting API |
-| **Edge rollout** | 🟡 `TEMPORARY/CERT_PROPAGATING` | Hosting API |
+| `hostState` | `HOST_ACTIVE` | Hosting API |
+| `ownershipState` | `OWNERSHIP_ACTIVE` | Hosting API |
+| `cert.state` | **`CERT_ACTIVE`** | Hosting API |
+| `dnsStatus` | `DNS_MATCH` | Hosting API |
+| Issues | **zero** | Hosting API |
 
-Only the last row was outstanding, and **it is not actionable** — Google is
-still telling its edge nodes that `wawitas.org` belongs to this site. Firebase
-documents this as up to 24 hours.
-
-```bash
-curl -sS -o /dev/null -w '%{http_code}
-' https://wawitas.org
-```
-
-**`200` means done.** If it is still `404`, the one diagnostic that matters is
-*whose* 404 it is:
+**This file previously said "wait, then escalate to Firebase." That advice is
+wrong now** — nothing is pending on Google and nothing is misconfigured. The
+fix is to invalidate that one cache entry; a fresh `firebase deploy --only
+hosting` is the normal way. It was not run because it publishes to the live
+site and needed the user's call.
 
 ```bash
-curl -sSI https://wawitas.org | grep -i -E '^(HTTP|x-powered-by|server)'
+curl -sSI https://wawitas.org | grep -i -E '^(HTTP|x-cache|x-powered-by)'
 ```
 
-- **Body says "Site Not Found", no `X-Powered-By`** → Firebase's own page. The
-  hostname has not reached that edge node. **Still just waiting.**
+- **404 + `X-Cache: HIT`, no `X-Powered-By`** → the stale cache above.
 - **`X-Powered-By: Next.js`** → the request reached our app and *our* app 404'd.
-  That is a completely different bug — routing, not DNS. Do not conflate them.
-
-If it is still Firebase's 404 after ~24h, re-run
-`terraform apply` (the domain resources are idempotent) and re-check
-`requiredDnsUpdates` on the Hosting API before touching Spaceship — the records
-were correct at handoff and are the least likely thing to have broken.
+  A routing bug, completely different. Do not conflate them.
 
 **Do not put `wawitas.org` on flyers, the Instagram bio, or the WhatsApp
-profile until that curl returns 200.**
+profile until a bare `curl https://wawitas.org` returns 200.**
 
-⚠️ **AS OF 2026-08-22 18:22 UTC (80+ minutes after DNS entry):** The apex is
-still 404 despite cert becoming `CERT_ACTIVE` (not just propagating). Normal
-rollout is measured in minutes, not hours. **If it is still 404 after ~24h,
-something is stuck** — this is no longer a "wait and check back" situation. At
-that point:
-1. Confirm Firebase's own 404 (no `X-Powered-By`), not our app's
-2. Run `terraform apply` (domain resources are idempotent) and re-check
-   `requiredDnsUpdates` on the Hosting API — very unlikely to have changed,
-   but rules it out before touching Spaceship
-3. Check if the release is still FINALIZED on the site
-4. Escalate to Firebase if all of the above are correct
+### ⏭ After step 3 — step 2: auth flows
+
+Everything the backend needs is already done, verified 2026-08-23:
+
+- Email/Password provider **enabled** (`IDENTITY_PLATFORM` subtype)
+- `authorizedDomains` covers `localhost`, the Cloud Run URL, `wawitas.web.app`,
+  `wawitas.firebaseapp.com` and `wawitas.org` — this list is a real trap, and
+  it is already correct
+- All six `NEXT_PUBLIC_FIREBASE_*` values are populated in `.env.local`
+- `src/lib/firebase-client.ts` already calls `getAuth()`
+
+What does **not** exist: a single `signInWith*` or `onAuthStateChanged` call
+anywhere in `src/`. `/account` is a static placeholder. **Auth is the first
+real test of whether `firestore.rules` enforces anything** — they compiled and
+released, which is not the same as being correct.
+
+Google as a provider still needs an OAuth consent screen (a console task).
+Email/Password alone is enough to build and test.
+
 
 ### ✅ THE FIREBASE BLOCKER IS GONE — 2026-08-16
 
@@ -242,7 +310,7 @@ Two supporting documents:
 The four-item list further down this section is superseded by that plan's build
 order. It is kept because its constraints and warnings are still accurate.
 
-### Verified state, as of 2026-08-22
+### Verified state, as of 2026-08-23
 
 | Check | Command | Result |
 |---|---|---|
@@ -251,14 +319,14 @@ order. It is kept because its constraints and warnings are still accurate.
 | Container image | GitHub Actions `docker buildx` | ✅ **built + pushed**, tag = commit SHA. `gcloud builds submit` was the bootstrap path and is now the fallback, not the norm |
 | Infra | `terraform apply` | ✅ **40 resources live**, GCS backend |
 | Infra | `terraform plan` | 🟡 one **known-benign** diff on `cloud_run` `scaling` — see `cloud_run.tf`. Anything else is real |
-| **CI** | GitHub Actions, PR #1 | ✅ typecheck + 10/10 tests + build + **0 vulnerabilities**, 47s |
-| **CD** | GitHub Actions, push to `main` | ✅ **built, pushed, deployed, verified 200** — keyless via WIF, 3m23s |
+| **CI** | GitHub Actions, PR #3 | ✅ typecheck + **47/47** tests + build + **0 vulnerabilities**, 44s |
+| **CD** | GitHub Actions, push to `main` | ✅ **built, pushed, deployed, verified 200** — keyless via WIF. Last run 2m24s on the PR #3 merge |
 | **CD ↔ Terraform** | `terraform plan` after a CI deploy | ✅ **does NOT roll the image back** — `ignore_changes` proven, not assumed |
 | Firestore | live query via Admin SDK | ✅ connects, returns 0 docs |
 | GCP project | `gcloud projects describe wawitas` | ✅ `ACTIVE`, `us-east1`, **no org parent** |
 | Billing | `gcloud billing projects describe wawitas` | ✅ `billingEnabled: true` — trial expires ~2026-11-10 |
 | ADC | `google-auth-library` probe | ✅ resolves `wawitas` with no `.env.local` help |
-| Build | `npm run build` | ✅ 8 routes *(last local run 2026-08-08; Cloud Build has since built it twice)* |
+| Build | `npm run build` | ✅ **8 routes, run locally 2026-08-23** after the English rename |
 | Tests | `npm test` | ✅ **47/47** — 10 microchip, 23 placement/outbreak, 14 arrival state machine |
 | Typecheck | `npm run typecheck` | ✅ clean |
 | **Outbreak trace** | seeded fixtures → live `collectionGroup` query → asserted → deleted | ✅ **PROVEN AGAINST LIVE FIRESTORE**, not just deployed. Contacts, ordering, area isolation, window clipping and occupancy all returned hand-computed answers |
@@ -272,8 +340,15 @@ order. It is kept because its constraints and warnings are still accurate.
 | **`/_next/static` cache header** | `curl -I` on a real chunk | ✅ `public, max-age=31536000, immutable` — the specific rule wins over the `woff2` rule. **Measured, not inferred from ordering** |
 | **DNS for wawitas.org** | `nslookup` against `launch1.spaceship.net` | ✅ all 4 records authoritative; apex resolves **only** to `199.36.158.100` (parking IPs displaced) |
 | **Certificate** | `openssl s_client` | ✅ `CN=wawitas.org`, Google Trust Services, valid to 2026-11-20 |
-| **wawitas.org serving** | `GET /` | 🟡 **404 (Firebase's own "Site Not Found")** — edge rollout incomplete. The one thing on this page NOT yet earned |
-| Real data | any pet document | ❌ none exists |
+| **Custom domain gates** | Hosting API | ✅ **2026-08-23: `HOST_ACTIVE` + `OWNERSHIP_ACTIVE` + `CERT_ACTIVE` + `DNS_MATCH`, zero issues** on apex and `www` |
+| **wawitas.org routes** | `GET /adopt`, `GET /?cb=1` | ✅ **HTTP 200** — the domain serves |
+| **wawitas.org bare `/`** | `GET /` | 🟡 **404 from a STALE FASTLY CACHE**, not a misconfiguration. `X-Cache: HIT`. See the section above before touching anything |
+| **English routes** | `GET /adopt /help /about /lost /account` | ✅ **all 200 in production**, 2026-08-23 |
+| **Legacy redirects** | `GET /adopta /ayuda /nosotros /perdidos /cuenta` | ✅ **all 308**, slug preserved on `/adopta/:slug` |
+| **Deployed image ↔ HEAD** | `gcloud run services describe` | ✅ tag `8abe308c` **equals `git rev-parse HEAD`** |
+| **Firebase Auth** | Identity Toolkit admin API | ✅ Email/Password **enabled**; `authorizedDomains` covers localhost, Cloud Run, both Firebase hosts and `wawitas.org` |
+| **Client config** | `.env.local` | ✅ all six `NEXT_PUBLIC_FIREBASE_*` **populated**. Maps + App Check keys still empty (not needed yet) |
+| Real data | any pet document | ❌ **none exists — `pets`, `areas`, `users`, `adoptions` all 0 docs.** This is the next task |
 
 Still not covered by any green check: server-side validation at apply (retention
 bounds, immutable locations) and `docker build`. Org policy has dropped off this
@@ -363,6 +438,12 @@ registered Firebase **web app**, which does not exist yet.
 
 ### The next four things, in order
 
+> ⚠️ **Steps 1 and 2 of this list are DONE** (Firebase web app registered
+> 2026-08-16; the seed-a-pet constraints below are still exactly right and are
+> restated at the top of this section under ▶ *Do this next*). Read the top of
+> the file first — this list is kept for its constraints and warnings, which
+> remain accurate, not for its ordering.
+>
 > **Superseded 2026-08-16 by
 > [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md)
 > §0.1 and §9**, which expand this into a 14-step order covering the arrival
