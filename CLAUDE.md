@@ -127,27 +127,33 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-23** — **Bug-fix pass over the intake wizard, and the most valuable find was a three-week-old hole in `storage.rules` that no code had ever been able to trip.** Five defects, four of them found by *clicking things* rather than by reading. (1) **An admin could upload a pet photo and never delete one.** `pets/{petId}/{fileName}` carried a single `allow write`, which covers create, update **and delete** — and its condition called `isImage()`, which dereferences `request.resource.contentType`. On a delete `request.resource` is **null**, so the rule threw and denied. Every admin, every photo, since 2026-08-02. It went unseen because **nothing in the project had ever attempted a delete**; the wizard's "Quitar" button was the first, and it failed silently behind a best-effort handler. Confirmed with a client-SDK probe (`storage/unauthorized` while signed in *with* the claim), fixed by splitting `create, update` from `delete`, redeployed, and re-verified — and then checked in the other direction, because a fix to a deny rule is exactly where a hole gets opened: unauthenticated **and** signed-in-without-claim are still refused both delete and upload. `sightings` and `medical` were already correct, and `firestore.rules` never dereferences `request.resource` on a delete path, so `pets` was the only one. **The general rule now recorded: `allow write` includes delete, and any condition that inspects the payload will deny it.** (2) **"Registrar otro" was a dead button.** It was a `<Link href="/admin/intake">` on a success screen that already lives at `/admin/intake`, so Next matched the same segment, kept the component mounted, and `published` pinned the screen — the shelter could not register a second animal without manually navigating away. A reset is a button that clears state, not a link to where you already are. (3) **A disambiguated slug was silently different from what was typed.** Publishing a second Luna produced `luna-prueba-2` and said nothing; the success screen now shows the final URL and explains the change, which is also why `slug-taken` was **removed** from `IntakeError` rather than wired up — a collision is normal, not an error to block on. (4) **Discarding a draft, or removing a photo, orphaned the Storage object** with no sweep job to ever collect it; both now delete best-effort at the one moment the path is still known. (5) **An unreadable image reported "revisa tu conexión"** — `accept="image/*"` lets a phone offer HEIC, which Chrome cannot decode, so `PhotoUnreadableError` now says what actually happened and what to do. Verified after: 81/81, typecheck and build clean, 0 vulnerabilities in both trees, and Firestore/Storage/Auth all read back at **0** again.
 
+- **2026-08-23** — **PR #12 merged and deployed, and the project has its first admin — so the intake wizard is now reachable by a real person rather than only by a probe.** The merge is `1618ce6`. Production was checked rather than inferred from a green pipeline, and this time there was a stronger signal than usual available: **`/admin` and `/admin/intake` did not exist before this merge, so a 200 on them cannot be a stale edge entry** — it is direct proof the new build is serving. Both return 200 on **both** hosts, the deployed Cloud Run tag `app:1618ce6b…` **equals `git rev-parse HEAD`**, and all five routes carry `s-maxage=300, stale-while-revalidate` including the two new ones, so neither inherited the year-long Hosting cache defect that PR #7 fixed. Two production-only properties were re-confirmed: `/admin` serves its real shell (title, "Verificando permisos", `noindex`), and the homepage's 9 chunks still contain **no firebase auth code** — the `AuthProvider` dynamic import holds. **The rules drift this file warned about is closed:** both rulesets were deployed *before* the merge (nothing could be verified without them), and a readback now shows `firestore.rules` and `storage.rules` **byte-identical to `main`** — so a redeploy from `main` is safe and will not reinstate the delete bug. Then the bootstrap actually ran for the first time: **`israel.rocha.rocha@live.com` signed up through `/account` and was granted the claim** with `npm run grant:admin`, confirmed two independent ways — the script's own read-back, and `--list` enumerating every account and filtering on the claim. **There is now 1 admin and 1 auth account, and still 0 pets.** That last number is the whole remaining gap, and it is no longer a technical one: the shelter can enter an animal through a form.
+
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-23. The ADMIN INTAKE UI is BUILT and verified end to
-end in a browser — `/admin` and `/admin/intake`, build-order step 5. A pet was
-entered, photographed, published, checked, and deleted. Firestore is back to 0
-documents and 0 auth accounts.**
+**Last session: 2026-08-23. The ADMIN INTAKE UI is BUILT, MERGED (PR #12,
+`1618ce6`), DEPLOYED and VERIFIED IN PRODUCTION — `/admin` and
+`/admin/intake`, build-order step 5. The project has its FIRST ADMIN. Firestore
+still holds 0 pets, and that is now the only thing left in step 3.**
 
-**Two things changed about what "next" means.** Step 3 no longer needs anyone
-to hand-write JSON: the shelter can enter their own animal through a form. And
-the admin claim now exists as a one-command bootstrap:
+**Everything is in place for a real animal to be entered.** Nobody has to
+hand-write JSON any more, and the admin bootstrap has actually been run rather
+than merely built:
 
 ```bash
 npm run grant:admin -- someone@example.com
 ```
 
-That account must **sign up first** at `/account` — a claim attaches to an
+The account must **sign up first** at `/account` — a claim attaches to an
 account. `GOOGLE_CLOUD_PROJECT=wawitas` must be set. `--list` shows every
-admin, `--revoke` removes one. **Right now there are 0 admins and 0 accounts**,
-so the first real action is: the shelter signs up, then gets granted.
+admin, `--revoke` removes one (by deleting the key, never by writing
+`false`).
+
+**Current state: 1 admin — `israel.rocha.rocha@live.com` — and 1 auth
+account.** So the panel is reachable by a real person today; the missing piece
+is the shelter's animal and photograph, not access.
 
 ⚠️ **A fresh grant is invisible to an already-signed-in browser for up to an
 hour** — custom claims are baked into the ID token at issue time. This is
@@ -155,11 +161,22 @@ measured, not folklore. `AdminGate` forces `getIdTokenResult(true)` on mount
 precisely to paper over it; if someone still cannot get in, have them sign out
 and back in before suspecting the grant failed.
 
-**Step 3 is still NOT done: Firestore is still 0 documents, because it needs
-the shelter's own animal and photograph, not a technical fix.**
+**Step 3 is still NOT done: `pets` holds 0 documents, because it needs the
+shelter's own animal and photograph, not a technical fix.**
 
-**The next task is still step 3: put one real pet in Firestore — and the only
-thing missing is the shelter's own data.** No code is needed. Run:
+**The next task is step 3, and the way to do it is now the UI**, at
+**https://wawitas.org/admin/intake**. Identity plus one photo is enough to
+publish; the story can wait.
+
+⚠️ **Status defaults to `shelter` ("En el refugio"), which does NOT reach the
+public wall — only `available` ("Disponible") does.** That default is
+deliberate: publishing to the front page of a live shelter's site should be a
+decision, not the path of least resistance. Note the dossier page is publicly
+reachable at its URL under any status, and its CTA opens a real WhatsApp
+message to the shelter's number.
+
+`scripts/seed-pet.mjs` still works and is now the **fallback**, for when the
+UI is down or a record needs correcting faster than a deploy:
 
 ```bash
 npm run seed:pet -- seed/luna.json
@@ -169,12 +186,14 @@ npm run seed:pet -- seed/luna.json
 Run URL (`https://pet-shelter-web-production-poz3ad3gaa-ue.a.run.app`) is the
 origin behind them.
 
-Every ✅ below was *executed*, not inferred. `firestore.rules` is deployed but
-has **never been enforced against a client**, because no client can reach
-Firestore yet. **`storage.rules` is now the exception** — it was exercised on
-both its allow and its deny branch on 2026-08-23, and it works.
+Every ✅ below was *executed*, not inferred. **Both rulesets are now proven
+enforcing against a real client**, on their allow *and* deny branches —
+`firestore.rules` 22/22 plus 11/11 for `petDrafts`, `storage.rules` on
+`pets/**` vs `medical/**` and on the delete verb. Any older note in this file
+saying the rules are "released but unexercised" is stale; it was true until
+2026-08-23 and is not any more.
 
-### ▶ Do this next — step 3: seed one real pet
+### ▶ Do this next — step 3: enter one real pet
 
 **Why this and not auth:** the wall, the dossier, `pets-server.ts`, the
 Firestore query, the composite index, Cloud Run and Hosting are all live and
@@ -184,7 +203,11 @@ objective end to end, and it is the only link never exercised.
 
 **What is already done** (2026-08-23), so do not redo it:
 
-- `scripts/seed-pet.mjs` — validates the document, strips EXIF, uploads the
+- **The intake wizard**, `/admin/intake` — the primary path now. It does
+  everything the seeder does (validates, strips EXIF, uploads, derives
+  `coverPhoto`) plus the tier split and the microchip record, in one
+  `writeBatch`. Reachable today: there is a real admin account
+- `scripts/seed-pet.mjs` — the **fallback**. Validates the document, strips EXIF, uploads the
   photo, and **derives `coverPhoto` from the upload**. Tested: it rejects the
   legacy Spanish enums, a hand-typed `coverPhoto`, a non-kebab slug, a missing
   `formerNames`, and a non-boolean `hasMicrochip`. `--dry-run` and `--delete`
@@ -196,7 +219,7 @@ objective end to end, and it is the only link never exercised.
   unauthenticated, with or without a `?token=`. See the log entry
 
 **What is missing is not technical.** It is one animal's real details and one
-real photograph, which only the shelter has:
+real photograph, which only the shelter has. The wizard asks for exactly this:
 
 | Needed | Notes |
 |---|---|
@@ -204,7 +227,7 @@ real photograph, which only the shelter has:
 | `sex` | drives Spanish gender agreement everywhere — never decorative |
 | `size`, `ageMonths` | `ageMonths` may be `null` if genuinely unknown |
 | `hasMicrochip` | boolean only. The **number** never goes in this document |
-| a photo | any local image file; the seeder resizes and strips EXIF |
+| a photo | any local image file; both paths resize to a 1600px long edge and strip EXIF |
 
 **Do not invent a pet to make the wall look populated.** `wawitas.org` is a
 live public adoption site and the dossier's CTA opens WhatsApp pre-filled with
@@ -425,7 +448,7 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Auth error mapping** | deliberate bad logins in the browser | ✅ wrong credentials and a 3-char password both surfaced the correct **Spanish** message, from a real Firebase refusal |
 | **Enumeration protection** | raw Identity Toolkit call | ✅ **measured** — `INVALID_LOGIN_CREDENTIALS`; and `sendPasswordResetEmail` resolves for an address with **no account** |
 | **Firebase kept off the homepage** | prerendered script tags per route | ✅ **measured** — `/` `/adopt` `/about` carry no firebase chunk (634 KB raw); `/account` does (1320 KB raw) |
-| **Cleanup after probing** | Admin SDK | ✅ **0 auth accounts, 0 documents** in `users`, `pets`, `areas`, `adoptions` |
+| **Cleanup after probing** | Admin SDK | ✅ every probe pet, draft, object and throwaway account removed and read back at **0**. The only account that remains is the real admin below — deliberately |
 | **Public image URL** | unauthenticated `curl` of a `firebasestorage.googleapis.com` URL | ✅ **200, `image/jpeg`, exact bytes** — with **and** without a `?token=`. Resolves the constraint that killed the 2026-08-08 mock-data attempt. Probe objects deleted; bucket back to 0 |
 | **Firebase Hosting** | `firebase deploy --only hosting` | ✅ **released 2026-08-22** — `sites/wawitas/releases/1787431703816000`, FINALIZED. First release in the project's life |
 | **wawitas.web.app** | `GET /` | ✅ **HTTP 200 with real Spanish HTML** — `lang="es"`, the tagline, the WhatsApp link. `X-Powered-By: Next.js` proves the rewrite reaches Cloud Run rather than serving a static file |
@@ -441,7 +464,10 @@ order. It is kept because its constraints and warnings are still accurate.
 | **authorizedDomains** | Identity Toolkit admin API | ✅ all five hosts incl. `wawitas.org`; email/password on; **`enableImprovedEmailPrivacy: true`** |
 | **English routes** | `GET /adopt /help /about /lost /account` | ✅ **all 200 in production**, 2026-08-23 |
 | **Legacy redirects** | `GET /adopta /ayuda /nosotros /perdidos /cuenta` | ✅ **all 308**, slug preserved on `/adopta/:slug` |
-| **Deployed image ↔ HEAD** | `gcloud run services describe` | ✅ tag `8abe308c` **equals `git rev-parse HEAD`** |
+| **Deployed image ↔ HEAD** | `gcloud run services describe` | ✅ tag `1618ce6b` **equals `git rev-parse HEAD`** (PR #12) |
+| **New routes live in prod** | `GET /admin`, `GET /admin/intake` | ✅ **200 on both hosts.** These routes did not exist before the merge, so a 200 cannot be a stale edge entry — stronger proof than the usual `?cb=` comparison |
+| **First admin** | `npm run grant:admin -- --list` | ✅ **1 admin: `israel.rocha.rocha@live.com`.** Confirmed by the script's read-back *and* by `--list` enumerating every account and filtering on the claim |
+| **Deployed rules ↔ `main`** | Rules API readback after the merge | ✅ `firestore.rules` **and** `storage.rules` byte-identical to `main` — the pre-merge drift is closed |
 | **Firebase Auth** | Identity Toolkit admin API | ✅ Email/Password **enabled**; `authorizedDomains` covers localhost, Cloud Run, both Firebase hosts and `wawitas.org` |
 | **Client config** | `.env.local` | ✅ all six `NEXT_PUBLIC_FIREBASE_*` **populated**. Maps + App Check keys still empty (not needed yet) |
 | **Pet seeder** | `npm run seed:pet -- <file> --dry-run` | ✅ **validated 2026-08-23** — rejects legacy Spanish enums, hand-typed `coverPhoto`, bad slug, missing `formerNames`, non-boolean `hasMicrochip`. Enum-drift guard fires on both drift *and* a broken parser |
@@ -456,7 +482,7 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Slug collision is surfaced** | publish three pets called Luna | ✅ `luna-prueba` → `-2` → `-3`, and the success screen now names the final URL and says why it changed |
 | **Stale `?draft=` id** | open `/admin/intake?draft=doesNotExist` | ✅ says so, starts a fresh draft, and strips the dead query so a reload does not mint another id |
 | **Deployed ruleset ↔ file** | Rules API readback, diffed in Node | ✅ **byte-identical** (16230 bytes), `petDrafts` rule present |
-| Real data | any pet document | ❌ **none exists — `pets`, `areas`, `users`, `adoptions` all 0 docs.** Still the next task, and it needs the **shelter's** animal + photo — but it is now a form, not a JSON file |
+| Real data | any pet document | ❌ **still none — `pets`, `areas`, `adoptions` all 0 docs** (`users` now has 1, the admin). The last gap in step 3, and it needs the **shelter's** animal + photo — but it is now a form at `/admin/intake`, not a JSON file |
 
 Still not covered by any green check: server-side validation at apply (retention
 bounds, immutable locations) and `docker build`. Org policy has dropped off this
@@ -590,9 +616,12 @@ Check keys are still empty, and are not needed yet.
      real one or keep the Terraform-managed one. **Not urgent:** `wawitas-app`
      has no `allUsers` binding, uniform bucket-level access is on, and only the
      Cloud Run service account holds `objectAdmin`.
-   - **Rules enforcement has never been exercised.** They compiled and
-     released, which is not the same as being correct. The first real test
-     comes with auth (step 3).
+   - ~~**Rules enforcement has never been exercised.**~~ **Done — both
+     rulesets are PROVEN ENFORCING as of 2026-08-23**, on their allow *and*
+     deny branches, from a real client SDK. `storage.rules` was also found
+     BROKEN in the process: `allow write` covers delete, and the condition
+     dereferenced a null `request.resource`, so no admin could ever delete a
+     pet photo. Fixed and re-verified.
    - `public_access_prevention` on `wawitas-app` is `inherited`, not
      `enforced`. Decide when Storage is actually used — enforcing it may affect
      how pet photos are served.
@@ -610,8 +639,15 @@ Check keys are still empty, and are not needed yet.
    dossier's gated block is still a prompt, not a gate. That is the natural
    follow-up, and it is the first thing that will read Firestore *client-side*,
    where the cost principle in `## Architecture` finally starts paying off.
-4. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
-   `MICROCHIP_ERROR_ES` are built and tested, ready to wire into a form.
+4. ~~**Admin publishing UI**, including microchip entry.~~ — **DONE
+   2026-08-23** (PR #12), merged and deployed. `/admin` and `/admin/intake`,
+   steps 1–3 manual. `validateMicrochip()` is wired in and fires live; the
+   Spanish wording reaches it through `t.microchipError()`, not through a
+   `MICROCHIP_ERROR_ES` constant — that name is from before the i18n split
+   and no longer exists.
+   **The natural follow-up is step 6, the re-admission / dedup path**
+   (plan §3.1): it is cheap now and expensive once duplicate records exist,
+   and it becomes properly testable as soon as one real chipped pet does.
 
 ### Open questions awaiting a decision
 
