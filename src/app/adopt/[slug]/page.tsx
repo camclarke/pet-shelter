@@ -87,13 +87,19 @@ export default async function PetPage({ params }: Props) {
             Adóptame ↗
           </a>
 
+          {/* ⚠️ Deliberately phrased in the FUTURE tense. Sign-in works as of
+              2026-08-23, but nothing reads the `detail`, `medical` or
+              `care/feeding` tiers yet — so "están disponibles al iniciar
+              sesión" would be a promise the site cannot keep the moment the
+              first pet is seeded. Switch it to the present tense in the same
+              commit that actually renders those tiers, not before. */}
           <div className="dossier__gated">
             <p>
-              La historia completa de {pet.name}, sus fotos, su historial médico y su plan de
-              alimentación están disponibles al iniciar sesión.
+              Crea tu cuenta para seguir a {pet.name}. Pronto encontrarás aquí su historia
+              completa, sus fotos, su historial médico y su plan de alimentación.
             </p>
             <a href="/account" className="btn btn--muted">
-              Iniciar sesión
+              Crear cuenta o entrar
             </a>
           </div>
         </div>

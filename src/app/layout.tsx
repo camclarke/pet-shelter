@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Header, Ticker, Footer } from '@/components/SiteChrome';
+import { AuthProvider } from '@/components/AuthProvider';
 import { SHELTER } from '@/config/shelter';
 
 export const metadata: Metadata = {
@@ -44,10 +45,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a href="#main" className="skip-link">
           Saltar al contenido
         </a>
-        <Header />
-        <Ticker />
-        <main id="main">{children}</main>
-        <Footer />
+        {/* Wraps everything, but costs the first paint nothing: AuthProvider
+            imports the Firebase SDK dynamically, after hydration. `children`
+            stays server-rendered — a Client Component parent does not force
+            its slotted children to become client. */}
+        <AuthProvider>
+          <Header />
+          <Ticker />
+          <main id="main">{children}</main>
+          <Footer />
+        </AuthProvider>
       </body>
     </html>
   );
