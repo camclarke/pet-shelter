@@ -120,6 +120,44 @@ npm run build   # production build
 
 ---
 
+## Publishing a pet
+
+Until the admin UI exists, pets are published with a script. Copy the template,
+fill it in, point it at a photo, and run it:
+
+```bash
+cp seed/EXAMPLE-pet.json seed/luna.json
+```
+
+```bash
+npm run seed:pet -- seed/luna.json --dry-run
+```
+
+```bash
+npm run seed:pet -- seed/luna.json
+```
+
+`--dry-run` validates everything and writes nothing. `--delete` removes the pet
+and its photos. Re-running is safe: the script matches on `slug`, so it corrects
+an existing pet rather than creating a duplicate.
+
+Three things it does that are easy to get wrong by hand:
+
+- **It derives `coverPhoto` from the upload** and refuses one you typed. Next.js
+  only permits images from `firebasestorage.googleapis.com` (`next.config.ts`
+  `images.remotePatterns`); a URL on any other host throws `E231 Invalid src
+  prop` and 500s the whole page.
+- **It strips EXIF.** A photo taken in a foster home carries GPS coordinates,
+  and publishing those publishes a volunteer's home address. `seed/*` is
+  gitignored except the template for the same reason — stripping happens on
+  upload, which is too late if you committed the original.
+- **It validates the stored enum values**, which are English (`available`, not
+  `adopcion`). Only `status: "available"` appears on the public wall; every
+  other status is stored and hidden. A typo'd status is not an error anywhere
+  — it is just an animal nobody ever sees.
+
+---
+
 ## Deploying
 
 ```bash
@@ -135,8 +173,23 @@ Firebase CLI, because Terraform's Firestore-rules support is too thin to be a
 trustworthy source of truth for a security-critical file:
 
 ```bash
-firebase deploy --only firestore:rules,firestore:indexes,storage:rules
+firebase deploy --only firestore:rules,firestore:indexes
 ```
+
+**Storage rules are deployed separately, and not by the Firebase CLI:**
+
+```bash
+npm run deploy:storage-rules
+```
+
+> `firebase deploy --only storage` fails with *"Firebase Storage has not been
+> set up"* whenever your bucket is a **named** one rather than the Firebase
+> *default* bucket that the console's "Get Started" button creates. This
+> template's Terraform creates a named bucket on purpose, so the CLI will
+> never work here. The message is misleading — Storage *is* set up, and the
+> underlying Rules API has no such precondition. `scripts/release-storage-rules.mjs`
+> makes the same two API calls the CLI makes underneath, reads the bucket out
+> of `firebase.json`, and verifies by reading the released ruleset back.
 
 ### Continuous deployment
 
