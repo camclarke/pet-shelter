@@ -44,7 +44,7 @@ scanned chip resolves to a name and a phone call.
 | Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial. **Blaze plan via the trial. Expires 2026-11-11 exactly** (read off the Firebase console: 85 days, $300.00 remaining, as of 2026-08-17). Upgrade before then or services stop |
 | ADC | ✅ Verified reaching `wawitas`. One global file, **two identities** — see the switch ritual below |
 | Firestore | ✅ **Live** — `(default)`, `us-east1`, PITR on, daily + weekly backups, delete protection |
-| **Firestore rules** | ✅ **Deployed 2026-08-12** — `firestore.rules` compiled and released. Enforcement itself is still **untested**: no client can reach Firestore yet |
+| **Firestore rules** | ✅ **DEPLOYED, AND PROVEN ENFORCING 2026-08-23** — 22/22 assertions from a real client SDK, on both the allow *and* deny branches, including the privilege-escalation one. The five-day-old caveat that they "compiled and released, which is not the same as being correct" is now retired. See the log |
 | Firestore indexes | ✅ **Deployed** — 10 composite + the `identity.code` collection-group field override that `findPetByMicrochip()` needs |
 | **Firebase project** | ✅ **ADDED 2026-08-16** — `projects/wawitas`, ACTIVE. Was never added until this session. **Google Analytics deliberately declined.** Imported into Terraform (`google_firebase_project.default`) |
 | Storage rules | ✅ **DEPLOYED 2026-08-16, and PROVEN ENFORCING 2026-08-23** — the only rules in this project that have been. Same bucket, same upload: `pets/**` reads 200, `medical/**` reads **403**. Deployed by `npm run deploy:storage-rules`, **not** the Firebase CLI, which cannot do it — see the row below and `scripts/release-storage-rules.mjs` |
@@ -52,8 +52,8 @@ scanned chip resolves to a name and a phone call.
 | `firebase deploy --only storage` | ❌ **Will never work here, and that is fine.** It demands a Firebase *default* bucket; this project uses a named Terraform-managed one. Adding the Firebase project did **not** fix it — that was a wrong guess too. Use the npm script |
 | Firebase emulator suite | ❌ **Not used — decided 2026-08-08.** Also cannot run here (no Java) |
 | Firebase web app | ✅ **Registered 2026-08-16** by Terraform (`google_firebase_web_app.web`). The four `NEXT_PUBLIC_*` values are in `.env.local`, from `terraform output firebase_web_config` — never copied from a console |
-| Firebase Auth | 🟡 **Initialized 2026-08-16, Email/Password ON.** Subtype is **`IDENTITY_PLATFORM`**, not legacy Firebase Auth. **Google provider still off** — needs an OAuth consent screen. No UI exists yet, so rules remain unenforced |
-| Auth flows (UI) | ⬜ Not started — **step 2 of the build plan**, and the first real test of `firestore.rules`. Backend fully ready: provider on, `authorizedDomains` correct, client config populated. Zero `signInWith*` calls exist in `src/` |
+| Firebase Auth | ✅ **Initialized 2026-08-16, Email/Password ON, and EXERCISED end to end 2026-08-23.** Subtype is **`IDENTITY_PLATFORM`**, not legacy Firebase Auth — which matters: **email enumeration protection is on by default** and is measured, not assumed. **Google provider still off** — needs an OAuth consent screen |
+| **Auth flows (UI)** | ✅ **BUILT + VERIFIED IN A BROWSER 2026-08-23** — sign up, sign in, sign out, password reset, email verification, session persistence across reload. `src/lib/auth.ts`, `AuthProvider`, `AccountPanel`, `AccountLink`. Firebase is **dynamically imported** so it stays out of the homepage bundle — measured, see the log |
 | Admin publishing UI | ⬜ Not started — **fully specified**, [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md) §3 |
 | Maps + sightings | ⬜ Not started |
 | Reporting (BigQuery mirror) | ⬜ **Decided 2026-08-09, deliberately not built** — add when a real report is asked for |
@@ -113,12 +113,16 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-23** — **Built the seeding tool and measured every constraint step 3 depends on — but deliberately did NOT seed a pet, so Firestore is still 0 documents.** The stop was the user's call and the reason is worth keeping: a real animal needs the *shelter's* name, breed, age and photograph, and `wawitas.org` is a live public adoption site, so a fabricated pet is outward-facing content on a real organisation's site — with a WhatsApp CTA pre-filled with the invented animal's name. The tool is `scripts/seed-pet.mjs` (`npm run seed:pet`), plus a self-describing `seed/EXAMPLE-pet.json`. **The constraint that killed the 2026-08-08 mock-data attempt is now measured rather than feared:** a generated JPEG was uploaded to `pets/_pipeline-check/cover.jpg` in `wawitas-app` and the resulting `firebasestorage.googleapis.com` URL fetched **unauthenticated — 200, `image/jpeg`, exact byte count** — then deleted, leaving the bucket at 0 objects. **Both URL forms work**, with a `?token=` download token and without one; the tokenless form works because `storage.rules` grants `allow read: if true` on `pets/{petId}/{fileName}`. So a named, Terraform-managed bucket needs no Firebase *default* bucket to serve public images, and `next.config.ts`'s single-host allowlist is satisfiable exactly as written. **The bigger result is the first proof that any security rule in this project enforces anything.** Same bucket, same Admin SDK upload, two paths: `pets/**` (public rule) returned **200** and `medical/**` (admin-only rule) returned **403**. Identical everything except the rule, which is what isolates the *rule* as the thing denying it rather than IAM or a bucket ACL. This file has said since 2026-08-12 that rules "compiled and released, which is not the same as being correct" — that still holds for **`firestore.rules`**, which remains unexercised, but `storage.rules` is now tested on both its allow *and* its deny branch. Three things about the seeder itself. (1) It **derives `coverPhoto` from the upload and refuses a hand-typed one**, because the 2026-08-08 failure was a URL on the wrong host and the fix is to make that URL unwritable by hand. It also rejects the pre-rename Spanish enum values (`adopcion`, `perro`, `hembra`), which is the live legacy trap now that stored values are English. (2) It **strips EXIF, and that is a privacy control rather than an optimisation** — a photo taken in a foster home carries GPS coordinates, so publishing it publishes a volunteer's home address. That is concern #2 arriving through the *image pipeline* instead of the location field, which is where this file had been watching for it. `seed/*` is gitignored except the template for the same reason: the seeder strips EXIF on **upload**, which is too late if the original was committed. (3) **A guard that silently disabled itself was caught before it shipped, and only because the check was checked.** The enum-drift guard reads the real `PetStatus`/`Species`/`PetSex`/`PetSize` out of `src/lib/types.ts` and compares them to the script's copies — but its `if (!theirs) continue` meant that if the parser ever stopped matching, it would skip every comparison and report success forever. Now it fails loudly instead, and both branches were verified by breaking them on purpose. **A false negative nearly caused the opposite mistake:** a throwaway `bash` heredoc test reported the guard was dead code, because a quoted heredoc mangled `[\\s\\S]` down to `[sS]` — the test was broken, not the script. Re-running it from a properly written file showed all four enums parsing correctly. **Escaping-sensitive code cannot be tested through a shell heredoc; write the probe to a file.** Verified at the end: typecheck clean, 47/47 tests, `pets`/`areas`/`users`/`adoptions` all still 0 documents, bucket back to 0 objects, and nothing published.
 
+- **2026-08-23** — **Built email/password auth, and in doing so turned `firestore.rules` from "released" into "proven".** That second half is the headline: this file has carried the caveat since 2026-08-12 that the rules "compiled and released, which is not the same as being correct," and it is now retired. A **22/22 probe using the real client SDK** — not the Admin SDK, which bypasses rules entirely — checked both directions: signed out, `pets/{id}` reads and every subcollection is refused; signed in as an ordinary non-admin, non-owner account, `detail` and `medical` open while `identity`, `location`, `scans`, `areas` and `collectionGroup('placements')` stay shut; and the write branches refuse another user's document, a `role:'admin'` self-grant, an `email` self-edit, a self-delete, and a sighting created with `status: 'confirmed'`, while permitting exactly the `displayName` edit the rules intend. **The probe needed no pet documents at all** — Firestore evaluates rules *before* existence, so a denied path returns `permission-denied` and an allowed path returns an empty snapshot, which is the entire signal. That is why this could be done without fabricating a single animal, and it is the technique to reuse. **Three things were measured rather than assumed.** (1) **Email enumeration protection is really on.** Identity Platform returns a raw `INVALID_LOGIN_CREDENTIALS` for a wrong password *and* for an address with no account, and `sendPasswordResetEmail` **resolves successfully for an address that has no account** — verified by sending to one. So "te enviamos el enlace" would have been a false statement, and the conditional "si existe una cuenta con ese correo" is *required*, not merely tactful. Equally, the UI must never say "contraseña incorrecta": we are genuinely not told which half was wrong. (2) **The dynamic Firebase import works**, checked by reading each prerendered page's own script tags: `/`, `/adopt` and `/about` carry **no** firebase chunk in their initial scripts (634 KB raw) while `/account` does (1320 KB raw). Mounting `AuthProvider` in the root layout therefore costs the homepage — the page the whole primary objective runs through, read on mobile data — nothing at first paint. (3) **`users/{uid}` must be create-if-absent, never a blind write**, because the update rule permits only a `displayName`/`photoURL` diff; re-writing the whole document on each sign-in would be rejected the instant `createdAt` resolved to a fresh `serverTimestamp()`. **Two old traps recurred and were correctly *not* acted on.** The 2026-08-22 computed-style scare came back exactly as written: light mode reported near-white input text on near-white paper, which looks like a contrast bug and is not — `body` carries `transition: color 0.5s`, and the browser pane was not compositing, so the transition stalled indefinitely and `getComputedStyle` kept returning the dark value. Reading the tokens straight off `:root` with a transition-free probe element gave the true pairing (`#12463b` on `#ede5d6` light, `#efe9dc` on `#142320` dark). **A non-compositing tab does not just delay the resolved colour, it never arrives.** And the heredoc lesson repeated verbatim — writing the JSX through a `bash` heredoc died on quoting and produced no file at all, so the component was written with the file tool instead. Cleanup was verified rather than assumed: the probe account and its profile document were deleted, leaving **0 auth accounts and 0 documents in every collection**. Typecheck clean, 47/47 tests, build clean, 0 vulnerabilities in both trees. **Deliberately no new unit tests:** the only pure logic added is a Firebase-code→`AuthError` map whose correctness depends on strings the SDK owns, and a `Record<AuthError, string>` already makes a missing translation a compile error — a mocked test would assert my own assumptions back at me, which is weaker than the live run that was actually done.
+
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-23. The seeding tool for step 3 is built and tested;
-step 3 itself is deliberately NOT done. Firestore is still 0 documents.**
+**Last session: 2026-08-23. Step 2 (email/password auth) is DONE and verified
+in a browser, and `firestore.rules` is now PROVEN ENFORCING. Step 3 is still
+NOT done: Firestore is still 0 documents, because it needs the shelter's own
+animal and photograph, not a technical fix.**
 
 **The next task is still step 3: put one real pet in Firestore — and the only
 thing missing is the shelter's own data.** No code is needed. Run:
@@ -249,24 +253,59 @@ curl -sSI https://wawitas.org | grep -i -E '^(HTTP|x-cache|x-powered-by)'
 **Do not put `wawitas.org` on flyers, the Instagram bio, or the WhatsApp
 profile until a bare `curl https://wawitas.org` returns 200.**
 
-### ⏭ After step 3 — step 2: auth flows
+### ✅ Step 2 — email/password auth. DONE 2026-08-23
 
-Everything the backend needs is already done, verified 2026-08-23:
+Built and **exercised in a browser**, not just compiled: sign up, sign in,
+sign out, password reset, email verification with resend, and session
+persistence across a hard reload.
 
-- Email/Password provider **enabled** (`IDENTITY_PLATFORM` subtype)
-- `authorizedDomains` covers `localhost`, the Cloud Run URL, `wawitas.web.app`,
-  `wawitas.firebaseapp.com` and `wawitas.org` — this list is a real trap, and
-  it is already correct
-- All six `NEXT_PUBLIC_FIREBASE_*` values are populated in `.env.local`
-- `src/lib/firebase-client.ts` already calls `getAuth()`
+| File | Role |
+|---|---|
+| `src/lib/auth.ts` | every Firebase call, plus the `AuthError` union |
+| `src/components/AuthProvider.tsx` | `onAuthStateChanged`, mounted in the root layout |
+| `src/app/account/AccountPanel.tsx` | the form — sign in / sign up / reset |
+| `src/components/AccountLink.tsx` | the header button, auth-aware |
 
-What does **not** exist: a single `signInWith*` or `onAuthStateChanged` call
-anywhere in `src/`. `/account` is a static placeholder. **Auth is the first
-real test of whether `firestore.rules` enforces anything** — they compiled and
-released, which is not the same as being correct.
+Four things worth knowing before touching it:
 
-Google as a provider still needs an OAuth consent screen (a console task).
-Email/Password alone is enough to build and test.
+- **Firebase is imported dynamically** inside `AuthProvider`'s effect, on
+  purpose. Measured: `/`, `/adopt` and `/about` carry **no** firebase chunk in
+  their initial scripts; `/account` does. A static import in the root layout
+  would put the Web SDK on the homepage. **Do not "simplify" it.**
+- **Never name which half of a bad login was wrong.** Identity Platform's
+  email enumeration protection collapses wrong-password and no-such-account
+  into one `INVALID_LOGIN_CREDENTIALS`. Same reason password reset says *"si
+  existe una cuenta"* — it resolves for unknown addresses, measured.
+- **`users/{uid}` is create-if-absent.** The rules allow an update to touch
+  only `displayName`/`photoURL`, so a blind re-write is rejected the moment
+  `createdAt` resolves to a fresh `serverTimestamp()`.
+- Auth failure text lives in `src/i18n`, reached through `t.authError()`.
+  `src/lib/auth.ts` carries no Spanish, by the same rule as `microchipError`.
+
+**Google as a provider still needs an OAuth consent screen** (a console task,
+still on the "later, not now" list). Email/Password is enough for everything
+currently designed.
+
+### ✅ `firestore.rules` is PROVEN ENFORCING — 2026-08-23
+
+This file said from 2026-08-12 to 2026-08-23 that the rules "compiled and
+released, which is not the same as being correct." **That caveat is retired.**
+A 22/22 probe with the real client SDK covered both branches:
+
+| Signed out | Signed in (ordinary account) |
+|---|---|
+| `pets/{id}` ✅ read | `detail`, `medical` ✅ read |
+| `detail`, `identity`, `location` ❌ | `identity`, `location`, `scans` ❌ |
+| write `pets/{id}` ❌ | `areas`, `collectionGroup(placements)` ❌ |
+| `areas` ❌ | another user's `users/{uid}` ❌ read and write |
+|  | `role:'admin'` self-grant ❌ · `email` self-edit ❌ |
+|  | `displayName` edit ✅ · self-delete ❌ |
+|  | undeclared collection ❌ · self-confirmed sighting ❌ |
+
+**The technique matters more than the result: it needed no pet documents.**
+Firestore evaluates rules *before* existence, so a denied path throws
+`permission-denied` and an allowed path returns an empty snapshot — that
+difference is the whole signal. Reuse this rather than seeding fixtures.
 
 
 ### ✅ THE FIREBASE BLOCKER IS GONE — 2026-08-16
@@ -352,10 +391,15 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Outbreak trace** | seeded fixtures → live `collectionGroup` query → asserted → deleted | ✅ **PROVEN AGAINST LIVE FIRESTORE**, not just deployed. Contacts, ordering, area isolation, window clipping and occupancy all returned hand-computed answers |
 | Terraform | `terraform plan` after this session | ✅ 2 to add (both Firebase), **1 to change = the documented benign `cloud_run` `scaling` diff and nothing else** |
 | Dependencies | `npm audit --omit=dev` | ✅ 0 vulnerabilities |
-| **Firestore rules** | `firebase deploy` | ✅ **compiled + released** — but enforcement **still never exercised** (no client). Note the contrast with `storage.rules` below, which now *has* been: these are two different rulesets and only one of them is proven |
+| **Firestore rules ENFORCEMENT** | client-SDK probe, signed out **and** signed in | ✅ **PROVEN 2026-08-23 — 22/22.** Public tier reads, auth tier reads, restricted-tier denials, admin-only denials, collection-group denial, cross-user write denial, `role:'admin'` self-grant denial, `email` self-edit denial, `displayName` edit allowed, default-deny, and a self-confirmed sighting rejected. **Needed zero pet documents** — rules are evaluated before existence |
 | **Indexes** | `gcloud firestore indexes composite list` | ✅ **10 composite + 1 field override** |
 | Storage rules | `firebase deploy --only storage` | ❌ blocked on a Firebase default bucket; bucket is private regardless — use `npm run deploy:storage-rules` |
 | **Storage rules ENFORCEMENT** | unauthenticated `curl` of two paths in `wawitas-app` | ✅ **PROVEN 2026-08-23** — `pets/**` → **200**, `medical/**` → **403**. Same bucket, same Admin SDK upload, so the *rule* is what differs. The first security rule in this project shown to enforce anything |
+| **Auth flows end to end** | browser, real Firebase | ✅ **2026-08-23** — sign up, sign in, sign out, password reset, verification resend, and a hard reload that restores the session |
+| **Auth error mapping** | deliberate bad logins in the browser | ✅ wrong credentials and a 3-char password both surfaced the correct **Spanish** message, from a real Firebase refusal |
+| **Enumeration protection** | raw Identity Toolkit call | ✅ **measured** — `INVALID_LOGIN_CREDENTIALS`; and `sendPasswordResetEmail` resolves for an address with **no account** |
+| **Firebase kept off the homepage** | prerendered script tags per route | ✅ **measured** — `/` `/adopt` `/about` carry no firebase chunk (634 KB raw); `/account` does (1320 KB raw) |
+| **Cleanup after probing** | Admin SDK | ✅ **0 auth accounts, 0 documents** in `users`, `pets`, `areas`, `adoptions` |
 | **Public image URL** | unauthenticated `curl` of a `firebasestorage.googleapis.com` URL | ✅ **200, `image/jpeg`, exact bytes** — with **and** without a `?token=`. Resolves the constraint that killed the 2026-08-08 mock-data attempt. Probe objects deleted; bucket back to 0 |
 | **Firebase Hosting** | `firebase deploy --only hosting` | ✅ **released 2026-08-22** — `sites/wawitas/releases/1787431703816000`, FINALIZED. First release in the project's life |
 | **wawitas.web.app** | `GET /` | ✅ **HTTP 200 with real Spanish HTML** — `lang="es"`, the tagline, the WhatsApp link. `X-Powered-By: Next.js` proves the rewrite reaches Cloud Run rather than serving a static file |
@@ -456,8 +500,9 @@ travel between machines:
 GOOGLE_CLOUD_PROJECT=wawitas
 ```
 
-Its four `NEXT_PUBLIC_FIREBASE_*` client values are still empty — they need a
-registered Firebase **web app**, which does not exist yet.
+All six `NEXT_PUBLIC_FIREBASE_*` client values are **populated** (since
+2026-08-16, from `terraform output firebase_web_config`). The Maps and App
+Check keys are still empty, and are not needed yet.
 
 ### The next four things, in order
 
@@ -516,10 +561,14 @@ registered Firebase **web app**, which does not exist yet.
    test that `firestore.rules` actually enforces anything. Remember these are
    **build-time** values baked into the bundle by `next build` (see the
    Dockerfile ARGs), not Cloud Run runtime env vars.
-3. **Auth flows** (email + Google). Everything gated is currently a placeholder —
-   `/account` renders static text and the dossier's sign-in prompt is not a
-   working gate. The `detail`, `medical`, and `care/feeding` tiers have rules
-   written but no UI can reach them yet.
+3. ~~**Auth flows** (email + Google)~~ — **email/password DONE 2026-08-23**,
+   and it did what this list predicted: it proved `firestore.rules` enforces.
+   Google as a provider still needs an OAuth consent screen.
+   **Still true:** the `detail`, `medical`, and `care/feeding` tiers have rules
+   written and now-reachable credentials, but **no UI reads them yet** — the
+   dossier's gated block is still a prompt, not a gate. That is the natural
+   follow-up, and it is the first thing that will read Firestore *client-side*,
+   where the cost principle in `## Architecture` finally starts paying off.
 4. **Admin publishing UI**, including microchip entry. `validateMicrochip()` and
    `MICROCHIP_ERROR_ES` are built and tested, ready to wire into a form.
 
@@ -592,6 +641,36 @@ From building the seeder (2026-08-23):
   by an `overrides` entry. `require('sharp')` works; `require('sharp/package.json')`
   does not (`exports` blocks the subpath), which is a misleading way to
   conclude it is missing.
+
+From building auth (2026-08-23):
+
+- **A rules probe does not need data.** Firestore evaluates rules *before*
+  document existence, so a denied path throws `permission-denied` and an
+  allowed path returns an empty snapshot. Both branches are testable against
+  an empty database — which is how `firestore.rules` got proven without
+  fabricating a pet. Use the **client** SDK; the Admin SDK bypasses rules and
+  proves nothing about them.
+- **Never tell a visitor which half of a login was wrong.** Identity Platform
+  hides it from *us* too — wrong password and no-such-account both return
+  `INVALID_LOGIN_CREDENTIALS`, and password reset succeeds for addresses with
+  no account. A message like "contraseña incorrecta" would be a guess
+  presented as a fact, and "no existe esa cuenta" would leak what the
+  protection exists to hide.
+- **`users/{uid}` is create-if-absent, never a blind write.** The update rule
+  permits only a `displayName`/`photoURL` diff, so re-writing the document on
+  each sign-in fails as soon as `createdAt` becomes a fresh
+  `serverTimestamp()`. The `getDoc` first is what makes it idempotent.
+- **The computed-style trap from 2026-08-22 is worse than recorded.** It is
+  not merely that a transition delays the resolved value — in a tab that is
+  **not compositing** (browser pane hidden, tab backgrounded), the transition
+  stalls and the stale value never arrives, at any wait. It reported
+  near-white text on near-white paper and looked exactly like a real contrast
+  bug. Read tokens off `:root` with a `transition: none` probe element; do not
+  wait longer and do not "fix" the CSS.
+- **`AuthProvider`'s dynamic `import()` is load-bearing, not style.** It is
+  what keeps the Firebase Web SDK out of the homepage bundle while still
+  letting the root layout provide auth everywhere. Measured per route — see
+  the verified-state table. A static import would undo it invisibly.
 
 From the English rename (2026-08-22):
 

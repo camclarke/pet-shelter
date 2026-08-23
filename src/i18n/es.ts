@@ -9,6 +9,7 @@
 import type { Messages } from './messages';
 import type { MedicalRecordKind, PetSex, PetSize, PetStatus, Species } from '@/lib/types';
 import type { MicrochipError } from '@/lib/microchip';
+import type { AuthError } from '@/lib/auth';
 
 /**
  * Size adjectives, as stems. "grande" is invariant — it already ends in -e and
@@ -75,6 +76,25 @@ const MICROCHIP_ERROR: Record<MicrochipError, string> = {
   'national-id-overflow': 'Ese número no corresponde a un código ISO 11784 válido.',
 };
 
+/**
+ * ⚠️ Read the `authError` note in messages.ts before touching
+ * `invalid-credentials`. Naming the password or the account would undo
+ * Identity Platform's email enumeration protection.
+ */
+const AUTH_ERROR: Record<AuthError, string> = {
+  'invalid-email': 'Ese correo no parece válido. Revísalo e intenta de nuevo.',
+  'missing-password': 'Escribe tu contraseña.',
+  'invalid-credentials': 'El correo o la contraseña no coinciden. Intenta de nuevo.',
+  'email-in-use': 'Ya existe una cuenta con ese correo. Inicia sesión o recupera tu contraseña.',
+  'weak-password': 'La contraseña es muy corta. Usa al menos 6 caracteres.',
+  'user-disabled': 'Esta cuenta está desactivada. Escríbenos por WhatsApp y lo revisamos.',
+  'too-many-requests':
+    'Demasiados intentos seguidos. Espera unos minutos antes de volver a probar.',
+  network: 'No pudimos conectarnos. Revisa tu internet e intenta de nuevo.',
+  'provider-disabled': 'El inicio de sesión con correo no está habilitado en este momento.',
+  unknown: 'Algo salió mal. Intenta de nuevo en un momento.',
+};
+
 export const es: Messages = {
   locale: 'es-BO',
 
@@ -111,6 +131,8 @@ export const es: Messages = {
   medicalKindLabel: (kind) => MEDICAL_KIND[kind],
 
   microchipError: (error) => MICROCHIP_ERROR[error],
+
+  authError: (error) => AUTH_ERROR[error],
 
   adoptionInquiry: (petName) => `Hola, me interesa adoptar a ${petName}`,
 
