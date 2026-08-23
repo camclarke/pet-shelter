@@ -28,6 +28,7 @@ import type {
 } from '@/lib/types';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
+import type { IntakeError } from '@/lib/intake';
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -48,8 +49,18 @@ export interface Messages {
   /** Definite article, for sentences like "conoce a la gata". */
   article(sex: PetSex): string;
 
-  /** Past participle agreeing with sex: "identificado" / "identificada". */
-  pastParticiple(stem: 'identific' | 'conoc' | 'perdid', sex: PetSex): string;
+  /**
+   * Past participle agreeing with sex: "identificado" / "identificada".
+   *
+   * The argument is the participle stem MINUS its final vowel, not the verb
+   * root: "identificad", not "identific". Two of the three values here were
+   * originally the verb root, which produced the non-words "identifica" and
+   * "conoca" on a pet dossier -- live, and unseen for months only because no
+   * pet document existed for the page to render. Getting the stem wrong is
+   * not a type error, so the union is the only thing constraining it: add a
+   * value only after checking both forms are real Spanish words.
+   */
+  pastParticiple(stem: 'identificad' | 'conocid' | 'perdid', sex: PetSex): string;
 
   /** "3 meses", "1 año", "edad desconocida". */
   formatAge(ageMonths: number | null): string;
@@ -64,6 +75,16 @@ export interface Messages {
 
   /** Validation message for a rejected microchip code. */
   microchipError(error: MicrochipError): string;
+
+  /**
+   * Why an intake draft cannot advance a step or be published.
+   *
+   * Read by the admin console, which is staff-facing rather than
+   * visitor-facing — but it is still Spanish, and it still belongs here. The
+   * rule is not "translate what the public sees", it is "no user-facing words
+   * outside src/i18n", and the shelter's volunteers are users.
+   */
+  intakeError(error: IntakeError): string;
 
   /**
    * Why a sign-in, sign-up, or password reset was refused.
