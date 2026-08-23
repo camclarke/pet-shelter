@@ -24,36 +24,36 @@ import type { PetStatus } from '../types';
 // ── the state machine ───────────────────────────────────────────────────────
 
 test('an announced animal can arrive or fall through, and nothing else', () => {
-  assert.deepEqual([...PET_STATUS_TRANSITIONS['en-camino']], ['cuarentena', 'cancelado']);
+  assert.deepEqual([...PET_STATUS_TRANSITIONS['inbound']], ['quarantine', 'cancelled']);
 });
 
 test('an announced animal cannot skip quarantine onto the wall', () => {
   // The whole point of the pipeline: nothing reaches `adopcion` without
   // physically arriving and being cleared.
-  assert.equal(canTransition('en-camino', 'adopcion'), false);
-  assert.equal(canTransition('en-camino', 'refugio'), false);
+  assert.equal(canTransition('inbound', 'available'), false);
+  assert.equal(canTransition('inbound', 'shelter'), false);
 });
 
 test('quarantine is left by clearance, not by expiry', () => {
-  assert.equal(canTransition('cuarentena', 'refugio'), true);
+  assert.equal(canTransition('quarantine', 'shelter'), true);
   // Straight onto the wall from quarantine would bypass the vet.
-  assert.equal(canTransition('cuarentena', 'adopcion'), false);
+  assert.equal(canTransition('quarantine', 'available'), false);
 });
 
 test('a returned adoptee goes back to the shelter rather than becoming a new animal', () => {
   // Re-admission reopens the existing record — the chip is a deduplication
   // key. If this transition were illegal the wizard would create a duplicate
   // and split the medical history across two records.
-  assert.equal(canTransition('adoptado', 'refugio'), true);
-  assert.equal(canTransition('adoptado', 'cuarentena'), true);
+  assert.equal(canTransition('adopted', 'shelter'), true);
+  assert.equal(canTransition('adopted', 'quarantine'), true);
 });
 
 test('a cancelled rescue can come back on', () => {
-  assert.equal(canTransition('cancelado', 'en-camino'), true);
+  assert.equal(canTransition('cancelled', 'inbound'), true);
 });
 
 test('a same-status write is not an illegal transition', () => {
-  assert.equal(canTransition('refugio', 'refugio'), true);
+  assert.equal(canTransition('shelter', 'shelter'), true);
 });
 
 test('every status has an entry, and every target is a real status', () => {
@@ -72,29 +72,29 @@ test('isolation is not a status', () => {
   // aislamiento is an AreaKind. A sick animal moves pen without losing its
   // place on the wall, so the two axes stay independent.
   const all = Object.keys(PET_STATUS_TRANSITIONS);
-  assert.equal(all.includes('aislamiento'), false);
+  assert.equal(all.includes('isolation'), false);
 });
 
 // ── placements vs. foster homes ─────────────────────────────────────────────
 
 test('a fostered animal has no open placement', () => {
   // The boundary that keeps a volunteer's home address out of the area list.
-  assert.equal(shouldHaveOpenPlacement('transito'), false);
-  assert.equal(shouldHaveOpenPlacement('adoptado'), false);
-  assert.equal(shouldHaveOpenPlacement('en-camino'), false);
+  assert.equal(shouldHaveOpenPlacement('foster'), false);
+  assert.equal(shouldHaveOpenPlacement('adopted'), false);
+  assert.equal(shouldHaveOpenPlacement('inbound'), false);
 });
 
 test('an animal physically in the shelter does have one', () => {
-  assert.equal(shouldHaveOpenPlacement('cuarentena'), true);
-  assert.equal(shouldHaveOpenPlacement('refugio'), true);
-  assert.equal(shouldHaveOpenPlacement('adopcion'), true);
+  assert.equal(shouldHaveOpenPlacement('quarantine'), true);
+  assert.equal(shouldHaveOpenPlacement('shelter'), true);
+  assert.equal(shouldHaveOpenPlacement('available'), true);
 });
 
 // ── the WhatsApp announcement ───────────────────────────────────────────────
 
 test('the announcement carries name, breed, origin and the record link', () => {
   const text = arrivalAnnouncementText({
-    pet: { name: 'Luna', species: 'perro', breed: 'mestiza' },
+    pet: { name: 'Luna', species: 'dog', breed: 'mestiza' },
     origin: 'Av. Blanco Galindo',
     recordUrl: 'https://wawitas.org/id/abc123',
   });
@@ -109,7 +109,7 @@ test('unknown fields are omitted, never rendered as empty or "?"', () => {
   // A dog nobody has met yet has no name. The message must still read like a
   // sentence, or staff learn to ignore it.
   const text = arrivalAnnouncementText({
-    pet: { name: '', species: 'perro', breed: '' },
+    pet: { name: '', species: 'dog', breed: '' },
     origin: null,
     recordUrl: 'https://wawitas.org/id/x',
   });
@@ -121,7 +121,7 @@ test('unknown fields are omitted, never rendered as empty or "?"', () => {
 
 test('a name without a breed does not leave a trailing comma', () => {
   const text = arrivalAnnouncementText({
-    pet: { name: 'Rocky', species: 'gato', breed: '' },
+    pet: { name: 'Rocky', species: 'cat', breed: '' },
     recordUrl: 'https://wawitas.org/id/y',
   });
   assert.match(text, /ingreso en camino: Rocky\n/);
@@ -131,7 +131,7 @@ test('a name without a breed does not leave a trailing comma', () => {
 test('the link is a wa.me deep link with the text percent-encoded', () => {
   const link = arrivalAnnouncementLink(
     {
-      pet: { name: 'Luna', species: 'perro', breed: 'mestiza' },
+      pet: { name: 'Luna', species: 'dog', breed: 'mestiza' },
       recordUrl: 'https://wawitas.org/id/abc',
     },
     '59177903553',

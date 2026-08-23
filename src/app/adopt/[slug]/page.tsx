@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import { notFound } from 'next/navigation';
 import { getPetBySlug } from '@/lib/pets-server';
-import { formatAge, whatsappLink, sizeLabel, speciesNoun, article } from '@/lib/pets';
+import { whatsappLink } from '@/lib/pets';
 import { SHELTER } from '@/config/shelter';
+import { t } from '@/i18n';
 
 export const revalidate = 300;
 
@@ -16,8 +17,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const pet = await getPetBySlug(slug);
   if (!pet) return {};
 
-  const noun = speciesNoun(pet.species, pet.sex);
-  const description = `${noun} · ${pet.breed} · ${formatAge(pet.ageMonths)}. Conoce a ${pet.name} en ${SHELTER.name}.`;
+  const noun = t.speciesNoun(pet.species, pet.sex);
+  const description = `${noun} · ${pet.breed} · ${t.formatAge(pet.ageMonths)}. Conoce a ${pet.name} en ${SHELTER.name}.`;
 
   return {
     title: pet.name,
@@ -31,9 +32,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 /**
- * The expediente: the page every WhatsApp click and every "adoptar perro
- * Cochabamba" search should land on. Everything here comes from the PUBLIC
- * `pets/{id}` document.
+ * The pet's dossier — "el expediente" — the page every WhatsApp click and
+ * every "adoptar perro Cochabamba" search should land on. Everything here
+ * comes from the PUBLIC `pets/{id}` document.
  *
  * Note what is deliberately absent: the microchip number. `hasMicrochip` is
  * shown because a finder benefits from knowing the animal is chipped, but the
@@ -50,49 +51,48 @@ export default async function PetPage({ params }: Props) {
   if (!pet) notFound();
 
   return (
-    <article className="expediente">
-      <div className="env expediente__grid">
-        <div className="expediente__foto">
+    <article className="dossier">
+      <div className="container dossier__grid">
+        <div className="dossier__photo">
           {pet.coverPhoto && (
             <Image src={pet.coverPhoto} alt={pet.name} width={640} height={800} priority />
           )}
         </div>
 
-        <div className="expediente__info">
-          <h1 className="t-nombre expediente__nombre">{pet.name}</h1>
+        <div className="dossier__info">
+          <h1 className="t-name dossier__name">{pet.name}</h1>
           {pet.formerNames.length > 0 && (
-            <p className="expediente__antes">
-              Antes {pet.sex === 'hembra' ? 'conocida' : 'conocido'} como{' '}
-              {pet.formerNames.join(', ')}
+            <p className="dossier__former-names">
+              Antes {t.pastParticiple('conoc', pet.sex)} como {pet.formerNames.join(', ')}
             </p>
           )}
-          <p className="t-dato expediente__meta">
-            {speciesNoun(pet.species, pet.sex)} · {pet.breed} · {formatAge(pet.ageMonths)} ·{' '}
-            {sizeLabel(pet.size, pet.sex)}
+          <p className="t-data dossier__meta">
+            {t.speciesNoun(pet.species, pet.sex)} · {pet.breed} · {t.formatAge(pet.ageMonths)} ·{' '}
+            {t.sizeLabel(pet.size, pet.sex)}
           </p>
 
           {pet.hasMicrochip && (
-            <p className="expediente__chip-nota">
-              <span aria-hidden="true">🔒</span> {article(pet.sex) === 'la' ? 'Está' : 'Está'}{' '}
-              {pet.sex === 'hembra' ? 'identificada' : 'identificado'} con microchip. Si{' '}
-              {article(pet.sex)} encuentras perdid{pet.sex === 'hembra' ? 'a' : 'o'}, cualquier
-              veterinaria puede leerlo y avisarnos.
+            <p className="dossier__chip-note">
+              <span aria-hidden="true">🔒</span> Está {t.pastParticiple('identific', pet.sex)} con
+              microchip. Si {t.article(pet.sex)} encuentras{' '}
+              {t.pastParticiple('perdid', pet.sex)}, cualquier veterinaria puede leerlo y
+              avisarnos.
             </p>
           )}
 
           <a
-            href={whatsappLink(pet.name, SHELTER.whatsapp)}
-            className="btn btn--accion expediente__cta"
+            href={whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name))}
+            className="btn btn--action dossier__cta"
           >
             Adóptame ↗
           </a>
 
-          <div className="expediente__gated">
+          <div className="dossier__gated">
             <p>
               La historia completa de {pet.name}, sus fotos, su historial médico y su plan de
               alimentación están disponibles al iniciar sesión.
             </p>
-            <a href="/cuenta" className="btn btn--tenue">
+            <a href="/account" className="btn btn--muted">
               Iniciar sesión
             </a>
           </div>

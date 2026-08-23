@@ -2,7 +2,7 @@
 # deploy.yml so nothing reaches Cloud Run without passing it first.
 #
 # Deliberately needs no GCP credentials. `npm run build` prerenders the
-# homepage and /adopta, which read Firestore through the Admin SDK — with no
+# homepage and /adopt, which read Firestore through the Admin SDK — with no
 # credentials those reads fail and the pages fall back to their error state,
 # exactly as they already do in Cloud Build. The build succeeds either way, and
 # because both pages carry `revalidate = 300` the real data arrives at runtime.
