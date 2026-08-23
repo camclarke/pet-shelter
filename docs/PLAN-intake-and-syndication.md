@@ -65,7 +65,7 @@ tested otherwise.
 | **1a** | Register a Firebase **web app** in the console for project `wawitas` | Four `NEXT_PUBLIC_FIREBASE_*` values exist |
 | **1b** | Fill them in `.env.local` **and** as Docker build ARGs | `next build` inlines them — they are **build-time**, not Cloud Run env vars |
 | **1c** | Decide the Storage bucket question (open decision #2) | Either a Firebase default bucket exists, or `wawitas-app` is confirmed as the one |
-| **2a** | Enable Email/Password + Google providers | A user can sign in on `/cuenta` |
+| **2a** | Enable Email/Password + Google providers | A user can sign in on `/account` |
 | **2b** | Write the admin custom claim via a one-off Admin SDK script | `request.auth.token.admin === true` for your own uid |
 | **2c** | Exercise `firestore.rules` from a **real client** | First time enforcement is tested at all — see below |
 | **3** | Seed one real pet document by hand | The Muro renders it in **production**, allowing one 300 s ISR window |
@@ -159,7 +159,7 @@ The EU passport and WSAVA both demand fields we don't have:
   codes: string[];
 ```
 
-Add `'serologia'` to `MedicalRecordKind` — titre testing is §VI of the passport
+Add `'serology'` to `MedicalRecordKind` — titre testing is §VI of the passport
 and WSAVA-endorsed, and it is not a `consulta` with a note.
 
 **Keep `veterinarian` and `batch` nullable and do not treat null as incomplete.**
@@ -1250,7 +1250,7 @@ communal pot. The split:
   adopter** — the existing rationale in `types.ts` is exactly this, avoiding
   digestive upset from a sudden diet change.
 - **`rationLadles`** is added as the shelter-side ration, with `unit` gaining
-  `'cucharones'`.
+  `'ladles'`.
 
 Conflating them would mean handing an adopter a feeding plan measured in ladles
 from a pot they do not have.
@@ -1300,7 +1300,7 @@ New status values:
 
 `refugio` keeps its current meaning: at the shelter, in general population.
 
-**The wall is unaffected.** `getWall()` filters `status == 'adopcion'`, so every
+**The wall is unaffected.** `getWall()` filters `status == 'available'`, so every
 new value is excluded automatically. No query anywhere needs changing — which is
 the payoff for the wall having been written as an allowlist rather than a
 denylist.

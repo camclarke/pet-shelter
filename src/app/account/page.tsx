@@ -10,11 +10,11 @@ export const metadata: Metadata = {
  * CLAUDE.md and task #5. This page exists now only so the header link
  * resolves instead of 404ing.
  */
-export default function CuentaPage() {
+export default function AccountPage() {
   return (
-    <div className="env" style={{ paddingBlock: 'var(--paso-5)' }}>
-      <h1 className="t-titulo">Mi cuenta</h1>
-      <p style={{ marginTop: 'var(--paso-2)', maxWidth: '60ch', opacity: 0.8 }}>
+    <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
+      <h1 className="t-title">Mi cuenta</h1>
+      <p style={{ marginTop: 'var(--space-2)', maxWidth: '60ch', opacity: 0.8 }}>
         El inicio de sesión con correo y Google está en construcción.
       </p>
     </div>

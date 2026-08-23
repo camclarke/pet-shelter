@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Muro } from '@/components/Muro';
+import { AdoptionWall } from '@/components/AdoptionWall';
 import { SHELTER } from '@/config/shelter';
 
 export const metadata: Metadata = {
@@ -12,10 +12,10 @@ export const metadata: Metadata = {
 // each, while a newly published pet still appears within minutes.
 export const revalidate = 300;
 
-export default function AdoptaPage() {
+export default function AdoptPage() {
   return (
-    <div style={{ paddingTop: 'var(--paso-4)' }}>
-      <Muro limit={48} title="Todos los animalitos disponibles" />
+    <div style={{ paddingTop: 'var(--space-4)' }}>
+      <AdoptionWall limit={48} title="Todos los animalitos disponibles" />
     </div>
   );
 }

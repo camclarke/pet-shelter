@@ -8,7 +8,7 @@
  * Cochabamba, Bolivia); replace them with your own.
  *
  * Design tokens — colours, fonts, the logo mark — live in src/app/globals.css
- * and src/components/Marca.tsx. Those are the other two files worth changing.
+ * and src/components/Brand.tsx. Those are the other two files worth changing.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -76,7 +76,7 @@ export const SHELTER: ShelterConfig = {
   locale: 'es-BO',
   siteUrl: 'https://wawitas.org',
 
-  species: ['perro', 'gato'],
+  species: ['dog', 'cat'],
 
   bounds: {
     minLat: -17.75,
