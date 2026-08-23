@@ -23,9 +23,20 @@ service firebase.storage {
     // gating images behind auth would mean proxying them through a function.
     // Access control for *which* photos a visitor learns about lives in
     // Firestore — an unguessable URL is not a secret, but the gallery list is.
+    // ⚠️ `create, update` and `delete` are SEPARATE on purpose. `allow write`
+    // covers all three, and on a delete `request.resource` is null — so
+    // `isImage()` dereferences null, the rule errors, and the delete is
+    // denied. That is not a hypothetical: this rule shipped as a single
+    // `allow write` on 2026-08-02 and an admin could upload a pet photo but
+    // never remove one. Nothing noticed until the intake wizard's "Quitar"
+    // button became the first code in the project to attempt a delete.
+    //
+    // The size and content-type checks belong only on the paths that carry a
+    // payload. Deleting needs to prove who you are, nothing more.
     match /pets/{petId}/{fileName} {
       allow read: if true;
-      allow write: if isAdmin() && isImage() && request.resource.size < 8 * 1024 * 1024;
+      allow create, update: if isAdmin() && isImage() && request.resource.size < 8 * 1024 * 1024;
+      allow delete: if isAdmin();
     }
 
     // ── sighting photos ────────────────────────────────────────────────────

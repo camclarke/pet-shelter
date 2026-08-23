@@ -47,19 +47,21 @@ scanned chip resolves to a name and a phone call.
 | **Firestore rules** | ✅ **DEPLOYED, AND PROVEN ENFORCING 2026-08-23** — 22/22 assertions from a real client SDK, on both the allow *and* deny branches, including the privilege-escalation one. The five-day-old caveat that they "compiled and released, which is not the same as being correct" is now retired. See the log |
 | Firestore indexes | ✅ **Deployed** — 10 composite + the `identity.code` collection-group field override that `findPetByMicrochip()` needs |
 | **Firebase project** | ✅ **ADDED 2026-08-16** — `projects/wawitas`, ACTIVE. Was never added until this session. **Google Analytics deliberately declined.** Imported into Terraform (`google_firebase_project.default`) |
-| Storage rules | ✅ **DEPLOYED 2026-08-16, and PROVEN ENFORCING 2026-08-23** — the only rules in this project that have been. Same bucket, same upload: `pets/**` reads 200, `medical/**` reads **403**. Deployed by `npm run deploy:storage-rules`, **not** the Firebase CLI, which cannot do it — see the row below and `scripts/release-storage-rules.mjs` |
+| Storage rules | ✅ **DEPLOYED, PROVEN ENFORCING, and FIXED 2026-08-23** — `pets/**` used a single `allow write`, which covers delete, while the condition dereferenced `request.resource` (null on delete): an admin could upload a photo and **never delete one**. Now `create, update` and `delete` are separate.  — the only rules in this project that have been. Same bucket, same upload: `pets/**` reads 200, `medical/**` reads **403**. Deployed by `npm run deploy:storage-rules`, **not** the Firebase CLI, which cannot do it — see the row below and `scripts/release-storage-rules.mjs` |
 | **Pet seeding tool** | ✅ **Built + tested 2026-08-23** — `npm run seed:pet`, `scripts/seed-pet.mjs`, template in `seed/EXAMPLE-pet.json`. Validates, strips EXIF, uploads, and derives `coverPhoto`. **Never run against real data — `pets` is still empty** |
 | `firebase deploy --only storage` | ❌ **Will never work here, and that is fine.** It demands a Firebase *default* bucket; this project uses a named Terraform-managed one. Adding the Firebase project did **not** fix it — that was a wrong guess too. Use the npm script |
 | Firebase emulator suite | ❌ **Not used — decided 2026-08-08.** Also cannot run here (no Java) |
 | Firebase web app | ✅ **Registered 2026-08-16** by Terraform (`google_firebase_web_app.web`). The four `NEXT_PUBLIC_*` values are in `.env.local`, from `terraform output firebase_web_config` — never copied from a console |
 | Firebase Auth | ✅ **Initialized 2026-08-16, Email/Password ON, and EXERCISED end to end 2026-08-23.** Subtype is **`IDENTITY_PLATFORM`**, not legacy Firebase Auth — which matters: **email enumeration protection is on by default** and is measured, not assumed. **Google provider still off** — needs an OAuth consent screen |
 | **Auth flows (UI)** | ✅ **BUILT + VERIFIED IN A BROWSER 2026-08-23** — sign up, sign in, sign out, password reset, email verification, session persistence across reload. `src/lib/auth.ts`, `AuthProvider`, `AccountPanel`, `AccountLink`. Firebase is **dynamically imported** so it stays out of the homepage bundle — measured, see the log |
-| Admin publishing UI | ⬜ Not started — **fully specified**, [`docs/PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md) §3 |
+| **Admin intake UI** | ✅ **BUILT + VERIFIED IN A BROWSER 2026-08-23** — `/admin`, `/admin/intake`, steps 1–3 manual. A pet was entered, photographed, published and deleted end to end. Plan §3, build-order step 5. Dedup (§3.1) is step 6 and is **not** built |
+| **Admin custom claim** | ✅ **`npm run grant:admin`** — `scripts/grant-admin.mjs`. The only thing that writes `request.auth.token.admin`, deliberately outside the deployed surface. Merges claims rather than replacing them, and verifies by reading back |
+| **`petDrafts` rules** | ✅ **DEPLOYED + PROVEN ENFORCING 2026-08-23** — 11/11 client-SDK assertions across *no claim → granted → revoked*. Byte-identical readback from the Rules API |
 | Maps + sightings | ⬜ Not started |
 | Reporting (BigQuery mirror) | ⬜ **Decided 2026-08-09, deliberately not built** — add when a real report is asked for |
 | **Intake / medical / food / areas plan** | ✅ **Written 2026-08-16** — [`PLAN-intake-and-syndication.md`](docs/PLAN-intake-and-syndication.md). 14 sections |
 | Arrival pipeline — model layer | ✅ **Built + tested 2026-08-16.** Statuses, `areas`, `placements`, rules, indexes. **Outbreak trace verified against live Firestore with known data**, not just deployed |
-| Arrival pipeline — UI | ⬜ Not started — blocked on auth |
+| Arrival pipeline — UI | ⬜ Not started — **no longer blocked on auth**; the admin surface and the claim now exist |
 | Veterinary record standards | ✅ **Researched 2026-08-16** — [`veterinary-records-standards.md`](docs/veterinary-records-standards.md). No international EMR standard exists; modelled on the EU passport + WSAVA 2024 |
 | LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
 | LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
@@ -121,15 +123,40 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-23** — **Moved all seven GitHub Actions onto a Node 24 runtime, ahead of a deadline this project does not control.** Every run of both workflows was emitting *"Node.js 20 is deprecated ... being forced to run on Node.js 24"*, naming `actions/checkout@v4`, `actions/setup-node@v4`, `docker/build-push-action@v6`, `docker/login-action@v3`, `docker/setup-buildx-action@v3`, `google-github-actions/auth@v2` and `google-github-actions/setup-gcloud@v2`. **The fallback is GitHub's to withdraw, and when it goes the failure will name the actions rather than anything in this repo** — which is the whole reason it was worth doing before it became an outage. Bumped to `checkout@v7`, `setup-node@v7`, `build-push-action@v7`, `login-action@v4`, `setup-buildx-action@v4`, `auth@v3`, `setup-gcloud@v3` (PR #10). **Every target was verified by reading `runs.using` out of the action's own `action.yml` at the floating major tag the workflow actually resolves** — not from the marketplace listing, and not from memory, which for three of these was already out of date. That distinction matters more than it sounds: the workflows pin floating majors, so the tag is the thing that resolves at run time and the tag is therefore the thing to check; a latest-*release* being node24 does not prove the major tag points at it. All seven were `node24` and all were stable releases, no prereleases. **`checkout` and `setup-node` each jump three majors, so the intervening releases were read rather than skipped**, and the only removals that touch this repo's surface are ones it does not use: `auth` v3 drops `retries`/`backoff`/`backoff_limit`, `setup-gcloud` v3 drops `skip_tool_cache`, `build-push-action` v7 drops two `DOCKER_BUILD_*` envs, `setup-buildx-action` v4 drops deprecated inputs we pass none of. Two near-misses that were checked instead of assumed: **`setup-node` v5 added automatic caching keyed off a `packageManager` field** in `package.json` and v6 narrowed it to npm — moot here only because `package.json` declares no `packageManager` *and* `ci.yml` sets `cache: npm` explicitly; and **`checkout` v7 blocks checking out fork PRs**, but only for `pull_request_target` and `workflow_run`, while `ci.yml` triggers on plain `pull_request`. **The one bump with real blast radius was `auth` v2 → v3, because it sits on the WIF exchange**, and it was confirmed live rather than by reading the changelog: the `Authenticate to Google Cloud` step completed and `steps.auth.outputs.access_token` still populated, proven by the `Log in to Artifact Registry` step immediately after succeeding on it — that step is the read-through, and it is what would have failed first had the output been dropped. Still keyless, no service-account key, `terraform/cicd.tf` untouched. **The verification got an accidental control group.** PR #9 merged 40 seconds ahead of PR #10 and still carried the old versions, so two deploy runs went back to back on the same workflow in the same repo: the older logged **2** deprecation warnings (one per job — the reusable `ci` job names two actions, the `deploy` job names six), the newer logged **0**, with zero annotations on both jobs and no `##[warning]` line of any kind. Same probe, before and after, which is the only thing that makes a zero mean anything. **A broken probe nearly produced a false positive, and it is the same class of error this file has recorded twice already.** The first grep reported the warning was *still present* in the new run; it was not. The pipeline was `grep ... | sort -u && echo PRESENT || echo OK`, and a pipeline's exit status is the **last** command's — `sort -u` succeeds on empty input, so the `&&` branch fired on nothing. The replacement counts matches into a variable, compares old against new, and prints the pattern's hits on the old run to demonstrate the pattern works before a zero is allowed to mean absence. **`grep` in a pipeline does not gate anything; only its own exit status does.** Production checked rather than inferred from a green pipeline: the deploy's own verify step passed the image-tag assertion and got `attempt 1: HTTP 200`, the run's `headSha` equals `origin/main` so the **deployed tag still equals `git rev-parse HEAD`**, and both `wawitas.org` and `wawitas.web.app` return 200. **Explicitly not touched:** the machine's local Node 20.20.2 and `ci.yml`'s `node-version: 22`, which matches the Dockerfile — `node24` here is the *runner's* runtime for the action wrappers and has nothing to do with the runtime the app ships on. Nothing about `paths-ignore`, the `continue-on-error` audit step, or the Cloud Run env list changed; the whole diff is eight `uses:` lines.
 
+- **2026-08-23** — **Built the admin intake wizard, and running it end to end found a Spanish grammar bug that had been live and unseeable since the rename.** Build-order step 5: `/admin` and `/admin/intake`, steps 1–3 manual, plus `scripts/grant-admin.mjs` for the claim the whole thing rests on. **The claim had to come first and could not come from inside the app**: `firestore.rules` and `storage.rules` gate every write on `request.auth.token.admin`, only the Admin SDK can set it, and a self-service bootstrap route would be a self-service privilege-escalation route. Two traps went into that script rather than into a comment: `setCustomUserClaims()` **replaces** the claims object rather than merging — the same shape as this project's `fieldOverrides` lesson — so existing claims are spread, and revoking **deletes** the key instead of writing `admin: false`, which would read as a grant in every audit. **The grammar bug is the entry's real headline.** `t.pastParticiple()` took a stem, and two of its three values were the *verb root* rather than the participle stem: `'identific'` and `'conoc'` rendered "Está **identifica** con microchip" and "Antes **conoca** como" — non-words, on the pet dossier, in the site's only language. It survived because **the dossier has never once rendered with a pet in it**, which is this project's most-repeated failure shape arriving in a new place: not a broken query this time, but broken *prose* that no test could catch and no reviewer would see. Fixed to `'identificad'`/`'conocid'`, and the union in `messages.ts` now carries the reason. **The verification was the point, and it was done against live Firestore rather than reasoned about.** An 11/11 client-SDK probe walked one probe account through *no claim → granted → revoked*: `petDrafts` read, list and write all denied without the claim, `pets` and `pets/{id}/identity` writes denied too, everything allowed after a forced token refresh, and denied again after revoke. Then the wizard itself was driven in a browser: `Ñoño Prueba` derived the slug `nono-prueba` (**the accent handling works in a real browser, not just in the 34 new unit tests**), a 999-prefix chip surfaced the correct Spanish test-transponder message from the validator that already had 10 tests, a valid `068…` code was accepted, a 2400×3000 JPEG was uploaded and came back **1280×1600** — the long edge capped exactly — and publish produced the tier split intact: `pets/{id}` carrying `hasMicrochip: true` and **no chip number anywhere in it**, `detail/main`, one `media` doc at `tier: 'public'`, and `identity/microchip` with the code stored as a **string whose leading zero survived** (`prefix: "068"`). `ageMonths` came out 14 from "1 año 2 meses". The draft was deleted by the same batch, so a half-published animal is not a state that exists. **Two claims were measured rather than asserted.** (1) **EXIF stripping is real**: the uploaded object was downloaded and its JPEG marker segments walked — `FFE0 FFE2 FFDB FFDB FFC0 FFC4×4 FFDA`, no APP1, and no `Exif`, `GPS` or XMP bytes anywhere. That is concern #2 closed through the image pipeline, and it is a privacy control rather than an optimisation: a foster-home photo carries the volunteer's address. (2) **The custom-claim token lag is real**: immediately after the grant the *cached* ID token did **not** carry `admin`, and only `getIdTokenResult(true)` surfaced it. That is why `AuthProvider` reads the cached token (so the homepage pays no round-trip) while `AdminGate` forces a refresh on mount (so a just-promoted admin gets in without signing out) — a split that would look like pointless complexity to anyone who had not seen the measurement. **Nothing fabricated was left behind, and that was verified rather than assumed:** the probe pet was published with `status: 'shelter'`, never `'available'`, so it could not reach the wall — confirmed by loading `/adopt` and getting the empty state **while the document existed**, which is the first time the wall's allowlist has been exercised against real data. Afterwards everything was deleted, including subcollections (Firestore does not cascade, and an orphan still answers a `collectionGroup` query), and the readback shows **0 documents in every collection, 0 in every collection group, 0 bucket objects, 0 auth accounts**. **Three smaller things worth keeping.** The working tree is **CRLF** (`core.autocrlf=true`), so every LF needle in an edit script silently matches nothing and reads as "the rule moved" — normalise, edit, restore. The file-editing tool **round-trips `\uf8ff` and combining marks back into literal invisible characters**, so `slugify`'s diacritic range and the slug prefix-query bound had to be written through a Node script to stay as escapes; an invisible character in a regex is undebuggable. And the heredoc lesson repeated a third time — the first two attempts at these fixes were mangled by shell quoting before the probe was written to a file and run from there. **Step 3 is still not done: Firestore holds 0 pets.** That is unchanged and still needs the shelter's own animal — but it is now a form someone fills in, not a JSON file someone writes.
+
+- **2026-08-23** — **Bug-fix pass over the intake wizard, and the most valuable find was a three-week-old hole in `storage.rules` that no code had ever been able to trip.** Five defects, four of them found by *clicking things* rather than by reading. (1) **An admin could upload a pet photo and never delete one.** `pets/{petId}/{fileName}` carried a single `allow write`, which covers create, update **and delete** — and its condition called `isImage()`, which dereferences `request.resource.contentType`. On a delete `request.resource` is **null**, so the rule threw and denied. Every admin, every photo, since 2026-08-02. It went unseen because **nothing in the project had ever attempted a delete**; the wizard's "Quitar" button was the first, and it failed silently behind a best-effort handler. Confirmed with a client-SDK probe (`storage/unauthorized` while signed in *with* the claim), fixed by splitting `create, update` from `delete`, redeployed, and re-verified — and then checked in the other direction, because a fix to a deny rule is exactly where a hole gets opened: unauthenticated **and** signed-in-without-claim are still refused both delete and upload. `sightings` and `medical` were already correct, and `firestore.rules` never dereferences `request.resource` on a delete path, so `pets` was the only one. **The general rule now recorded: `allow write` includes delete, and any condition that inspects the payload will deny it.** (2) **"Registrar otro" was a dead button.** It was a `<Link href="/admin/intake">` on a success screen that already lives at `/admin/intake`, so Next matched the same segment, kept the component mounted, and `published` pinned the screen — the shelter could not register a second animal without manually navigating away. A reset is a button that clears state, not a link to where you already are. (3) **A disambiguated slug was silently different from what was typed.** Publishing a second Luna produced `luna-prueba-2` and said nothing; the success screen now shows the final URL and explains the change, which is also why `slug-taken` was **removed** from `IntakeError` rather than wired up — a collision is normal, not an error to block on. (4) **Discarding a draft, or removing a photo, orphaned the Storage object** with no sweep job to ever collect it; both now delete best-effort at the one moment the path is still known. (5) **An unreadable image reported "revisa tu conexión"** — `accept="image/*"` lets a phone offer HEIC, which Chrome cannot decode, so `PhotoUnreadableError` now says what actually happened and what to do. Verified after: 81/81, typecheck and build clean, 0 vulnerabilities in both trees, and Firestore/Storage/Auth all read back at **0** again.
+
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-23. Step 2 (email/password auth) is DONE, deployed,
-and verified in production. `firestore.rules` is now PROVEN ENFORCING, and
-`wawitas.org` serves completely — the apex 404 is gone. Step 3 is still NOT
-done: Firestore is still 0 documents, because it needs the shelter's own
-animal and photograph, not a technical fix.**
+**Last session: 2026-08-23. The ADMIN INTAKE UI is BUILT and verified end to
+end in a browser — `/admin` and `/admin/intake`, build-order step 5. A pet was
+entered, photographed, published, checked, and deleted. Firestore is back to 0
+documents and 0 auth accounts.**
+
+**Two things changed about what "next" means.** Step 3 no longer needs anyone
+to hand-write JSON: the shelter can enter their own animal through a form. And
+the admin claim now exists as a one-command bootstrap:
+
+```bash
+npm run grant:admin -- someone@example.com
+```
+
+That account must **sign up first** at `/account` — a claim attaches to an
+account. `GOOGLE_CLOUD_PROJECT=wawitas` must be set. `--list` shows every
+admin, `--revoke` removes one. **Right now there are 0 admins and 0 accounts**,
+so the first real action is: the shelter signs up, then gets granted.
+
+⚠️ **A fresh grant is invisible to an already-signed-in browser for up to an
+hour** — custom claims are baked into the ID token at issue time. This is
+measured, not folklore. `AdminGate` forces `getIdTokenResult(true)` on mount
+precisely to paper over it; if someone still cannot get in, have them sign out
+and back in before suspecting the grant failed.
+
+**Step 3 is still NOT done: Firestore is still 0 documents, because it needs
+the shelter's own animal and photograph, not a technical fix.**
 
 **The next task is still step 3: put one real pet in Firestore — and the only
 thing missing is the shelter's own data.** No code is needed. Run:
@@ -385,7 +412,7 @@ order. It is kept because its constraints and warnings are still accurate.
 | Billing | `gcloud billing projects describe wawitas` | ✅ `billingEnabled: true` — trial expires ~2026-11-10 |
 | ADC | `google-auth-library` probe | ✅ resolves `wawitas` with no `.env.local` help |
 | Build | `npm run build` | ✅ **8 routes, run locally 2026-08-23** after the English rename |
-| Tests | `npm test` | ✅ **47/47** — 10 microchip, 23 placement/outbreak, 14 arrival state machine |
+| Tests | `npm test` | ✅ **81/81** — 10 microchip, 23 placement/outbreak, 14 arrival state machine, **34 intake** (slug/accents, age, per-step validation, publish gate) |
 | Typecheck | `npm run typecheck` | ✅ clean |
 | **Outbreak trace** | seeded fixtures → live `collectionGroup` query → asserted → deleted | ✅ **PROVEN AGAINST LIVE FIRESTORE**, not just deployed. Contacts, ordering, area isolation, window clipping and occupancy all returned hand-computed answers |
 | Terraform | `terraform plan` after this session | ✅ 2 to add (both Firebase), **1 to change = the documented benign `cloud_run` `scaling` diff and nothing else** |
@@ -418,7 +445,18 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Firebase Auth** | Identity Toolkit admin API | ✅ Email/Password **enabled**; `authorizedDomains` covers localhost, Cloud Run, both Firebase hosts and `wawitas.org` |
 | **Client config** | `.env.local` | ✅ all six `NEXT_PUBLIC_FIREBASE_*` **populated**. Maps + App Check keys still empty (not needed yet) |
 | **Pet seeder** | `npm run seed:pet -- <file> --dry-run` | ✅ **validated 2026-08-23** — rejects legacy Spanish enums, hand-typed `coverPhoto`, bad slug, missing `formerNames`, non-boolean `hasMicrochip`. Enum-drift guard fires on both drift *and* a broken parser |
-| Real data | any pet document | ❌ **none exists — `pets`, `areas`, `users`, `adoptions` all 0 docs.** Still the next task, and it needs the **shelter's** animal + photo, not a technical fix |
+| **Admin intake, end to end** | browser: enter → upload → publish → render → delete | ✅ **PROVEN 2026-08-23.** `Ñoño Prueba` → slug `nono-prueba`, 2400×3000 JPEG → **1280×1600**, tier split intact, `ageMonths` 14 from "1 año 2 meses", draft deleted by the same batch. Then removed; **0 documents, 0 objects, 0 accounts** on readback |
+| **`petDrafts` rules ENFORCEMENT** | client-SDK probe: no claim → granted → revoked | ✅ **11/11** — reads, lists and writes denied without the claim, allowed after a forced token refresh, denied again after revoke |
+| **Custom-claim token lag** | cached vs forced `getIdTokenResult` | ✅ **MEASURED** — right after the grant the cached token did **not** carry `admin`; only `getIdTokenResult(true)` surfaced it. This is why `AdminGate` forces a refresh and `AuthProvider` does not |
+| **Browser EXIF stripping** | download the uploaded object, walk its JPEG segments | ✅ `FFE0 FFE2 FFDB FFDB FFC0 FFC4×4 FFDA` — **no APP1**, no `Exif`, no `GPS`, no XMP. A canvas re-encode cannot carry metadata through |
+| **Wall allowlist vs real data** | `GET /adopt` while a `shelter`-status pet existed | ✅ empty state — `getWall()` filters `status == 'available'`, exercised for the first time against an actual document |
+| **Admin CAN delete a pet photo** | client SDK, signed in with the claim | ✅ **FIXED + PROVEN 2026-08-23.** Was `storage/unauthorized` for every admin because `allow write` covers delete and `isImage()` dereferences a null `request.resource`. Split into `create, update` / `delete` |
+| **Non-admins still cannot** | unauthenticated, and signed-in-without-claim | ✅ delete **and** upload both denied on `pets/**` — the delete fix did not widen anything |
+| **"Registrar otro" resets** | browser: publish → click → form is blank | ✅ **FIXED.** Was a `<Link>` to the route it was already on, so the component never remounted and the success screen never cleared — a second animal could not be registered without navigating away |
+| **Slug collision is surfaced** | publish three pets called Luna | ✅ `luna-prueba` → `-2` → `-3`, and the success screen now names the final URL and says why it changed |
+| **Stale `?draft=` id** | open `/admin/intake?draft=doesNotExist` | ✅ says so, starts a fresh draft, and strips the dead query so a reload does not mint another id |
+| **Deployed ruleset ↔ file** | Rules API readback, diffed in Node | ✅ **byte-identical** (16230 bytes), `petDrafts` rule present |
+| Real data | any pet document | ❌ **none exists — `pets`, `areas`, `users`, `adoptions` all 0 docs.** Still the next task, and it needs the **shelter's** animal + photo — but it is now a form, not a JSON file |
 
 Still not covered by any green check: server-side validation at apply (retention
 bounds, immutable locations) and `docker build`. Org policy has dropped off this
@@ -692,6 +730,73 @@ From building auth (2026-08-23):
   what keeps the Firebase Web SDK out of the homepage bundle while still
   letting the root layout provide auth everywhere. Measured per route — see
   the verified-state table. A static import would undo it invisibly.
+
+From building the admin intake UI (2026-08-23):
+
+- **The admin claim is set by a script and by nothing else.**
+  `npm run grant:admin -- <email>`. There is deliberately no HTTP route, no
+  Cloud Function, and no self-service path — a bootstrap an authenticated user
+  could call is a privilege-escalation path, and `firestore.rules` refusing a
+  `role: 'admin'` field says nothing about the claim, which never lived in
+  Firestore. The account must exist before it can be promoted.
+- **`setCustomUserClaims()` REPLACES the claims object, it does not merge.**
+  Passing `{ admin: true }` deletes every other claim. Same shape as the
+  `fieldOverrides` lesson: a partial write that looks like an addition. Revoke
+  by **deleting the key**, never by writing `admin: false` — that is
+  indistinguishable from a grant in any log or dashboard.
+- **A granted claim is invisible to a signed-in browser for up to an hour**,
+  and this is measured, not folklore: right after a grant the cached ID token
+  did not carry it and only `getIdTokenResult(true)` surfaced it. Hence the
+  split — `AuthProvider` reads the **cached** token so the homepage pays no
+  round-trip, `AdminGate` **forces** a refresh on mount so a just-promoted
+  admin gets in. **Do not "simplify" either half.** A fresh grant that "does
+  not work" is almost always this, not a failed write.
+- **`AdminGate` is UX, not the security boundary.** It runs in the browser.
+  The boundary is `firestore.rules` and `storage.rules`. Someone who bypasses
+  the component reaches a form whose every save fails `permission-denied`. A
+  client-side gate quietly believed to be the authorization layer is how
+  authorization gets removed from the layer that has it.
+- **A pet dossier had non-words in it for months and nothing could have caught
+  it.** `t.pastParticiple()` was given verb roots instead of participle stems,
+  so a chipped animal read "Está **identifica** con microchip". No test covers
+  prose, and the page had **never rendered with a pet in it**. The general
+  form: *copy that only appears when real data exists is untested by
+  construction* — the fix is to render it once with real data, which is now a
+  form anyone can fill in.
+- **Publish is one `writeBatch` across four tiers, and the draft delete is in
+  it.** A half-published animal is therefore not a state that exists. The
+  draft id is minted up front and IS the petId, so step 2's photos upload
+  straight to `pets/{petId}/…` and publishing moves no files and changes no
+  URL.
+- **Browser EXIF stripping is a canvas re-encode, and it drops orientation
+  too.** `createImageBitmap(file, { imageOrientation: 'from-image' })` bakes
+  the rotation into the pixels before drawing — without it, portrait phone
+  photos publish sideways while the original looks fine in every viewer, so
+  the bug appears to be ours alone. Verified by walking the uploaded JPEG's
+  marker segments: no APP1, no `Exif`, no `GPS`, no XMP.
+- **`allow write` in a Storage or Firestore rule COVERS DELETE, and on a
+  delete `request.resource` is null.** So any condition that inspects the
+  incoming payload — `isImage()`, a size cap, a field whitelist — makes the
+  rule throw and deny. `pets/**` carried this from 2026-08-02 and nobody
+  noticed for three weeks, because **no code in the project had ever tried to
+  delete an object.** Split `create, update` from `delete`, and when adding
+  any rule ask which verbs the condition can actually evaluate. `sightings`
+  and `medical` were already correct; only `pets` was wrong.
+- **A same-route `<Link>` does not reset component state.** "Registrar otro"
+  pointed at `/admin/intake` from a success screen that already lives there,
+  so Next matched the same segment, kept the component mounted, and the
+  `published` state pinned the screen forever. A reset is a **button that
+  clears state**, not a link to where you already are. Found by clicking it,
+  not by reading it.
+- **The working tree is CRLF** (`core.autocrlf=true`, no `.gitattributes`).
+  Any edit script matching LF needles finds nothing and reads as "the rule
+  moved". Normalise to LF, edit, restore the file's own endings.
+- **The file-editing tool turns `\uf8ff` and combining-mark escapes back into
+  literal invisible characters.** `slugify`'s diacritic range and the slug
+  prefix-query bound both had to be written through a Node script to survive
+  as escapes. An invisible character inside a regex is undebuggable — and this
+  is the third recurrence of the wider lesson: **escaping-sensitive edits go
+  in a file you run, never through a shell heredoc or an inline `-e`.**
 
 From the English rename (2026-08-22):
 

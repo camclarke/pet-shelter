@@ -797,7 +797,9 @@ textarea {
   gap: 7px;
 }
 
-.auth__field input {
+.auth__field input,
+.auth__field select,
+.auth__field textarea {
   padding: 13px 14px;
   border: 2px solid var(--line);
   border-radius: var(--radius);
@@ -806,11 +808,15 @@ textarea {
   width: 100%;
 }
 
-.auth__field input:focus {
+.auth__field input:focus,
+.auth__field select:focus,
+.auth__field textarea:focus {
   border-color: var(--jade);
 }
 
-.auth__field input:disabled {
+.auth__field input:disabled,
+.auth__field select:disabled,
+.auth__field textarea:disabled {
   opacity: 0.55;
 }
 
@@ -896,5 +902,304 @@ textarea {
 @media (max-width: 760px) {
   .auth {
     padding: var(--space-3);
+  }
+}
+
+
+/* ===========================================================================
+   Admin surface - the panel and the intake wizard.
+
+   Deliberately plainer than the public site. The wall is a street corner of
+   crooked flyers; this is a clipboard. Someone entering a rescue at 22:00
+   needs to find the field they are looking for, not admire the layout, so
+   nothing here rotates, animates, or overlaps.
+   =========================================================================== */
+
+.admin,
+.admin-gate,
+.admin-done {
+  max-width: 780px;
+  margin: 0 auto;
+  background: var(--cream-2);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  box-shadow: var(--shadow);
+}
+
+.admin-gate,
+.admin-done {
+  text-align: center;
+}
+
+.admin-gate__note,
+.admin-done__note {
+  margin: var(--space-2) 0 var(--space-3);
+  line-height: 1.6;
+}
+
+.admin-done__url {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  font-size: 15px;
+  word-break: break-all;
+}
+
+.admin-gate__actions,
+.admin-done__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+}
+
+.admin__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.admin__sub {
+  font-size: 14px;
+  opacity: 0.75;
+  line-height: 1.55;
+  margin-top: 6px;
+}
+
+/* ---- step rail ---------------------------------------------------------- */
+.admin-steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-steps__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  color: var(--jade-deep);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-steps__item:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.admin-steps__item.is-current {
+  border-color: var(--jade);
+}
+
+/* A done step is marked on the NUMBER, not by colouring the whole control:
+   the current step and a completed step are different facts and a reader
+   needs to see both at once. */
+.admin-steps__item.is-done .admin-steps__n {
+  background: var(--jade);
+  color: var(--cream);
+}
+
+.admin-steps__n {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--line);
+  font-size: 12px;
+}
+
+/* ---- forms -------------------------------------------------------------- */
+.admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.admin-form__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--space-2);
+}
+
+.admin-form__fieldset {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.admin-form__fieldset legend {
+  padding: 0 8px;
+}
+
+.admin-form__check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.admin-form__check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--jade);
+}
+
+/* ---- photos ------------------------------------------------------------- */
+.admin-photos {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.admin-photo {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+.admin-photo img {
+  width: 110px;
+  height: 110px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--cream-2);
+}
+
+.admin-photo__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.admin-photo__body .auth__field {
+  width: 100%;
+}
+
+.admin-photo__badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: var(--radius);
+  background: var(--sun);
+  color: var(--charcoal);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---- blockers ----------------------------------------------------------- */
+/* Not styled as an error. These are things still to do on a form nobody has
+   submitted yet, and painting them red trains people to ignore red. */
+.admin-errors {
+  list-style: none;
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border-left: 3px solid var(--sun);
+  background: var(--cream);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---- footer ------------------------------------------------------------- */
+.admin__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.admin__footer-left,
+.admin__footer-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.admin__blocked {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+/* ---- lists -------------------------------------------------------------- */
+.admin-list {
+  margin-top: var(--space-4);
+}
+
+.admin-list__items {
+  list-style: none;
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-list__item a {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  text-decoration: none;
+  color: inherit;
+}
+
+.admin-list__item a:hover {
+  border-color: var(--jade);
+}
+
+@media (max-width: 760px) {
+  .admin,
+  .admin-gate,
+  .admin-done {
+    padding: var(--space-3);
+  }
+
+  .admin-photo {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-photo img {
+    width: 100%;
+    height: 180px;
   }
 }

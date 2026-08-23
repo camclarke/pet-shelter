@@ -10,6 +10,7 @@ import type { Messages } from './messages';
 import type { MedicalRecordKind, PetSex, PetSize, PetStatus, Species } from '@/lib/types';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
+import type { IntakeError } from '@/lib/intake';
 
 /**
  * Size adjectives, as stems. "grande" is invariant — it already ends in -e and
@@ -77,6 +78,30 @@ const MICROCHIP_ERROR: Record<MicrochipError, string> = {
 };
 
 /**
+ * Intake wizard validation, in the words the shelter's volunteers use.
+ *
+ * Phrased as instructions rather than accusations — "Escribe el nombre", not
+ * "Falta el nombre". These appear while someone is typing with a rescue in the
+ * car, and a form that scolds gets abandoned for the WhatsApp group this
+ * system exists to replace.
+ */
+const INTAKE_ERROR: Record<IntakeError, string> = {
+  'name-required': 'Escribe el nombre del animalito.',
+  'species-required': 'Elige si es perro, gato, conejo u otro.',
+  'sex-required': 'Elige macho o hembra. De esto depende cómo se le nombra en toda la página.',
+  'size-required': 'Elige el tamaño.',
+  'breed-required': 'Escribe la raza. "Mestizo" o "mestiza" es una respuesta válida.',
+  'age-required': 'Escribe la edad aproximada, o marca "no sabemos".',
+  'age-range': 'Esa edad no parece posible. Revisa los años y los meses.',
+  'slug-invalid':
+    'La dirección web no es válida. Usa solo minúsculas, números y guiones — por ejemplo "luna-2".',
+  'microchip-required': 'Marcaste que tiene microchip: escribe el número, o desmarca la casilla.',
+  'photo-required': 'Sube al menos una foto. Sin foto, nadie se enamora.',
+  'alt-required':
+    'Cada foto necesita una descripción corta, para quien no puede verla. Por ejemplo: "Perra mestiza café echada en el patio".',
+};
+
+/**
  * ⚠️ Read the `authError` note in messages.ts before touching
  * `invalid-credentials`. Naming the password or the account would undo
  * Identity Platform's email enumeration protection.
@@ -131,6 +156,8 @@ export const es: Messages = {
   medicalKindLabel: (kind) => MEDICAL_KIND[kind],
 
   microchipError: (error) => MICROCHIP_ERROR[error],
+
+  intakeError: (error) => INTAKE_ERROR[error],
 
   authError: (error) => AUTH_ERROR[error],
 
