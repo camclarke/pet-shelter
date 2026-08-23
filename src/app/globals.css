@@ -957,6 +957,58 @@ textarea {
   justify-content: center;
 }
 
+/* The chip-lookup confirmation card — plan section 3.1.
+   Deliberately louder than a notice line: this is the one moment the shelter
+   decides between one record and two, and a decision that reads as a hint gets
+   clicked past. The photo is the whole point — "is this that animal?" is
+   answered by looking, not by reading a slug. */
+.admin-match {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin: var(--space-2) 0;
+  padding: var(--space-2);
+  border: 2px solid var(--jade);
+  border-radius: var(--radius);
+  background: var(--cream);
+  text-align: left;
+}
+
+.admin-match__photo {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  flex: none;
+}
+
+.admin-match__body {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.admin-match__name {
+  display: block;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.admin-match__meta {
+  font-size: 14px;
+  opacity: 0.8;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.admin-match__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: var(--space-2);
+}
+
 .admin__header {
   display: flex;
   align-items: flex-start;

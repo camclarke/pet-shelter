@@ -210,8 +210,21 @@ service cloud.firestore {
     // ── collection-group reads ─────────────────────────────────────────────
     // A collectionGroup query is evaluated against these rules, not the
     // nested ones above, so each group that gets queried needs an explicit
-    // decision. `identity` is queried by microchip code on the server via the
-    // Admin SDK (which bypasses rules entirely); from a client it stays shut.
+    // decision. `identity` is queried by microchip code from TWO places, and
+    // the distinction is the reason this rule is `isAdmin()` and not `false`:
+    //
+    //   - findPetByMicrochip()      the FINDER's path. Server-side, Admin SDK,
+    //                               bypasses rules entirely, returns the public
+    //                               tier only so a stranger who scans a stray
+    //                               cannot enumerate the registry.
+    //   - findPetByMicrochipAdmin() the SHELTER's path. Runs in the browser at
+    //                               intake to deduplicate a re-admission, so it
+    //                               is governed by this line and by nothing
+    //                               else.
+    //
+    // A signed-in adopter still cannot run it. (An earlier version of this
+    // comment said "from a client it stays shut", which was never what the
+    // rule did — only what the code happened to do at the time.)
     match /{path=**}/identity/{docId} {
       allow read: if isAdmin();
     }

@@ -15,6 +15,7 @@
 
 import 'server-only';
 import { getAdminDb } from './firebase-admin';
+import { normalizeMicrochipCode } from './microchip';
 import type { Pet, PetDetail, PetSex, PetSize, PetStatus, Sighting, Species } from './types';
 
 export interface WallFilters {
@@ -96,7 +97,12 @@ export async function getAllSlugs(): Promise<string[]> {
  */
 export async function findPetByMicrochip(code: string): Promise<Pet | null> {
   const db = getAdminDb();
-  const normalized = code.replace(/[\s\-.]/g, '');
+  // Normalised through `microchip.ts` rather than an inline regex. This line
+  // used to carry its own copy of the same expression, and the copy has to
+  // agree exactly with the one `validateIsoMicrochip()` applies before the code
+  // is STORED — a lookup that normalises differently from the write does not
+  // fail loudly, it just never matches, and reads as "chip not registered".
+  const normalized = normalizeMicrochipCode(code);
 
   const snap = await db
     .collectionGroup('identity')

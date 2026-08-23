@@ -13,7 +13,7 @@
  * use. A Spanish string here would be a Spanish string outside `src/i18n`.
  */
 
-import type { MicrochipStandard } from './microchip';
+import { normalizeMicrochipCode, type MicrochipStandard } from './microchip';
 import type { PetSex, PetSize, PetStatus, Species } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +75,23 @@ export interface PetDraft {
   microchipCode: string;
   microchipStandard: MicrochipStandard;
 
+  /**
+   * Set when a chip lookup resolved to an existing pet and the admin answered
+   * "es otro animal" — plan section 3.1's mis-read / mis-linked branch.
+   *
+   * Recorded on the draft rather than held in component state for two reasons.
+   * The draft is persisted, so the flag survives a reload and cannot be cleared
+   * by walking away and coming back; and `validateStep` is pure over the draft,
+   * so the publish gate below can see it without the validator learning how to
+   * query Firestore.
+   *
+   * ⚠️ It stores the CODE as well as the pet, and both matter. The conflict is
+   * about one specific number: re-scanning and getting a different one — which
+   * is what a transposed digit looks like once corrected — must clear the gate
+   * rather than leave the intake permanently blocked.
+   */
+  chipConflict: { petId: string; code: string } | null;
+
   // ── step 2: media ─────────────────────────────────────────────────────────
   media: DraftMedia[];
 
@@ -114,6 +131,12 @@ export type IntakeError =
   // success screen shows the final URL, so the shelter is told what happened
   // rather than being blocked on it. Two animals called Luna is normal.
   | 'microchip-required'
+  // The chip entered already belongs to a DIFFERENT animal, per the admin's own
+  // answer. Blocking is the point: publishing anyway would write one credential
+  // onto two records, and `findPetByMicrochip()` would then resolve the chip to
+  // whichever the query happened to return first. A duplicate is recoverable;
+  // an ambiguous identity registry is what the whole lookup exists to prevent.
+  | 'microchip-conflict'
   | 'photo-required'
   | 'alt-required';
 
@@ -138,6 +161,7 @@ export function draftDefaults(id: string): PetDraft {
     hasMicrochip: false,
     microchipCode: '',
     microchipStandard: 'iso-fdx-b',
+    chipConflict: null,
     media: [],
     story: '',
     temperament: [],
@@ -233,6 +257,25 @@ export function disambiguateSlug(base: string, taken: readonly string[]): string
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Whether a recorded chip conflict still describes what is currently typed.
+ *
+ * The stored conflict is about one specific number, so this compares against
+ * the NORMALISED code rather than the raw field — otherwise re-typing the same
+ * digits with different spacing would read as a fresh, unconflicted code and
+ * quietly reopen the hole the gate exists to close. Normalisation comes from
+ * `microchip.ts` rather than a second regex here, so there is one answer to
+ * "are these the same chip" in the codebase and not two that can drift.
+ *
+ * Unchecking "tiene microchip" clears the gate, and correctly so: an animal
+ * recorded as unchipped writes no `identity` document, so there is no
+ * credential left to collide with.
+ */
+export function chipConflictApplies(draft: PetDraft): boolean {
+  if (!draft.hasMicrochip || draft.chipConflict === null) return false;
+  return normalizeMicrochipCode(draft.microchipCode) === draft.chipConflict.code;
+}
+
+/**
  * What is missing from one step.
  *
  * Note what is NOT checked here: the microchip code's own validity. That is
@@ -264,6 +307,7 @@ export function validateStep(step: IntakeStep, draft: PetDraft): IntakeError[] {
     if (draft.hasMicrochip && draft.microchipCode.trim().length === 0) {
       errors.push('microchip-required');
     }
+    if (chipConflictApplies(draft)) errors.push('microchip-conflict');
   }
 
   if (step === 'media') {
