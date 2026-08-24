@@ -54,7 +54,8 @@ scanned chip resolves to a name and a phone call.
 | Firebase web app | ✅ **Registered 2026-08-16** by Terraform (`google_firebase_web_app.web`). The four `NEXT_PUBLIC_*` values are in `.env.local`, from `terraform output firebase_web_config` — never copied from a console |
 | Firebase Auth | ✅ **Initialized 2026-08-16, Email/Password ON, and EXERCISED end to end 2026-08-23.** Subtype is **`IDENTITY_PLATFORM`**, not legacy Firebase Auth — which matters: **email enumeration protection is on by default** and is measured, not assumed. **Google provider still off** — needs an OAuth consent screen |
 | **Auth flows (UI)** | ✅ **BUILT + VERIFIED IN A BROWSER 2026-08-23** — sign up, sign in, sign out, password reset, email verification, session persistence across reload. `src/lib/auth.ts`, `AuthProvider`, `AccountPanel`, `AccountLink`. Firebase is **dynamically imported** so it stays out of the homepage bundle — measured, see the log |
-| **Admin intake UI** | ✅ **BUILT + VERIFIED IN A BROWSER 2026-08-23** — `/admin`, `/admin/intake`, steps 1–3 manual. A pet was entered, photographed, published and deleted end to end. Plan §3, build-order step 5. Dedup (§3.1) is step 6 and is **not** built |
+| **Admin intake UI** | ✅ **BUILT + VERIFIED IN A BROWSER 2026-08-23** — `/admin`, `/admin/intake`, steps 1–3 manual. A pet was entered, photographed, published and deleted end to end. Plan §3, build-order step 5 |
+| **Re-admission / dedup** | ✅ **BUILT + PROVEN AGAINST LIVE FIRESTORE AND IN A BROWSER 2026-08-23** — plan §3.1, build-order step 6. A valid chip is looked up before the form is trusted: known → reopen the record, unknown → new intake, "es otro animal" → blocked from publishing the same code twice. `src/lib/readmission.ts` (pure, 22 tests), `findPetByMicrochipAdmin()`, `reopenPet()`. **No rules or index change was needed** — the admin collection-group read on `identity` already existed |
 | **Admin custom claim** | ✅ **`npm run grant:admin`** — `scripts/grant-admin.mjs`. The only thing that writes `request.auth.token.admin`, deliberately outside the deployed surface. Merges claims rather than replacing them, and verifies by reading back |
 | **`petDrafts` rules** | ✅ **DEPLOYED + PROVEN ENFORCING 2026-08-23** — 11/11 client-SDK assertions across *no claim → granted → revoked*. Byte-identical readback from the Rules API |
 | Maps + sightings | ⬜ Not started |
@@ -129,14 +130,24 @@ scanned chip resolves to a name and a phone call.
 
 - **2026-08-23** — **PR #12 merged and deployed, and the project has its first admin — so the intake wizard is now reachable by a real person rather than only by a probe.** The merge is `1618ce6`. Production was checked rather than inferred from a green pipeline, and this time there was a stronger signal than usual available: **`/admin` and `/admin/intake` did not exist before this merge, so a 200 on them cannot be a stale edge entry** — it is direct proof the new build is serving. Both return 200 on **both** hosts, the deployed Cloud Run tag `app:1618ce6b…` **equals `git rev-parse HEAD`**, and all five routes carry `s-maxage=300, stale-while-revalidate` including the two new ones, so neither inherited the year-long Hosting cache defect that PR #7 fixed. Two production-only properties were re-confirmed: `/admin` serves its real shell (title, "Verificando permisos", `noindex`), and the homepage's 9 chunks still contain **no firebase auth code** — the `AuthProvider` dynamic import holds. **The rules drift this file warned about is closed:** both rulesets were deployed *before* the merge (nothing could be verified without them), and a readback now shows `firestore.rules` and `storage.rules` **byte-identical to `main`** — so a redeploy from `main` is safe and will not reinstate the delete bug. Then the bootstrap actually ran for the first time: **`israel.rocha.rocha@live.com` signed up through `/account` and was granted the claim** with `npm run grant:admin`, confirmed two independent ways — the script's own read-back, and `--list` enumerating every account and filtering on the claim. **There is now 1 admin and 1 auth account, and still 0 pets.** That last number is the whole remaining gap, and it is no longer a technical one: the shelter can enter an animal through a form.
 
+- **2026-08-23** — **Built step 6, the re-admission / dedup path — and the thing worth keeping is that it was fully verifiable with `pets` holding zero documents.** Plan §3.1. Entering a valid chip at intake now runs a lookup *before* the form is trusted: unknown → new intake, known → offer to reopen the existing record, "es otro animal" → the conflict is recorded and publishing that code onto a second record is blocked. Built before the first real animal deliberately, because a dedup key is cheap while the collection is empty and expensive the moment a duplicate exists. **The lookup is automatic rather than a button**, which is a design decision and not a convenience: a dedup check that has to be remembered is a dedup check that does not happen, and the cost is one Firestore read per *completed valid* code — keyed on the normalised value, so retyping `068 0000…` as `0680000…` does not re-query. **Three findings.** (1) **No rules change and no index change were needed, and that was checked rather than assumed.** `firestore.rules` already carried `match /{path=**}/identity/{docId} { allow read: if isAdmin(); }` and the `identity.code` collection-group `fieldOverride` was already deployed — the decision to let an admin client run this query had been made months earlier and simply never used. What *was* wrong was the comment above it, which said the group was "queried on the server via the Admin SDK; from a client it stays shut." **That was never what the rule did** — only what the code happened to do at the time. A comment describing current usage as though it were policy is worse than no comment, because the next person reads it as the boundary. Rewritten to name both callers, redeployed, and read back **byte-identical (16744 bytes)** in Node — never PowerShell, whose `Get-Content -Raw` mis-decodes these BOM-less UTF-8 files. (2) **`findPetByMicrochipAdmin()` reads `limit(2)`, not `limit(1)`.** The server-side finder has always used `limit(1)`, which cannot distinguish "one animal has this chip" from "two do" — and silently returning the first is precisely wrong for a credential by which ownership is asserted. The verdict is a three-way union (`unregistered` / `registered` / `ambiguous`) so the impossible case surfaces to a human instead of being resolved by query order. (3) **"Es otro animal" had to block, not warn.** Letting it through would write one chip number onto two `identity` documents, at which point `findPetByMicrochip()` — the finder's path, the single most important query in the system — resolves a scanned chip to whichever record the query returns first. So the conflict is recorded **on the draft** (persisted, so it survives a reload) and gates publishing via a new `IntakeError`. It clears itself when a *different* code is entered, because a transposed digit is by far the likeliest cause and a gate that stayed shut after the correction would only teach people to uncheck the box. A failed *lookup*, by contrast, warns and does **not** block — plan §3 is explicit that a gate stricter than the shelter's reality gets worked around, and the workaround is the WhatsApp group this system exists to replace. **The verification is the point, and it went further than expected.** A 26/26 client-SDK probe against live Firestore proved the collection-group query resolves for an admin **and is denied for a signed-in non-admin** (both branches, as always), that the re-admission closes the previous custody interval and leaves **exactly one** open, that `merge: true` does not drop `createdAt` — which `getWall()` orders by, so a plain `set()` would have looked like the animal vanishing — and that medical and identity are untouched. Then the wizard was driven in a browser end to end. **Four things only the browser could show.** (a) **My own fixture chip was rejected, and the validator was right**: `068900000000042` has a national ID of 900,000,000,042, past the 38-bit ceiling of 274,877,906,943, so it is not a physically possible ISO 11784 code — the form refused it and correctly ran no lookup at all. (b) Renaming the animal back to a *former* name produced `name: 'Nube'`, `formerNames: ['Luna']` — the chain removed the revived name rather than duplicating it, which is the one branch of `nextFormerNames()` that is easy to get subtly wrong and impossible to notice later. (c) **The dossier rendered with a chipped, renamed pet for the first time ever**, and the Spanish participles read *"Antes **conocida** como Luna"* and *"Está **identificada** con microchip"* — so the `pastParticiple()` fix from earlier today is now proven against real data rather than merely corrected in source. That copy is untestable by construction; it only exists when a pet does. (d) The wall stayed empty while a `quarantine` animal existed, exercising the `status == 'available'` allowlist against real data a second time. **Two smaller notes.** The browser pane was not compositing, so screenshots and *scrolling* both failed — `document.scrollingElement.scrollTop` stayed 0 against a 2093 px page. The way through is `resize_window` to a viewport taller than the document; ref-based clicks and `read_page` keep working, and `read_page` only reports elements in the viewport, which is why the form looked truncated. And **button text matched by `innerText` comes back CSS-uppercased**, so `/otro animal/` finds nothing and `/otro animal/i` does — a false negative that looks exactly like a missing element. All probe data removed and read back at zero: 0 pets, 0 drafts, 0 in every collection group, and the only auth account is the real admin. 103/103 tests, typecheck clean, build clean, 0 vulnerabilities in both trees.
+
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-23. The ADMIN INTAKE UI is BUILT, MERGED (PR #12,
-`1618ce6`), DEPLOYED and VERIFIED IN PRODUCTION — `/admin` and
-`/admin/intake`, build-order step 5. The project has its FIRST ADMIN. Firestore
-still holds 0 pets, and that is now the only thing left in step 3.**
+**Last session: 2026-08-23. STEP 6 — the re-admission / deduplication path —
+is BUILT and PROVEN, on branch `feature/readmission-dedup` (`b392e43`), NOT
+yet merged and NOT yet deployed.** The intake wizard now looks a chip up
+before it trusts the form. Step 5 (the wizard itself) shipped earlier as PR
+#12 (`1618ce6`) and is live. **Firestore still holds 0 pets, and that is
+still the only thing left in step 3.**
+
+⚠️ **The branch is unmerged: open a PR and let CI/CD deploy it.** The
+`firestore.rules` comment change on it **is already deployed** (verified
+byte-identical, 16744 bytes) — rules do not go through the pipeline, so that
+one file is ahead of `main` in production until the merge lands. Nothing
+about its *behaviour* changed, only a misleading comment.
 
 **Everything is in place for a real animal to be entered.** Nobody has to
 hand-write JSON any more, and the admin bootstrap has actually been run rather
@@ -207,6 +218,11 @@ objective end to end, and it is the only link never exercised.
   everything the seeder does (validates, strips EXIF, uploads, derives
   `coverPhoto`) plus the tier split and the microchip record, in one
   `writeBatch`. Reachable today: there is a real admin account
+- **The chip is a dedup key** (step 6, branch `feature/readmission-dedup`).
+  Entering a valid microchip runs a lookup first: an unknown chip just says
+  so and carries on, a known one offers to reopen the existing record. **This
+  matters for the very first real pet only if it is chipped AND was here
+  before** — otherwise it is one extra read and a reassuring line of text
 - `scripts/seed-pet.mjs` — the **fallback**. Validates the document, strips EXIF, uploads the
   photo, and **derives `coverPhoto` from the upload**. Tested: it rejects the
   legacy Spanish enums, a hand-typed `coverPhoto`, a non-kebab slug, a missing
@@ -435,7 +451,8 @@ order. It is kept because its constraints and warnings are still accurate.
 | Billing | `gcloud billing projects describe wawitas` | ✅ `billingEnabled: true` — trial expires ~2026-11-10 |
 | ADC | `google-auth-library` probe | ✅ resolves `wawitas` with no `.env.local` help |
 | Build | `npm run build` | ✅ **8 routes, run locally 2026-08-23** after the English rename |
-| Tests | `npm test` | ✅ **81/81** — 10 microchip, 23 placement/outbreak, 14 arrival state machine, **34 intake** (slug/accents, age, per-step validation, publish gate) |
+| Tests | `npm test` | ✅ **103/103** — 10 microchip, 23 placement/outbreak, 14 arrival state machine, 34 intake (slug/accents, age, per-step validation, publish gate), **22 re-admission** (verdict, naming chain, custody kind, conflict gate) |
+| **Re-admission tests actually fail when broken** | broke normalisation, then the naming chain, on purpose | ✅ each break was caught by exactly one test and by no other; restored and re-run green. A test that has never failed has not been shown to test anything |
 | Typecheck | `npm run typecheck` | ✅ clean |
 | **Outbreak trace** | seeded fixtures → live `collectionGroup` query → asserted → deleted | ✅ **PROVEN AGAINST LIVE FIRESTORE**, not just deployed. Contacts, ordering, area isolation, window clipping and occupancy all returned hand-computed answers |
 | Terraform | `terraform plan` after this session | ✅ 2 to add (both Firebase), **1 to change = the documented benign `cloud_run` `scaling` diff and nothing else** |
@@ -473,6 +490,12 @@ order. It is kept because its constraints and warnings are still accurate.
 | **Pet seeder** | `npm run seed:pet -- <file> --dry-run` | ✅ **validated 2026-08-23** — rejects legacy Spanish enums, hand-typed `coverPhoto`, bad slug, missing `formerNames`, non-boolean `hasMicrochip`. Enum-drift guard fires on both drift *and* a broken parser |
 | **Admin intake, end to end** | browser: enter → upload → publish → render → delete | ✅ **PROVEN 2026-08-23.** `Ñoño Prueba` → slug `nono-prueba`, 2400×3000 JPEG → **1280×1600**, tier split intact, `ageMonths` 14 from "1 año 2 meses", draft deleted by the same batch. Then removed; **0 documents, 0 objects, 0 accounts** on readback |
 | **`petDrafts` rules ENFORCEMENT** | client-SDK probe: no claim → granted → revoked | ✅ **11/11** — reads, lists and writes denied without the claim, allowed after a forced token refresh, denied again after revoke |
+| **Chip lookup resolves from a CLIENT** | client-SDK `collectionGroup('identity')` probe, live Firestore | ✅ **26/26, 2026-08-23** — resolves as admin, **`permission-denied` for a signed-in non-admin**, empty (not an error) for an unknown chip. Proves the rule, the `identity.code` fieldOverride and the query shape together |
+| **Re-admission writes correctly** | same probe, then read back with the Admin SDK | ✅ old custody **closed**, exactly **one** interval open, scan appended with `context: 'intake'` + `codeRead`, `medical` and `identity` untouched, and `merge: true` did **not** drop `createdAt` — which `getWall()` orders by |
+| **Re-admission, end to end in a browser** | enter chip → match card → reopen → read Firestore | ✅ **2026-08-23.** Separators normalised (`068 0000 0000 0042` matched), renaming back to a former name gave `name: Nube` / `formerNames: ["Luna"]`, no second pet, no orphan draft, "Registrar otro" reset cleanly |
+| **The conflict gate blocks and self-clears** | click "Es otro animal", then correct the code | ✅ blockers 8 → 9 with the Spanish message, the button disables; a *different* code drops it back to 8 and re-runs the lookup |
+| **Dossier Spanish, with a REAL chipped pet** | `/adopt/{slug}` rendered with data | ✅ **first time ever** — *"Antes **conocida** como Luna"*, *"Está **identificada** con microchip"*. The `pastParticiple()` fix is now proven, not just corrected in source |
+| **Wall allowlist, second exercise** | `GET /adopt` while a `quarantine` pet existed | ✅ empty state — only `available` reaches the wall |
 | **Custom-claim token lag** | cached vs forced `getIdTokenResult` | ✅ **MEASURED** — right after the grant the cached token did **not** carry `admin`; only `getIdTokenResult(true)` surfaced it. This is why `AdminGate` forces a refresh and `AuthProvider` does not |
 | **Browser EXIF stripping** | download the uploaded object, walk its JPEG segments | ✅ `FFE0 FFE2 FFDB FFDB FFC0 FFC4×4 FFDA` — **no APP1**, no `Exif`, no `GPS`, no XMP. A canvas re-encode cannot carry metadata through |
 | **Wall allowlist vs real data** | `GET /adopt` while a `shelter`-status pet existed | ✅ empty state — `getWall()` filters `status == 'available'`, exercised for the first time against an actual document |
@@ -645,9 +668,10 @@ Check keys are still empty, and are not needed yet.
    Spanish wording reaches it through `t.microchipError()`, not through a
    `MICROCHIP_ERROR_ES` constant — that name is from before the i18n split
    and no longer exists.
-   **The natural follow-up is step 6, the re-admission / dedup path**
-   (plan §3.1): it is cheap now and expensive once duplicate records exist,
-   and it becomes properly testable as soon as one real chipped pet does.
+5. ~~**Step 6, the re-admission / dedup path** (plan §3.1).~~ — **DONE
+   2026-08-23.** Built before the first real pet on purpose: it is cheap while
+   `pets` is empty and expensive the moment a duplicate exists. It turned out
+   to be fully testable without one — see the log entry.
 
 ### Open questions awaiting a decision
 
@@ -833,6 +857,72 @@ From building the admin intake UI (2026-08-23):
   as escapes. An invisible character inside a regex is undebuggable — and this
   is the third recurrence of the wider lesson: **escaping-sensitive edits go
   in a file you run, never through a shell heredoc or an inline `-e`.**
+
+From building the re-admission path (2026-08-23):
+
+- **A rule's comment is not the rule, and a comment describing current usage
+  reads as policy.** `firestore.rules` said the `identity` collection group
+  was queried "on the server via the Admin SDK; from a client it stays shut"
+  — but the rule underneath was `allow read: if isAdmin()`, which an admin
+  *client* satisfies. Nothing was broken; the comment simply described what
+  the code happened to do rather than what the rule permitted, and the next
+  person reads that as the boundary. **When a comment and a predicate
+  disagree, fix the comment before writing code that relies on either.**
+- **`limit(1)` cannot tell "one match" from "two".** The finder's
+  `findPetByMicrochip()` has always taken the first identity document with a
+  given code. For a chip — the credential by which ownership is asserted —
+  two matches is a fact a human must resolve, not one a query should pick a
+  winner for. The admin lookup reads `limit(2)` and returns a three-way
+  verdict. Any `limit(1)` on a uniqueness assumption is that assumption going
+  unchecked.
+- **A lookup that normalises differently from the write never matches, and
+  never says so.** `findPetByMicrochip()` carried its own copy of
+  `replace(/[\s\-.]/g,'')`, which had to stay identical to what
+  `validateIsoMicrochip()` applies before storing. It now calls
+  `normalizeMicrochipCode()`. The failure mode is not an error — it is
+  "chip not registered", which is this project's most-repeated shape.
+- **`setDoc` without `{ merge: true }` deletes every field you did not
+  mention.** The re-admission writes four fields onto `pets/{id}`; a plain
+  `set()` would have dropped `breed`, `coverPhoto` and — worst —
+  `createdAt`, which `getWall()` orders by. A document missing the ordered
+  field is silently absent from the query, so the animal would appear to have
+  vanished. Proven not to happen, by reading the fields back.
+- **Decide which gate blocks and which only warns, and say why.** A chip that
+  the admin says belongs to a *different* animal BLOCKS publishing, because
+  proceeding writes one credential onto two records. A chip lookup that
+  FAILED only warns, because a rescue at 22:00 must not be stopped by a
+  transient read error — plan §3's rule that a gate stricter than reality
+  gets worked around. Same feature, opposite answers, and the reasoning is
+  the deliverable.
+- **A blocking gate needs a way out that is not "give up".** The conflict
+  clears when a *different* code is entered, because a transposed digit is
+  the likeliest cause. Without that, the only escape is unchecking "tiene
+  microchip" — which is how a real chip stops being recorded at all.
+- **A test that has never failed has not been shown to test anything.** Both
+  central assertions here were verified by breaking the code on purpose —
+  removing normalisation, then making the naming chain append naively — and
+  confirming exactly one test caught each. Same discipline the seeder's
+  drift guard needed.
+
+Browser-pane traps, found while verifying the above (2026-08-23):
+
+- **A non-compositing pane cannot scroll, not just cannot screenshot.**
+  `scrollIntoView` and `scrollingElement.scrollTop = 900` both left
+  `scrollTop` at 0 against a 2093 px page. `read_page` only reports
+  elements in the viewport, so the form looks truncated and the element you
+  want "does not exist". **The way through is `resize_window` to a viewport
+  taller than the document**; ref-based clicks, `form_input` and
+  `javascript_tool` all keep working. This is the same non-compositing tab
+  that produced the 2026-08-22 computed-style scare, in a new disguise.
+- **`innerText` returns CSS-uppercased text.** `.btn` uppercases its
+  labels, so matching `/otro animal/` finds nothing while
+  `/otro animal/i` finds it. A false negative that is indistinguishable
+  from a missing element.
+- **Deleting a probe account mid-session invalidates the browser's token**,
+  which logs two `400`s from Identity Toolkit into the console and then sits
+  there for the rest of the tab's life. Read the *full* console with
+  timestamps before blaming new code: here the last five page loads were
+  clean and only the first and third had errored.
 
 From the English rename (2026-08-22):
 

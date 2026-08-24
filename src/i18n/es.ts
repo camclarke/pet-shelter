@@ -96,6 +96,8 @@ const INTAKE_ERROR: Record<IntakeError, string> = {
   'slug-invalid':
     'La dirección web no es válida. Usa solo minúsculas, números y guiones — por ejemplo "luna-2".',
   'microchip-required': 'Marcaste que tiene microchip: escribe el número, o desmarca la casilla.',
+  'microchip-conflict':
+    'Ese microchip ya está registrado a otro animalito, y marcaste que este no es el mismo. Vuelve a escanear el chip por si se coló un dígito, o desmarca "tiene microchip" para continuar sin él. No podemos guardar el mismo número en dos fichas.',
   'photo-required': 'Sube al menos una foto. Sin foto, nadie se enamora.',
   'alt-required':
     'Cada foto necesita una descripción corta, para quien no puede verla. Por ejemplo: "Perra mestiza café echada en el patio".',
