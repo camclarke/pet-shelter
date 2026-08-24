@@ -23,12 +23,19 @@
  *    write, and an autosave on a form this size is a write per character.
  *    Steps save when you move between them, and there is a Guardar button.
  *
+ * 4. **A chip is looked up before it is stored.** Plan section 3.1, build order
+ *    step 6. Entering a valid code runs `findPetByMicrochipAdmin()` and the
+ *    wizard branches: an unknown chip continues as a new intake, a known one
+ *    offers to reopen the existing record instead of creating a second one.
+ *    The lookup is automatic rather than a button, because a dedup check that
+ *    has to be remembered is a dedup check that does not happen — and the cost
+ *    is one Firestore read per completed code, not one per keystroke.
+ *
  * ── What is deliberately NOT here ──────────────────────────────────────────
- * The re-admission / deduplication check (plan section 3.1) is build order
- * step 6, not 5. It needs an admin-scoped `findPetByMicrochip()` and it cannot
- * be meaningfully exercised against a collection holding zero pets. Wiring a
- * lookup that has never once resolved would be the "validated is not
- * verified" mistake this project keeps writing down.
+ * Nothing resolves a chip for an animal that has none, and most street rescues
+ * arrive unchipped. This protects the minority case only. A name-and-photo
+ * similarity prompt would cover the rest; it is not in the plan and pretending
+ * this deduplicates every intake would oversell it.
  */
 
 'use client';
@@ -55,14 +62,22 @@ import {
 import {
   deletePhotos,
   discardDraft,
+  findPetByMicrochipAdmin,
   mintPetId,
   PhotoUnreadableError,
   publishDraft,
+  reopenPet,
   saveDraft,
   loadDraft,
   uploadPetPhoto,
 } from '@/lib/pets-admin';
-import { validateMicrochip, type MicrochipError } from '@/lib/microchip';
+import {
+  READMISSION_STATUSES,
+  type ChipMatch,
+  type ChipVerdict,
+  type ReadmissionInput,
+} from '@/lib/readmission';
+import { formatMicrochipCode, validateMicrochip, type MicrochipError } from '@/lib/microchip';
 import type { PetSex, PetSize, PetStatus, Species } from '@/lib/types';
 import { t } from '@/i18n';
 
@@ -145,6 +160,38 @@ export function IntakeWizard() {
   /** True once the admin edits the slug by hand, so we stop deriving it. */
   const [slugTouched, setSlugTouched] = useState(false);
 
+  /**
+   * The chip lookup — plan section 3.1.
+   *
+   * `failed` is a state of its own rather than being folded into
+   * `unregistered`, and the distinction is the important part: "we looked and
+   * nothing has this chip" and "we could not look" must never render the same,
+   * because the first is permission to create a new record and the second is
+   * not.
+   */
+  const [lookup, setLookup] = useState<
+    | { state: 'idle' }
+    | { state: 'searching'; code: string }
+    | { state: 'done'; code: string; verdict: ChipVerdict }
+    | { state: 'failed'; code: string }
+  >({ state: 'idle' });
+
+  /** Set when the admin chose to reopen an existing record instead. */
+  const [readmit, setReadmit] = useState<ChipMatch | null>(null);
+  const [readmitInput, setReadmitInput] = useState<ReadmissionInput>({
+    name: '',
+    // Never `available`. An animal coming back goes to the shelter; putting it
+    // on the public wall stays a separate, deliberate act.
+    status: 'shelter',
+    note: '',
+  });
+  const [readmitted, setReadmitted] = useState<{
+    slug: string;
+    name: string;
+    renamed: boolean;
+    previousName: string;
+  } | null>(null);
+
   // ── load or create ────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -179,6 +226,48 @@ export function IntakeWizard() {
     setNotice(null);
   }, []);
 
+  /**
+   * The normalised code worth looking up, or null.
+   *
+   * Derived above the early return below so the hook order never changes, and
+   * keyed on the NORMALISED code so that retyping "068 123…" as "068123…" is
+   * not a new query — `validateMicrochip` strips separators, so both collapse
+   * to the same string and the effect does not re-run.
+   */
+  const chipLookupCode = (() => {
+    if (!draft?.hasMicrochip) return null;
+    const result = validateMicrochip(draft.microchipCode, draft.microchipStandard);
+    return result.valid && result.parsed ? result.parsed.code : null;
+  })();
+
+  useEffect(() => {
+    if (!chipLookupCode) {
+      setLookup({ state: 'idle' });
+      return;
+    }
+
+    let cancelled = false;
+    setLookup({ state: 'searching', code: chipLookupCode });
+
+    findPetByMicrochipAdmin(chipLookupCode)
+      .then((verdict) => {
+        if (!cancelled) setLookup({ state: 'done', code: chipLookupCode, verdict });
+      })
+      .catch((caught) => {
+        // Deliberately does NOT block the intake. A rescue arriving at 22:00
+        // must not be stopped by a transient read failure — plan section 3 is
+        // explicit that a gate stricter than the shelter's reality gets worked
+        // around, and the workaround is the WhatsApp group this replaces. The
+        // warning is loud instead.
+        console.error('[intake] chip lookup failed', caught);
+        if (!cancelled) setLookup({ state: 'failed', code: chipLookupCode });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chipLookupCode]);
+
   if (!draft) {
     return (
       <div className="admin-gate" aria-busy="true">
@@ -196,6 +285,16 @@ export function IntakeWizard() {
     const result = validateMicrochip(draft.microchipCode, draft.microchipStandard);
     if (!result.valid && result.error) chipError = result.error;
   }
+
+  // Narrowed once, here, rather than inside the JSX. TypeScript does not carry
+  // a discriminant narrowing into a callback closure, so reading
+  // `lookup.verdict.pet` inside an onClick would need a cast — and a cast is
+  // exactly the thing that keeps compiling after the union changes shape.
+  const chipMatch =
+    lookup.state === 'done' && lookup.verdict.kind === 'registered' ? lookup.verdict.pet : null;
+  const chipAmbiguous =
+    lookup.state === 'done' && lookup.verdict.kind === 'ambiguous' ? lookup.verdict.pets : null;
+  const chipUnregistered = lookup.state === 'done' && lookup.verdict.kind === 'unregistered';
 
   async function persist(next: PetDraft = draft!) {
     setBusy(true);
@@ -303,6 +402,56 @@ export function IntakeWizard() {
     }
   }
 
+  /**
+   * "Reabrir expediente" — the animal in front of us is the one on file.
+   *
+   * The half-started draft is thrown away rather than published: the whole
+   * point of resolving the chip was that this animal already has a record, so
+   * keeping a second one around — even unpublished — would leave exactly the
+   * duplicate the lookup exists to prevent sitting in the dashboard.
+   */
+  async function handleReopen() {
+    if (!user || !readmit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await reopenPet(readmit, readmitInput, draft!.microchipCode, user);
+
+      // Best-effort, and after the write rather than before: if the
+      // re-admission fails we want the draft still there to fall back on.
+      await deletePhotos(draft!.media.map((m) => m.path));
+      await discardDraft(draft!.id).catch((caught) => {
+        console.error('[intake] could not discard the draft after reopening', caught);
+      });
+
+      setReadmitted({
+        slug: readmit.slug,
+        name: readmitInput.name.trim() || readmit.name,
+        renamed:
+          readmitInput.name.trim().length > 0 &&
+          readmitInput.name.trim().toLocaleLowerCase() !== readmit.name.toLocaleLowerCase(),
+        previousName: readmit.name,
+      });
+    } catch (caught) {
+      report(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * "Es otro animal" — the chip resolved, but not to the animal in the room.
+   *
+   * Plan section 3.1 calls this a real signal rather than an error, and the
+   * response is to flag it, never to silently create a duplicate. Recording it
+   * on the draft blocks publishing this code onto a second record while leaving
+   * the admin free to re-scan: the most likely cause by far is a transposed
+   * digit, and a corrected code clears the gate on its own.
+   */
+  function markDifferentAnimal(petId: string, code: string) {
+    update({ chipConflict: { petId, code } });
+  }
+
   async function handleDiscard() {
     if (!window.confirm('¿Descartar esta ficha? No se puede deshacer.')) return;
     setBusy(true);
@@ -329,6 +478,13 @@ export function IntakeWizard() {
    */
   function startAnother() {
     setPublished(null);
+    setReadmitted(null);
+    setReadmit(null);
+    setReadmitInput({ name: '', status: 'shelter', note: '' });
+    // The effect re-runs and clears this anyway once the new draft's empty
+    // chip field fails validation, but leaving a resolved match on screen for
+    // even one frame would show the previous animal above a blank form.
+    setLookup({ state: 'idle' });
     setStep('identity');
     setNotice(null);
     setError(null);
@@ -337,6 +493,149 @@ export function IntakeWizard() {
     // Only when a stale `?draft=` is still in the URL; otherwise the effect
     // does not re-run and would leave the resumed id in the address bar.
     if (resumeId) router.replace('/admin/intake');
+  }
+
+  // ── re-admitted ───────────────────────────────────────────────────────────
+  if (readmitted) {
+    return (
+      <div className="admin-done">
+        <h1 className="t-title">Reingreso registrado</h1>
+        <p className="admin-done__note">
+          <strong>{readmitted.name}</strong> ya estaba en el sistema, así que no creamos una
+          ficha nueva: se agregó el reingreso a la que ya tenía.
+          <br />
+          <code className="admin-done__url">wawitas.org/adopt/{readmitted.slug}</code>
+        </p>
+
+        {readmitted.renamed && (
+          <p className="auth__notice" role="status">
+            Antes se llamaba <strong>{readmitted.previousName}</strong>. Guardamos ese nombre en
+            su historial, para que quien lo busque así lo encuentre.
+          </p>
+        )}
+
+        <p className="admin-gate__note">
+          Su historial médico, su microchip y sus fotos siguen intactos. Lo que se agregó es un
+          registro de custodia y un registro de escaneo.
+        </p>
+
+        <div className="admin-done__actions">
+          <Link href={`/adopt/${readmitted.slug}`} className="btn btn--action">
+            Ver la ficha
+          </Link>
+          <button type="button" className="btn btn--brand" onClick={startAnother}>
+            Registrar otro
+          </button>
+          <Link href="/admin" className="btn btn--muted">
+            Volver al panel
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // ── re-admission form ─────────────────────────────────────────────────────
+  if (readmit) {
+    return (
+      <div className="admin">
+        <header className="admin__header">
+          <div>
+            <h1 className="t-title">Reingreso</h1>
+            <p className="admin__sub">
+              Este animalito ya tiene ficha. Estamos agregando su regreso, no creando una nueva.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--muted"
+            disabled={busy}
+            onClick={() => setReadmit(null)}
+          >
+            ← Volver
+          </button>
+        </header>
+
+        {error && (
+          <p className="auth__error" role="alert">
+            {error}
+          </p>
+        )}
+
+        <div className="admin-match">
+          {readmit.coverPhoto && (
+            <img className="admin-match__photo" src={readmit.coverPhoto} alt={readmit.name} />
+          )}
+          <div className="admin-match__body">
+            <strong className="admin-match__name">{readmit.name}</strong>
+            <p className="admin-match__meta">
+              {readmit.breed} · {t.formatMeta(readmit)}
+            </p>
+            <p className="admin-match__meta">Estado actual: {t.statusLabel(readmit.status)}</p>
+            {readmit.formerNames.length > 0 && (
+              <p className="admin-match__meta">
+                También se llamó: {readmit.formerNames.join(', ')}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <section className="admin-form">
+          <label className="auth__field">
+            <span className="t-label">¿Cambió de nombre?</span>
+            <input
+              type="text"
+              value={readmitInput.name}
+              placeholder={readmit.name}
+              disabled={busy}
+              onChange={(e) => setReadmitInput((c) => ({ ...c, name: e.target.value }))}
+            />
+            <small className="auth__hint">
+              Déjalo en blanco si se sigue llamando {readmit.name}. Si escribes otro, el anterior
+              queda guardado en su historial — nunca se borra.
+            </small>
+          </label>
+
+          <label className="auth__field">
+            <span className="t-label">¿A dónde entra?</span>
+            <select
+              value={readmitInput.status}
+              disabled={busy}
+              onChange={(e) =>
+                setReadmitInput((c) => ({ ...c, status: e.target.value as PetStatus }))
+              }
+            >
+              {READMISSION_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {t.statusLabel(status)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="auth__field">
+            <span className="t-label">Nota (opcional)</span>
+            <textarea
+              rows={3}
+              value={readmitInput.note}
+              placeholder="Por qué volvió, quién lo trajo…"
+              disabled={busy}
+              onChange={(e) => setReadmitInput((c) => ({ ...c, note: e.target.value }))}
+            />
+          </label>
+
+          <div className="admin-done__actions">
+            <button
+              type="button"
+              className="btn btn--brand"
+              disabled={busy}
+              onClick={() => void handleReopen()}
+            >
+              {busy ? 'Guardando…' : 'Registrar reingreso'}
+            </button>
+          </div>
+        </section>
+      </div>
+    );
   }
 
   // ── published ─────────────────────────────────────────────────────────────
@@ -635,6 +934,92 @@ export function IntakeWizard() {
                     {t.microchipError(chipError)}
                   </p>
                 )}
+
+                {/* ── the deduplication branch, plan section 3.1 ──────────── */}
+                {lookup.state === 'searching' && (
+                  <p className="auth__notice" role="status">
+                    Buscando si ese chip ya está registrado…
+                  </p>
+                )}
+
+                {lookup.state === 'failed' && (
+                  <p className="auth__error" role="alert">
+                    No pudimos revisar si ese chip ya está registrado. Puedes continuar, pero si
+                    el animalito ya estuvo aquí antes se va a crear una ficha repetida — mejor
+                    intenta de nuevo en un momento.
+                  </p>
+                )}
+
+                {chipUnregistered && (
+                  <p className="auth__notice" role="status">
+                    Ese chip no está registrado aquí. Seguimos con un ingreso nuevo.
+                  </p>
+                )}
+
+                {chipAmbiguous && (
+                  <p className="auth__error" role="alert">
+                    Ese número aparece en más de una ficha:{' '}
+                    {chipAmbiguous.map((p) => p.name).join(', ')}. Eso no debería pasar, y hay
+                    que arreglarlo antes de seguir — avisa a quien administra el sistema.
+                  </p>
+                )}
+
+                {chipMatch && (
+                  <div className="admin-match" role="status">
+                    {chipMatch.coverPhoto && (
+                      <img
+                        className="admin-match__photo"
+                        src={chipMatch.coverPhoto}
+                        alt={chipMatch.name}
+                      />
+                    )}
+                    <div className="admin-match__body">
+                      <strong className="admin-match__name">
+                        Ese chip ya es de {chipMatch.name}
+                      </strong>
+                      <p className="admin-match__meta">
+                        {chipMatch.breed} · {t.formatMeta(chipMatch)} ·{' '}
+                        {t.statusLabel(chipMatch.status)}
+                      </p>
+                      <p className="admin-match__meta">
+                        {formatMicrochipCode(chipLookupCode ?? '')}
+                      </p>
+
+                      {/* Both answers are legitimate, so neither is the
+                          default. Guessing here is how a duplicate gets
+                          created by someone clicking through. */}
+                      <div className="admin-match__actions">
+                        <button
+                          type="button"
+                          className="btn btn--brand"
+                          disabled={busy}
+                          onClick={() => {
+                            update({ chipConflict: null });
+                            setReadmit(chipMatch);
+                          }}
+                        >
+                          Es el mismo — reabrir su ficha
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--muted"
+                          disabled={busy || draft.chipConflict?.petId === chipMatch.id}
+                          onClick={() => markDifferentAnimal(chipMatch.id, chipLookupCode ?? '')}
+                        >
+                          Es otro animal
+                        </button>
+                        <Link
+                          href={`/adopt/${chipMatch.slug}`}
+                          target="_blank"
+                          className="btn btn--muted"
+                        >
+                          Ver su ficha ↗
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <small className="auth__hint">
                   El número no se publica nunca. Se guarda aparte, y solo lo ven el refugio y
                   quien adopte al animalito.
