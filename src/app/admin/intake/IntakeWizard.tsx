@@ -71,6 +71,7 @@ import {
   loadDraft,
   uploadPetPhoto,
 } from '@/lib/pets-admin';
+import { shouldHaveOpenPlacement } from '@/lib/arrival';
 import {
   READMISSION_STATUSES,
   type ChipMatch,
@@ -152,10 +153,18 @@ export function IntakeWizard() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState<{
+    /**
+     * The internal id, which is also the draft id. Needed because the next
+     * thing the shelter should do — say which pen the animal is in — happens
+     * at `/admin/pets/{petId}`, a different namespace from the public slug.
+     */
+    petId: string;
     slug: string;
     /** What the admin typed, so a disambiguated slug can be pointed out. */
     requestedSlug: string;
     name: string;
+    /** Drives whether an area even applies: a fostered animal has no pen. */
+    status: PetStatus;
   } | null>(null);
   /** True once the admin edits the slug by hand, so we stop deriving it. */
   const [slugTouched, setSlugTouched] = useState(false);
@@ -186,10 +195,12 @@ export function IntakeWizard() {
     note: '',
   });
   const [readmitted, setReadmitted] = useState<{
+    petId: string;
     slug: string;
     name: string;
     renamed: boolean;
     previousName: string;
+    status: PetStatus;
   } | null>(null);
 
   // ── load or create ────────────────────────────────────────────────────────
@@ -391,9 +402,11 @@ export function IntakeWizard() {
     try {
       const result = await publishDraft(draft!, user);
       setPublished({
+        petId: result.petId,
         slug: result.slug,
         requestedSlug: draft!.slug,
         name: draft!.name.trim(),
+        status: draft!.status,
       });
     } catch (caught) {
       report(caught);
@@ -415,7 +428,7 @@ export function IntakeWizard() {
     setBusy(true);
     setError(null);
     try {
-      await reopenPet(readmit, readmitInput, draft!.microchipCode, user);
+      const reopened = await reopenPet(readmit, readmitInput, draft!.microchipCode, user);
 
       // Best-effort, and after the write rather than before: if the
       // re-admission fails we want the draft still there to fall back on.
@@ -425,6 +438,8 @@ export function IntakeWizard() {
       });
 
       setReadmitted({
+        petId: reopened.petId,
+        status: reopened.plan.status,
         slug: readmit.slug,
         name: readmitInput.name.trim() || readmit.name,
         renamed:
@@ -520,7 +535,12 @@ export function IntakeWizard() {
         </p>
 
         <div className="admin-done__actions">
-          <Link href={`/adopt/${readmitted.slug}`} className="btn btn--action">
+          {shouldHaveOpenPlacement(readmitted.status) && (
+            <Link href={`/admin/pets/${readmitted.petId}`} className="btn btn--action">
+              Asignar área
+            </Link>
+          )}
+          <Link href={`/adopt/${readmitted.slug}`} className="btn btn--brand">
             Ver la ficha
           </Link>
           <button type="button" className="btn btn--brand" onClick={startAnother}>
@@ -663,8 +683,30 @@ export function IntakeWizard() {
           Si lo publicaste como <em>Disponible</em>, aparecerá en el muro en unos minutos: la
           página de inicio se regenera cada 5 minutos.
         </p>
+
+        {/* Where the animal physically IS is deliberately NOT asked here.
+            The wizard's job ends when the record exists; the pen it goes into
+            is a placement, and a placement is an interval that gets closed and
+            reopened every time it moves. Folding the first one into publish
+            would make the wizard the only screen that can start a ledger it
+            cannot continue. So this hands over instead — and the panel flags
+            any animal inside the facility with no open placement, so skipping
+            it here stays visible rather than silently leaving a gap in the
+            outbreak trace. */}
+        {shouldHaveOpenPlacement(published.status) && (
+          <p className="auth__notice" role="status">
+            Falta decir en qué área quedó. Sin eso, si se enferma no hay forma de saber a quién
+            estuvo expuesto.
+          </p>
+        )}
+
         <div className="admin-done__actions">
-          <Link href={`/adopt/${published.slug}`} className="btn btn--action">
+          {shouldHaveOpenPlacement(published.status) && (
+            <Link href={`/admin/pets/${published.petId}`} className="btn btn--action">
+              Asignar área
+            </Link>
+          )}
+          <Link href={`/adopt/${published.slug}`} className="btn btn--brand">
             Ver la ficha
           </Link>
           <button type="button" className="btn btn--brand" onClick={startAnother}>
