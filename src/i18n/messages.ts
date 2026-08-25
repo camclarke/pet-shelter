@@ -20,12 +20,16 @@
  */
 
 import type {
+  AreaKind,
   MedicalRecordKind,
   PetSex,
   PetSize,
   PetStatus,
+  PlacementReason,
   Species,
 } from '@/lib/types';
+import type { AreaError, PlacementWarning } from '@/lib/areas';
+import type { Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
@@ -107,4 +111,40 @@ export interface Messages {
     origin: string | null;
     recordUrl: string;
   }): string;
+
+  // ── areas and placements ──────────────────────────────────────────────────
+
+  /** "Cuarentena", "Aislamiento" — the shelter's own words for a kind of pen. */
+  areaKindLabel(kind: AreaKind): string;
+
+  /** One line explaining what a kind of area is FOR, shown beside the picker. */
+  areaKindHint(kind: AreaKind): string;
+
+  /** Why an area cannot be saved. */
+  areaError(error: AreaError): string;
+
+  /** Why an animal was moved: "Ingreso", "Alta veterinaria", "Traslado". */
+  placementReasonLabel(reason: PlacementReason): string;
+
+  /**
+   * What the manager should know before recording a move.
+   *
+   * ⚠️ Every one of these is a WARNING and none of them blocks. Plan section 3
+   * is explicit that a gate stricter than the shelter's reality gets worked
+   * around — so the wording must inform a decision, never scold someone for a
+   * decision they have already had to make with an animal in their arms.
+   */
+  placementWarning(warning: PlacementWarning): string;
+
+  /** "moquillo", "parvovirus" — the disease being traced. */
+  pathogenLabel(pathogen: Pathogen): string;
+
+  /** "3 de 6" when the capacity is known, "3 animalitos" when it is not. */
+  occupancyLabel(count: number, capacity: number | null): string;
+
+  /** "hoy", "ayer", "hace 12 días". */
+  daysAgoLabel(days: number): string;
+
+  /** How long two animals shared a pen: "12 días juntos", "menos de un día". */
+  contactDurationLabel(ms: number): string;
 }

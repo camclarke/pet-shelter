@@ -1239,6 +1239,212 @@ textarea {
   border-color: var(--jade);
 }
 
+/* ---- areas and placements ----------------------------------------------- */
+/* The occupancy board, the move form's warnings, and the placement timeline.
+   Built on the same tokens as the rest of the admin console — no new colours,
+   because the capacity states below need the only three the palette reserves
+   for meaning: jade for fine, sun for at the limit, coral for over it. */
+
+.admin__header-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.admin-list__flag {
+  color: var(--coral);
+  font-weight: 600;
+}
+
+.area-board {
+  list-style: none;
+  margin-top: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-2);
+}
+
+.area-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A left edge that names the kind of pen at a glance. Isolation and quarantine
+   are deliberately NOT the same colour: mistaking one for the other is exactly
+   the error the ASV guidance exists to prevent. */
+.area-card--quarantine {
+  border-left: 4px solid var(--sun);
+}
+
+.area-card--isolation {
+  border-left: 4px solid var(--coral);
+}
+
+.area-card--general {
+  border-left: 4px solid var(--jade);
+}
+
+.area-card--medical,
+.area-card--maternity {
+  border-left: 4px solid var(--jade-light);
+}
+
+.area-card.is-inactive {
+  opacity: 0.6;
+}
+
+.area-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+.area-card__name {
+  font-family: var(--display);
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.area-card__kind {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.area-card__count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.area-card__count.is-full {
+  border-color: var(--sun);
+  color: var(--sun);
+}
+
+.area-card__count.is-over {
+  border-color: var(--coral);
+  color: var(--coral);
+}
+
+.area-card__clock {
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
+.area-card__pets {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.area-card__pets a {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--cream-2);
+  font-size: 13px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.area-card__pets a:hover {
+  border-color: var(--jade);
+}
+
+.area-card__notes {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.area-form {
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream-2);
+}
+
+.place-now {
+  margin-top: var(--space-1);
+  font-size: 16px;
+}
+
+/* Warnings, never blockers. Styled to be read rather than dismissed, but not
+   as an error: the manager is being informed of a consequence, not corrected. */
+.place-warnings {
+  list-style: none;
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.place-warnings li {
+  padding: 10px 12px;
+  border: 1px solid var(--sun);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--cream-2);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.timeline {
+  list-style: none;
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline__item {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+.timeline__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.timeline__dates {
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
+.timeline__note {
+  margin-top: 6px;
+  font-size: 14px;
+}
+
+.timeline__by {
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+.trace {
+  margin-top: var(--space-2);
+}
+
 @media (max-width: 760px) {
   .admin,
   .admin-gate,

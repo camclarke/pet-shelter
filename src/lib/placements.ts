@@ -81,6 +81,31 @@ export const INCUBATION_MAX_DAYS = {
 export type Pathogen = keyof typeof INCUBATION_MAX_DAYS;
 
 /**
+ * How far a caller's clock may run behind Firestore's before a trace starts
+ * lying.
+ *
+ * ⚠️ This is not defensive padding. It fixes a measured, reproducible silent
+ * failure. Placements are stamped with `serverTimestamp()`, so `startedAt` is
+ * Google's clock; the exposure window's ceiling is the CALLER's `now`. On
+ * 2026-08-24 the server was measured 2.7 s ahead of the dev machine, and the
+ * consequence was not a rounding error — a placement written seconds earlier
+ * sorted AFTER the window ended, so it was clipped out of the subject's own
+ * stays, no areas were derived from it, and the trace returned zero contacts.
+ *
+ * That result is the worst one this module can produce. `noPlacementData` was
+ * false (the animal *had* placements), so the UI would have reported "no
+ * contacts found" as a confident answer about an animal that had just been put
+ * in a pen with two others.
+ *
+ * Five minutes rather than five seconds because a browser clock — not a server
+ * — is what will ask this question, and browser clocks drift by minutes. The
+ * cost of the tolerance is including animals placed in the last few minutes,
+ * which a trace should include anyway; it errs toward INCLUDING, the direction
+ * this module documents everywhere else.
+ */
+export const CLOCK_SKEW_TOLERANCE_MS = 5 * 60_000;
+
+/**
  * The window to investigate for an animal diagnosed at `diagnosedAt`.
  *
  * It reaches BACK by the pathogen's maximum incubation period (when could this
@@ -182,12 +207,24 @@ export function traceContacts(
       // infinity, so the duration stays a real number the UI can sort on.
       const measuredEnd = shared.end ?? window.end;
 
+      /**
+       * Whether they are still together is a property of the two STAYS, not of
+       * the clipped arithmetic above.
+       *
+       * The subject's stay was clipped to the window before comparing, which
+       * turns an open stay into one ending at the window's edge — so `shared.end`
+       * is finite even when neither animal has left. Reporting that as the end
+       * of the contact made the most urgent row in the trace, the animal still
+       * standing beside the sick one, read as though the exposure were over.
+       */
+      const stillTogether = stay.endedAt === null && other.endedAt === null;
+
       contacts.push({
         petId: other.petId,
         areaId: other.areaId,
         areaName: other.areaName,
         overlapStart: shared.start,
-        overlapEnd: shared.end,
+        overlapEnd: stillTogether ? null : shared.end,
         overlapMs: measuredEnd - shared.start,
       });
     }
