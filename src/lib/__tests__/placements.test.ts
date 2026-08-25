@@ -29,6 +29,7 @@ import {
   currentOccupants,
   lengthOfStayDays,
   INCUBATION_MAX_DAYS,
+  CLOCK_SKEW_TOLERANCE_MS,
   MS_PER_DAY,
   type PlacementInterval,
 } from '../placements';
@@ -115,6 +116,58 @@ test('the window extends forward to now, not only back to diagnosis', () => {
   // since" is half the question.
   const w = exposureWindow(day(100), 'parvovirus', day(107));
   assert.equal(w.end, day(107));
+});
+
+test('the skew tolerance is what keeps a just-arrived animal inside the window', () => {
+  // The exact live failure, in the units it happened in. An animal placed
+  // moments ago carries a `startedAt` from Firestore's clock, which ran 2.7 s
+  // ahead of the caller's. Against a window ending at the caller's `now`, that
+  // stay starts AFTER the window and is clipped out — so the subject has no
+  // stays, no areas are derived, and the trace returns zero contacts while
+  // `noPlacementData` stays false. A confident wrong answer.
+  const now = day(100);
+  const justArrived = { petId: 'sick', areaId: 'q2', areaName: 'Q2', startedAt: now + 2_700, endedAt: null };
+  const alsoThere = { petId: 'luna', areaId: 'q2', areaName: 'Q2', startedAt: now + 2_600, endedAt: null };
+
+  const naive = exposureWindow(now, 'moquillo', now);
+  assert.equal(
+    traceContacts([justArrived], [justArrived, alsoThere], naive).length,
+    0,
+    'this is the bug, reproduced: a window ending at the caller\'s now finds nobody',
+  );
+
+  const tolerant = exposureWindow(now, 'moquillo', now + CLOCK_SKEW_TOLERANCE_MS);
+  assert.deepEqual(
+    traceContacts([justArrived], [justArrived, alsoThere], tolerant).map((c) => c.petId),
+    ['luna'],
+  );
+});
+
+test('the tolerance is generous enough for a browser clock, not just a server one', () => {
+  // Minutes, not seconds. A phone's clock is what will ask this question.
+  assert.ok(CLOCK_SKEW_TOLERANCE_MS >= 60_000);
+});
+
+test('an ongoing contact reports no end, so the UI can say "sigue"', () => {
+  // Found in a browser, not in a test: the trace rendered a contact between
+  // two animals BOTH still in the pen as "24 ago → 24 ago", which reads as
+  // finished. It is the row a shelter must act on first.
+  const now = day(100);
+  const subject = [{ petId: 'sick', areaId: 'q2', areaName: 'Q2', startedAt: day(90), endedAt: null }];
+  const other = [{ petId: 'luna', areaId: 'q2', areaName: 'Q2', startedAt: day(92), endedAt: null }];
+
+  const [contact] = traceContacts(subject, other, exposureWindow(now, 'moquillo', now));
+  assert.equal(contact!.overlapEnd, null, 'neither animal has left');
+  assert.ok(contact!.overlapMs > 0, 'the duration is still measured to the window end');
+});
+
+test('a contact that really ended still reports its end', () => {
+  const now = day(100);
+  const subject = [{ petId: 'sick', areaId: 'q2', areaName: 'Q2', startedAt: day(90), endedAt: null }];
+  const other = [{ petId: 'toby', areaId: 'q2', areaName: 'Q2', startedAt: day(92), endedAt: day(95) }];
+
+  const [contact] = traceContacts(subject, other, exposureWindow(now, 'moquillo', now));
+  assert.equal(contact!.overlapEnd, day(95));
 });
 
 // ── the trace itself ────────────────────────────────────────────────────────
