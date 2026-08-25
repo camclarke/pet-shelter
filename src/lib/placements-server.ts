@@ -21,6 +21,7 @@
 import 'server-only';
 import { getAdminDb } from './firebase-admin';
 import {
+  CLOCK_SKEW_TOLERANCE_MS,
   exposureWindow,
   traceContacts,
   type ContactTrace,
@@ -146,7 +147,15 @@ export async function traceOutbreak(
   diagnosedAt: Date,
   now: Date = new Date(),
 ): Promise<OutbreakTrace> {
-  const window = exposureWindow(diagnosedAt.getTime(), pathogen, now.getTime());
+  // Nudged forward by the skew tolerance — the same reason as the browser
+  // twin in `areas-admin.ts`. A Cloud Run instance's clock is far closer to
+  // Firestore's than a phone's, but "closer" is not "identical", and the
+  // failure it prevents is a trace that silently reports no contacts.
+  const window = exposureWindow(
+    diagnosedAt.getTime(),
+    pathogen,
+    now.getTime() + CLOCK_SKEW_TOLERANCE_MS,
+  );
 
   const subject = await getPetPlacements(petId);
   const inWindow = subject.filter(

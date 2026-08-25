@@ -7,7 +7,17 @@
  */
 
 import type { Messages } from './messages';
-import type { MedicalRecordKind, PetSex, PetSize, PetStatus, Species } from '@/lib/types';
+import type {
+  AreaKind,
+  MedicalRecordKind,
+  PetSex,
+  PetSize,
+  PetStatus,
+  PlacementReason,
+  Species,
+} from '@/lib/types';
+import type { AreaError, PlacementWarning } from '@/lib/areas';
+import { MS_PER_DAY, type Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
@@ -122,6 +132,78 @@ const AUTH_ERROR: Record<AuthError, string> = {
   unknown: 'Algo salió mal. Intenta de nuevo en un momento.',
 };
 
+
+/**
+ * The five kinds of area, in the shelter's own vocabulary.
+ *
+ * ⚠️ `quarantine` and `isolation` are NOT synonyms and must never be worded
+ * as though they were. Quarantine holds healthy, newly arrived animals under
+ * observation; isolation holds sick or suspected ones. The ASV Guidelines for
+ * Standards of Care in Animal Shelters keep them separate because putting a
+ * sick animal into a quarantine pen exposes every healthy animal in it — and
+ * the only reason the software can warn about that is that the two are
+ * distinct here and in `AreaKind`.
+ */
+const AREA_KIND: Record<AreaKind, string> = {
+  quarantine: 'Cuarentena',
+  isolation: 'Aislamiento',
+  general: 'Población general',
+  medical: 'Área médica',
+  maternity: 'Maternidad',
+};
+
+const AREA_KIND_HINT: Record<AreaKind, string> = {
+  quarantine: 'Animalitos sanos recién llegados, en observación.',
+  isolation: 'Animalitos enfermos o sospechosos. Nunca junto a los sanos.',
+  general: 'El resto del refugio, ya con el alta del veterinario.',
+  medical: 'En tratamiento o recuperándose de una cirugía.',
+  maternity: 'Preñadas o con cría.',
+};
+
+const AREA_ERROR: Record<AreaError, string> = {
+  'name-required': 'Ponle el nombre que ustedes usan, como "Cuarentena 2" o "Patio A".',
+  'name-too-long': 'El nombre es muy largo. Usa máximo 60 caracteres.',
+  'name-duplicate':
+    'Ya existe un área con ese nombre. Si de verdad son dos áreas distintas, dales nombres distintos: si quedan dos fichas para el mismo corral, los animalitos se reparten entre las dos y ninguna muestra cuántos hay en realidad.',
+  'kind-required':
+    'Elige qué tipo de área es. De esto depende que el sistema avise cuando un animalito enfermo está por entrar donde hay sanos.',
+  'capacity-invalid':
+    'La capacidad tiene que ser un número entero mayor a cero. Si todavía no la han contado, déjala vacía.',
+};
+
+const PLACEMENT_REASON: Record<PlacementReason, string> = {
+  intake: 'Ingreso',
+  'quarantine-cleared': 'Alta veterinaria',
+  transfer: 'Traslado',
+  medical: 'Por tratamiento',
+  outbreak: 'Por brote',
+  exit: 'Salida',
+};
+
+/**
+ * ⚠️ Every one of these informs a decision; none of them blocks one. Plan
+ * section 3 is explicit that a gate stricter than the shelter's reality gets
+ * worked around, and the workaround is the WhatsApp group this system exists
+ * to replace. So the wording must never scold someone for a decision they are
+ * making with an animal already in their arms.
+ */
+const PLACEMENT_WARNING: Record<PlacementWarning, string> = {
+  'infectious-into-shared':
+    'Lo estás moviendo por enfermedad, pero esta área no es de aislamiento ni médica. Un animalito enfermo aquí expone a todos los sanos que ya están dentro.',
+  'over-capacity':
+    'Esta área ya está en su límite. Con más animalitos hay más contagio, más estrés y peor aire: la decisión es de ustedes, pero que sea sabiéndolo.',
+  'restarts-quarantine-clock':
+    'Ya hay animalitos en esta cuarentena. Al entrar uno nuevo, el tiempo de observación vuelve a empezar para todos los que ya estaban.',
+  'undocumented-clearance':
+    'Sale de cuarentena a población general sin registrar el alta. Si el veterinario ya lo revisó, elige "Alta veterinaria" para que quede quién lo autorizó.',
+  'area-inactive': 'Esta área está marcada como fuera de servicio.',
+};
+
+const PATHOGEN: Record<Pathogen, string> = {
+  parvovirus: 'Parvovirus',
+  moquillo: 'Moquillo (distemper)',
+};
+
 export const es: Messages = {
   locale: 'es-BO',
 
@@ -171,5 +253,41 @@ export const es: Messages = {
     const who = descriptors.length > 0 ? descriptors.join(', ') : 'sin datos aún';
     const from = origin ? `\nViene de: ${origin}` : '';
     return `${emoji} Nuevo ingreso en camino: ${who}${from}\nFicha: ${recordUrl}`;
+  },
+
+  areaKindLabel: (kind) => AREA_KIND[kind],
+
+  areaKindHint: (kind) => AREA_KIND_HINT[kind],
+
+  areaError: (error) => AREA_ERROR[error],
+
+  placementReasonLabel: (reason) => PLACEMENT_REASON[reason],
+
+  placementWarning: (warning) => PLACEMENT_WARNING[warning],
+
+  pathogenLabel: (pathogen) => PATHOGEN[pathogen],
+
+  occupancyLabel(count, capacity) {
+    // Without a capacity there is no ratio to show, and inventing one would be
+    // worse than saying nothing — the whole point of the number is to be
+    // compared against a limit somebody actually measured.
+    if (capacity === null) return `${count} ${count === 1 ? 'animalito' : 'animalitos'}`;
+    return `${count} de ${capacity}`;
+  },
+
+  daysAgoLabel(days) {
+    if (days <= 0) return 'hoy';
+    if (days === 1) return 'ayer';
+    return `hace ${days} días`;
+  },
+
+  contactDurationLabel(ms) {
+    const days = ms / MS_PER_DAY;
+    // Rounded DOWN, and "menos de un día" rather than "0 días": a contact that
+    // reads as zero looks like no contact at all, which is the one impression
+    // this list must never give.
+    if (days < 1) return 'menos de un día juntos';
+    const whole = Math.floor(days);
+    return `${whole} ${whole === 1 ? 'día' : 'días'} juntos`;
   },
 };

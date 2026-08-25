@@ -17,12 +17,20 @@ import Link from 'next/link';
 
 import { draftProgress, type PetDraft } from '@/lib/intake';
 import { listDrafts } from '@/lib/pets-admin';
+import { getOccupancyForAreas, listAreas } from '@/lib/areas-admin';
+import { shouldHaveOpenPlacement } from '@/lib/arrival';
 import { t } from '@/i18n';
 import type { Pet } from '@/lib/types';
 
 export function AdminDashboard() {
   const [drafts, setDrafts] = useState<PetDraft[] | null>(null);
   const [pets, setPets] = useState<Pet[] | null>(null);
+  /**
+   * Every pet with an OPEN placement, derived from one query per area
+   * rather than one per pet. Fifty animals would be fifty reads the other
+   * way round; six pens is six, and the answer is the same set.
+   */
+  const [placed, setPlaced] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -41,6 +49,10 @@ export function AdminDashboard() {
 
       setDrafts(draftList);
       setPets(petSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Pet));
+
+      const areas = await listAreas();
+      const open = await getOccupancyForAreas(areas.map((a) => a.id));
+      setPlaced(new Set(open.map((placement) => placement.petId)));
     } catch (caught) {
       console.error('[admin] could not load', caught);
       const code = (caught as { code?: string })?.code;
@@ -65,9 +77,14 @@ export function AdminDashboard() {
           <h1 className="t-title">Panel del refugio</h1>
           <p className="admin__sub">Registra un animalito nuevo o continúa una ficha a medias.</p>
         </div>
-        <Link href="/admin/intake" className="btn btn--action">
-          + Nuevo ingreso
-        </Link>
+        <div className="admin__header-actions">
+          <Link href="/admin/areas" className="btn btn--muted">
+            Áreas
+          </Link>
+          <Link href="/admin/intake" className="btn btn--action">
+            + Nuevo ingreso
+          </Link>
+        </div>
       </header>
 
       {error && (
@@ -112,10 +129,17 @@ export function AdminDashboard() {
           <ul className="admin-list__items">
             {pets.map((pet) => (
               <li key={pet.id} className="admin-list__item">
-                <Link href={`/adopt/${pet.slug}`}>
+                {/* The INTERNAL record, not the public dossier. Everything a
+                    volunteer does to an animal after publishing it — moving it
+                    between pens, tracing contacts — lives at this id, and the
+                    public slug is a different namespace on purpose. */}
+                <Link href={`/admin/pets/${pet.id}`}>
                   <strong>{pet.name}</strong>
                   <span className="t-data">
                     {t.statusLabel(pet.status)} · {t.formatMeta(pet)}
+                    {shouldHaveOpenPlacement(pet.status) && !placed.has(pet.id) && (
+                      <> · <span className="admin-list__flag">sin área</span></>
+                    )}
                   </span>
                 </Link>
               </li>
