@@ -70,6 +70,23 @@ export interface PetDraft {
    */
   ageUnknown: boolean;
 
+  /**
+   * Bounds behind an estimated age, when a photo suggestion produced one
+   * and the admin accepted it. Both null for a hand-typed age.
+   */
+  ageMonthsMin: number | null;
+  ageMonthsMax: number | null;
+
+  /**
+   * Which fields a vision model influenced, and which model.
+   *
+   * On the DRAFT rather than in component state for the same reason
+   * `chipConflict` is: the draft is persisted, so provenance survives a
+   * reload. Provenance that a refresh can erase is not provenance.
+   */
+  suggestedFields: string[];
+  suggestedByModel: string | null;
+
   status: PetStatus;
   hasMicrochip: boolean;
   microchipCode: string;
@@ -154,6 +171,12 @@ export function draftDefaults(id: string): PetDraft {
     ageYears: null,
     ageMonthsPart: null,
     ageUnknown: false,
+    ageMonthsMin: null,
+    ageMonthsMax: null,
+    // Empty by default: a hand-typed pet has no model provenance, and
+    // that should stay the common case.
+    suggestedFields: [],
+    suggestedByModel: null,
     // An animal being entered is at the shelter unless someone says otherwise.
     // NOT 'available': publishing to the wall is a decision, and defaulting to
     // it would make the safe path the one that requires extra clicks.

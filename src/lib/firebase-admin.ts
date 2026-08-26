@@ -13,6 +13,7 @@
 
 import { getApps, initializeApp, cert, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { getAuth, type Auth } from 'firebase-admin/auth';
 
 let app: App;
 
@@ -41,4 +42,17 @@ export function getAdminDb(): Firestore {
     dbInstance = getFirestore();
   }
   return dbInstance;
+}
+
+/**
+ * Admin Auth, for verifying ID tokens in route handlers.
+ *
+ * WARNING: a Next.js route handler runs OUTSIDE firestore.rules. Every other
+ * admin write in this project goes straight from the browser to Firestore and
+ * is gated by the rules; a route handler is not, so it must verify the caller
+ * itself. That is what this exists for. See src/app/api/intake/suggest/route.ts.
+ */
+export function getAdminAuth(): Auth {
+  init();
+  return getAuth();
 }
