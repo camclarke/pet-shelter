@@ -151,19 +151,73 @@ scanned chip resolves to a name and a phone call.
 
   All probe data removed and read back at zero: **0 pets, 0 areas, 0 drafts, 0 in every collection group, 0 bucket objects**, and the only auth account is the real admin. 142/142 tests, typecheck clean, build clean, 0 vulnerabilities in both trees.
 
+- **2026-08-26** — **PR #14 merged and deployed; step 5a is live — and the whole
+  session began by repairing a credential state that had broken three ways at
+  once.** `gcloud` was on the **work** account (`israel.rocha@trustcertllc.com`)
+  while `core/project` still read `wawitas` — the exact split this file warns
+  about, and the one that is dangerous precisely because the project id looks
+  right. ADC was dead with `invalid_grant` / `invalid_rapt`, which is the *work*
+  domain’s reauth policy talking, so ADC was holding the work identity too.
+  The Firebase CLI, the usual drifter, was the one store already correct.
+
+  **`gcloud auth application-default login` then failed twice with
+  `mismatching_state` (CSRF), and the cause is worth keeping.** The reflex is to
+  blame the browser and retry; the second identical failure is what made that
+  untenable. `netstat` showed **PID 10300 already LISTENING on 127.0.0.1:8085**,
+  gcloud’s OAuth callback port — and it was a *concurrent* `gcloud auth login`
+  (a different command), started one minute earlier in another terminal. Two
+  OAuth flows were sharing one callback port, so each received the other’s
+  `state` and rejected it. **A `mismatching_state` from gcloud is not always the
+  browser; check whether something else already owns port 8085.** Neither flow
+  can succeed until one of them is the only listener.
+
+  **The ADC identity was then verified at the userinfo endpoint, not at the
+  `quota_project_id` label** — that label is a string in the credential file and
+  has lied here before (2026-08-12: a work-account ADC carrying the id of a
+  project deleted minutes earlier). `oauth2/v3/userinfo` returned
+  `israel.rocha.clarke@gmail.com`, resolved projectId `wawitas`, and a real
+  Admin SDK read against live Firestore succeeded — which is the claim worth
+  having, since a token that merely parses proves nothing.
+
+  **Production was verified rather than inferred from a green pipeline.** The
+  deployed Cloud Run tag equals `git rev-parse HEAD` (`16082dab…`), both new
+  routes return 200 on both hosts, and — the part that actually settles it —
+  the served chunks carry copy only this build contains. The probe **validated
+  each needle against its own source file before trusting an absence**, which is
+  the discipline five consecutive broken probes earned. The result is stronger
+  than a presence check: `/admin/areas` carries `Capacidad` and `En servicio`
+  and **not** the movement copy, while `/admin/pets/{id}` carries `Registrar
+  movimiento`, `rastrear contactos` and `no hay movimientos registrados` and
+  **not** the areas copy. That clean per-route split is what correct code
+  splitting looks like and is not something a stale edge entry could fake.
+  Cache headers confirmed the 2026-08-24 finding in production: `/admin/areas`
+  (static) serves `s-maxage=300, stale-while-revalidate`, `/admin/pets/{id}`
+  (dynamic) serves `private, no-cache, no-store` — `revalidate` is inert there.
+  The homepage bundle split still holds: 9 chunks, 635 KB, and all five SDK
+  fingerprints absent.
+
+  **Two smaller findings.** (1) **`cat -A` under Git Bash did not show `^M` on
+  this CRLF file**, which reads as "the file is LF" and would have sent any
+  patch script matching `\r\n` down a dead end. Counting the bytes in Node gave
+  the truth — **1746 CRLF, 0 lone LF**. Measure line endings in Node here, the
+  same rule this file already carries for diffing rulesets. (2) **`petDrafts`
+  held 1 document again** — completely blank, no media, 0 Storage objects, the
+  same wizard-reset artefact cleared on 2026-08-24. It was left in place this
+  time because its `updatedAt` was ~2 hours old, so an `/admin/intake` tab may
+  have been open. `users` is 1 (the real admin) and every other collection and
+  collection group is 0.
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-24. STEP 5a — the arrival pipeline UI — is BUILT and
-PROVEN, and is sitting UNCOMMITTED in the working tree.** ⚠️ It has **not**
-been committed, pushed, or deployed: no branch, no PR, no Cloud Run revision.
-Everything below about it was proven locally and against live Firestore, never
-in production. See the 2026-08-24 log entry.
+**Last session: 2026-08-26. STEP 5a — the arrival pipeline UI — is MERGED,
+DEPLOYED, and VERIFIED SERVING IN PRODUCTION.** PR #14, merged at `16082da`;
+CI and Deploy both green; the deployed Cloud Run tag equals
+`git rev-parse HEAD`. Read the 2026-08-24 log entry for what it does and the
+2026-08-26 entry for the deploy and the credential recovery.
 
 The step before it — STEP 6, re-admission / dedup — is merged (PR #13,
-`f2f2042`) and deployed; the deployed Cloud Run tag equals `git rev-parse HEAD`
-as of `db760b8`.
+`f2f2042`) and deployed.
 
 **Build-order steps 1–6 including 5a are done. `pets` still holds 0 documents,
 and that is the whole remaining gap in step 3.** It is no longer a technical one: the
