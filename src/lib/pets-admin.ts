@@ -43,7 +43,9 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import type { FieldValue } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
+import type { Pet } from './types';
 
 import { getFirebase } from './firebase-client';
 import { normalizeMicrochipCode, validateMicrochip } from './microchip';
@@ -58,6 +60,28 @@ import {
   type ReadmissionPlan,
 } from './readmission';
 import { SHELTER } from '@/config/shelter';
+
+/**
+ * The exact shape written to `pets/{petId}`.
+ *
+ * WARNING: this type is the ONLY thing tying `Pet` to the code that writes
+ * it. Before it existed the write was an untyped object literal, so a field
+ * added to `Pet` produced a green typecheck and a document without it. Keep
+ * the write annotated — an inline literal silently opts out of the check.
+ *
+ * `id` is the document id, not a field. The timestamps are FieldValue
+ * sentinels going in and Timestamps coming out, which is why this cannot
+ * simply be `Pet`.
+ */
+type PetDocumentWrite = Omit<
+  Pet,
+  'id' | 'createdAt' | 'updatedAt' | 'extractedAt'
+> & {
+  createdAt: FieldValue;
+  updatedAt: FieldValue;
+  /** A sentinel on the way in, a Timestamp on the way out. */
+  extractedAt: FieldValue | null;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drafts
@@ -312,28 +336,45 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
   const petRef = doc(db, 'pets', draft.id);
 
   // ── public tier ──────────────────────────────────────────────────────────
-  batch.set(petRef, {
+  const ageMonths = toAgeMonths(draft.ageYears, draft.ageMonthsPart, draft.ageUnknown);
+
+  const publicTier: PetDocumentWrite = {
     slug,
-    species: draft.species,
+    species: draft.species!,
     name: draft.name.trim(),
     // Empty on a first intake. It fills in when an animal is renamed later —
     // and the dossier reads `.length` unguarded, so it must be an array now.
     formerNames: [],
     breed: draft.breed.trim(),
-    ageMonths: toAgeMonths(draft.ageYears, draft.ageMonthsPart, draft.ageUnknown),
+    ageMonths,
+    ageMonthsMin: draft.ageMonthsMin,
+    ageMonthsMax: draft.ageMonthsMax,
+    // A shelter almost never knows a birthdate, so any age it holds is an
+    // estimate. Only a vaccination card giving `birthdateApprox` would make
+    // this false, and nothing writes that yet. Presenting "18 meses" as
+    // though it were measured is exactly what this flag exists to prevent.
+    ageIsEstimate: ageMonths !== null,
     birthdateApprox: null,
-    sex: draft.sex,
-    size: draft.size,
+    sex: draft.sex!,
+    size: draft.size!,
     status: draft.status,
     hasMicrochip: draft.hasMicrochip,
     // Derived from the first uploaded photo, never typed. See uploadPetPhoto.
     coverPhoto: draft.media[0]?.url ?? null,
+    // Provenance: which fields a vision model influenced, if any. Empty for a
+    // hand-typed animal. This records INFLUENCE, not unreviewed writing — an
+    // admin accepted every value that reached here.
+    suggestedFields: draft.suggestedFields,
+    extractedByModel: draft.suggestedByModel,
+    extractedAt: draft.suggestedByModel ? serverTimestamp() : null,
     // Required by getWall(), which orders by it. A document missing the
     // ordered field is dropped from the query silently — it looks exactly
-    // like "no data", which is this project's most-repeated failure shape.
+    // like "no data", which is this repo’s most-repeated failure shape.
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  };
+
+  batch.set(petRef, publicTier);
 
   // ── authenticated tier ───────────────────────────────────────────────────
   batch.set(doc(petRef, 'detail', 'main'), {
