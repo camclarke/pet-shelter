@@ -77,8 +77,36 @@ export interface Pet {
 
   /** Breed, or the shelter's honest best guess. Most street rescues are mixes. */
   breed: string;
-  /** Age in months. Usually an estimate — shelters rarely know a birthdate. */
+  /**
+   * Age in months — the single value the public page renders ("18 meses").
+   * Usually an estimate; shelters rarely know a birthdate.
+   *
+   * ⚠️ When `ageIsEstimate` is true this is the MIDPOINT of
+   * `ageMonthsMin`..`ageMonthsMax`, not a known age. Render it through the
+   * i18n age helper rather than directly, so an estimate never appears as a
+   * fact on a listing a stranger is deciding from.
+   */
   ageMonths: number | null;
+
+  /**
+   * The bounds the estimate came from. Both null when the age is simply
+   * known, or simply unknown.
+   *
+   * These exist because tooth-based ageing is genuinely tight for puppies
+   * (deciduous eruption follows a schedule) and genuinely loose for adults
+   * (wear varies with diet and chewing — a street dog is not a house dog).
+   * Collapsing both cases to one integer throws away the difference between
+   * "about 5 months" and "somewhere between 2 and 6 years".
+   */
+  ageMonthsMin: number | null;
+  ageMonthsMax: number | null;
+
+  /**
+   * Whether `ageMonths` is an estimate rather than a known age. Defaults to
+   * true for anything a shelter guessed, which is nearly everything.
+   */
+  ageIsEstimate: boolean;
+
   /** Set only when genuinely known, e.g. from a vaccination card. */
   birthdateApprox: Timestamp | null;
 
@@ -95,6 +123,30 @@ export interface Pet {
 
   /** Single optimized cover image. The rest live in the gated detail document. */
   coverPhoto: string | null;
+
+  /**
+   * Which of this document’s fields a vision model influenced, by field
+   * name — e.g. `["species", "ageMonths"]`. Empty for a pet typed in by
+   * hand, which is the default and should stay the common case.
+   *
+   * ⚠️ A value here does NOT mean the field was written unreviewed. Nothing
+   * a model produces is stored without an admin accepting it — plan §4.8,
+   * the review gate is not optional. This records INFLUENCE, so that a
+   * later reader can tell "the vet said 18 months" from "a model read a
+   * wear photo", and so a bad model generation is scopeable after the fact.
+   * Without it that distinction is unrecoverable once the form is saved.
+   */
+  suggestedFields: string[];
+
+  /**
+   * WHICH model suggested, as a stable KEY — never the raw model id. Same
+   * reasoning as `MedicalRecord.extractedByModel`: ids churn every few
+   * months and an id written into a database can never be renamed, so an
+   * accuracy problem traced to one model generation would be unscopeable.
+   * e.g. "flash". Null when nothing was suggested.
+   */
+  extractedByModel: string | null;
+  extractedAt: Timestamp | null;
 
   createdAt: Timestamp;
   updatedAt: Timestamp;
