@@ -65,8 +65,9 @@ scanned chip resolves to a name and a phone call.
 | Arrival pipeline — model layer | ✅ **Built + tested 2026-08-16.** Statuses, `areas`, `placements`, rules, indexes. **Outbreak trace verified against live Firestore with known data**, not just deployed |
 | **Arrival pipeline — UI (step 5a)** | ✅ **BUILT + PROVEN AGAINST LIVE FIRESTORE AND IN A BROWSER 2026-08-24** — plan §13. `/admin/areas` (occupancy board + area editor) and `/admin/pets/{petId}` (where it is, where it has been, move / clear / release, and the outbreak trace). `src/lib/areas.ts` is pure (34 tests), `src/lib/areas-admin.ts` is the client Firestore layer. **No rules change and no index change were needed** — both were written 2026-08-16 and had simply never had a caller |
 | Veterinary record standards | ✅ **Researched 2026-08-16** — [`veterinary-records-standards.md`](docs/veterinary-records-standards.md). No international EMR standard exists; modelled on the EU passport + WSAVA 2024 |
-| **AI foundations (step 8)** | ✅ **Built 2026-08-26** — `src/lib/ai/`: provider, model ids with the key/id split, a bill-derived `pricing.mjs`, and `recordAiUsage` wired at the FIRST call site. ⛔ **No `GEMINI_API_KEY` exists yet**, so nothing has ever called Gemini |
-| **Photo-assisted intake** | ✅ **Built 2026-08-26, NOT yet exercised against a live model.** Photo at intake step 1 → species + age prefilled, breed/size/names offered. Pure policy layer in `src/lib/intake-suggestion.ts` (38 tests, all break-verified). **`sex` is absent from the schema by construction** — see the log |
+| **AI foundations (step 8)** | ✅ **MERGED + DEPLOYED 2026-08-26** (PR #15, `ee2e1df`) — `src/lib/ai/`: provider, model ids with the key/id split, a bill-derived `pricing.mjs`, and `recordAiUsage` wired at the FIRST call site. ⛔ **No `GEMINI_API_KEY` exists**, so nothing has ever called Gemini |
+| **Photo-assisted intake** | ✅ **MERGED + DEPLOYED + SERVING 2026-08-26** (PR #15) — but **INERT**: no API key, so `/api/intake/suggest` answers 503 and the manual form runs unchanged. Photo at step 1 → species + age prefilled, breed/size/names offered. Pure policy in `src/lib/intake-suggestion.ts` (38 tests, all break-verified). **`sex` is absent from the schema by construction** |
+| **First API route in the project** | ✅ `/api/intake/suggest`, deployed 2026-08-26. ⚠️ **A new surface class: it sits OUTSIDE `firestore.rules`**, so it verifies the ID token and admin claim itself. Auth boundary proven in production — 401/401/405 |
 | LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
 | LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
 | Arrival pipeline + shelter areas | ⬜ Planned, plan §13. Placement intervals for outbreak tracing, not a current-area field |
@@ -316,6 +317,44 @@ scanned chip resolves to a name and a phone call.
   the same 1 blank `petDraft` that was already there, deliberately left alone
   because an `/admin/intake` tab may be open on it. No probe data was created
   this session; every check was a read.
+- **2026-08-26** — **PR #15 merged and deployed; photo-assisted intake is
+  live in production and completely inert, which is exactly what was
+  intended.** Merged at `ee2e1df`. CI green on the PR head (`2c32352`),
+  Deploy green on the merge commit, every step including the pipeline’s own
+  verify, and the **deployed Cloud Run tag equals `git rev-parse HEAD`**.
+  Still **0 Gemini calls ever made** — there is no API key, so the feature
+  ships switched off and the manual intake form is unchanged.
+
+  **Production was verified rather than inferred from a green pipeline**, and
+  the probe validated all four needles against `PhotoSuggestions.tsx` before
+  trusting anything. All four are FOUND in the served `/admin/intake` bundle
+  (13 chunks, 1400 KB — up 11 KB from PR #13’s 1389 KB, the cost of the whole
+  panel). All eight route/host combinations return 200 with
+  `s-maxage=300, stale-while-revalidate`, so nothing inherited the year-long
+  Hosting cache defect. The homepage split still holds at 9 chunks / 635 KB
+  with all five SDK fingerprints absent.
+
+  **Two production-only properties were confirmed that no local check could
+  establish.** (1) **The Gemini key is not in the browser bundle** —
+  `GEMINI_API_KEY`, `generativelanguage` and `createGoogleGenerativeAI` are
+  all absent from the served chunks, so the `server-only` guard in
+  `src/lib/ai/google.ts` holds through a real `next build` on CI and not just
+  locally. (2) **The route’s auth boundary works in production**: no header
+  → 401, garbage token → 401, GET → 405, on **both** hosts.
+
+  **This project now has an API route, and that is a new surface class worth
+  naming.** Every admin action until today went browser → Firestore with
+  `firestore.rules` as the boundary and `AdminGate` as mere UX. Route handlers
+  are not covered by the rules at all. `/api/intake/suggest` verifies the ID
+  token and the `admin` claim itself with `checkRevoked: true`, and that check
+  IS the boundary — there is nothing behind it. Any future route handler
+  inherits this obligation, and the rules will not catch a lapse.
+
+  **Also confirmed:** `firestore.rules` really does end in an explicit
+  `match /{document=**} { allow read, write: if false; }`, so the claim in
+  `metered.ts` that `api_usage_daily` is protected by ABSENCE of a rule is
+  accurate rather than hopeful. Do not add a rule for that collection — one
+  could only widen access, and the Admin SDK bypasses rules anyway.
 ---
 
 ## Next session — start here
@@ -329,12 +368,13 @@ CI and Deploy both green; the deployed Cloud Run tag equals
 The step before it — STEP 6, re-admission / dedup — is merged (PR #13,
 `f2f2042`) and deployed.
 
-### ⛔ Photo-assisted intake is BUILT but has never called a model
+### ⛔ Photo-assisted intake is DEPLOYED but has never called a model
 
-On branch `feature/ai-intake-suggestions`, not merged. Everything compiles,
-typechecks, builds and passes 180/180 tests — and **not one Gemini call has
-ever been made from this project**, because no API key exists. Read that as
-"unfalsified", not "working". It is exactly the state this file warns about.
+**Merged and live** (PR #15, `ee2e1df`), serving on both hosts, deployed tag
+equal to HEAD. And **not one Gemini call has ever been made from this
+project**, because no API key exists — so the feature is shipped switched
+off. Read every claim about it as "unfalsified", not "working". It is
+exactly the state this file warns about, arrived at deliberately.
 
 **The one human step nobody can automate:** create a key at
 https://aistudio.google.com/apikey and put it in `.env.local` as
