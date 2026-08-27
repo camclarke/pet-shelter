@@ -65,10 +65,12 @@ scanned chip resolves to a name and a phone call.
 | Arrival pipeline — model layer | ✅ **Built + tested 2026-08-16.** Statuses, `areas`, `placements`, rules, indexes. **Outbreak trace verified against live Firestore with known data**, not just deployed |
 | **Arrival pipeline — UI (step 5a)** | ✅ **BUILT + PROVEN AGAINST LIVE FIRESTORE AND IN A BROWSER 2026-08-24** — plan §13. `/admin/areas` (occupancy board + area editor) and `/admin/pets/{petId}` (where it is, where it has been, move / clear / release, and the outbreak trace). `src/lib/areas.ts` is pure (34 tests), `src/lib/areas-admin.ts` is the client Firestore layer. **No rules change and no index change were needed** — both were written 2026-08-16 and had simply never had a caller |
 | Veterinary record standards | ✅ **Researched 2026-08-16** — [`veterinary-records-standards.md`](docs/veterinary-records-standards.md). No international EMR standard exists; modelled on the EU passport + WSAVA 2024 |
-| **AI foundations (step 8)** | ✅ **MERGED + DEPLOYED 2026-08-26** (PR #15, `ee2e1df`) — `src/lib/ai/`: provider, model ids with the key/id split, a bill-derived `pricing.mjs`, and `recordAiUsage` wired at the FIRST call site. ⛔ **No `GEMINI_API_KEY` exists**, so nothing has ever called Gemini |
+| **AI foundations (step 8)** | ✅ **MERGED + DEPLOYED 2026-08-26** (PR #15, `ee2e1df`) — `src/lib/ai/`: provider, model ids with the key/id split, a bill-derived `pricing.mjs`, and `recordAiUsage` wired at the FIRST call site. ✅ **A `GEMINI_API_KEY` now exists** in `.env.local` (gitignored, untracked) and all three model ids are **verified live** via `npm run ai:probe`. ⛔ Still **no call has ever gone through the APP path** — `api_usage_daily` is 0 |
 | **Photo-assisted intake** | ✅ **MERGED + DEPLOYED + SERVING 2026-08-26** (PR #15) — but **INERT**: no API key, so `/api/intake/suggest` answers 503 and the manual form runs unchanged. Photo at step 1 → species + age prefilled, breed/size/names offered. Pure policy in `src/lib/intake-suggestion.ts` (38 tests, all break-verified). **`sex` is absent from the schema by construction** |
 | **First API route in the project** | ✅ `/api/intake/suggest`, deployed 2026-08-26. ⚠️ **A new surface class: it sits OUTSIDE `firestore.rules`**, so it verifies the ID token and admin claim itself. Auth boundary proven in production — 401/401/405 |
 | LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
+| **Medical records (step 7)** | ✅ **MERGED + DEPLOYED + SERVING 2026-08-27** (PR #16, `365cbd0`) — `MedicalPanel.tsx`, `src/lib/medical.ts` (27 tests), `medical-admin.ts`. The **first writer `pets/{petId}/medical` has ever had**. Rules and both indexes were written 2026-08-02/08-16 and had never had a caller. ⛔ **No human has saved a record** — it is behind `AdminGate` |
+| **Voice dictation — model layer (step 11)** | ✅ **MERGED + DEPLOYED 2026-08-27** (PR #16) — `src/lib/dictation.ts` (29 tests), `src/lib/ai/dictate.ts`. Transcript + **two independent extractors that each read the AUDIO**. ⛔ **No model has heard one second of audio**, and there is **no review UI** |
 | LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
 | Arrival pipeline + shelter areas | ⬜ Planned, plan §13. Placement intervals for outbreak tracing, not a current-area field |
 | Food: donations → pot → rations | ⬜ Planned, plan §12. LLM parses, **deterministic code does the arithmetic** |
@@ -355,65 +357,216 @@ scanned chip resolves to a name and a phone call.
   `metered.ts` that `api_usage_daily` is protected by ABSENCE of a rule is
   accurate rather than hopeful. Do not add a rule for that collection — one
   could only widen access, and the Admin SDK bypasses rules anyway.
+- **2026-08-27** — **The key arrived, three models were benchmarked against it,
+  and PR #16 shipped veterinary dictation plus medical records. Merged at
+  `365cbd0`, deploy verified serving in production.** This entry covers two
+  sessions: the build, and the deploy check that followed it.
+
+  **A `GEMINI_API_KEY` finally exists**, in `.env.local` — confirmed
+  gitignored (`.gitignore:9`) and untracked. Note the code reads
+  **`GEMINI_API_KEY` only**: `src/lib/ai/google.ts` constructs the provider
+  with an explicit `apiKey`, so the `GOOGLE_GENERATIVE_AI_API_KEY` alias this
+  file used to insist on is **not required** and is not set. All three model
+  ids were then **verified live** by `npm run ai:probe` — the playbook's ids,
+  carried from the sibling stack on 2026-08-16 and never checked here, were
+  correct.
+
+  **Photo intake moved to `gemini-3.1-flash-lite`, and the reason is a
+  benchmark rather than a docs page.** Run against a live key on the real
+  extraction schema: `gemini-3.6-flash` 9570 ms / 1131 thinking tokens /
+  $0.009591, `gemini-3.5-flash` 18883 ms / 881 / $0.009220,
+  `gemini-3.1-flash-lite` **1230 ms / 0 thinking / $0.000317**. Same species,
+  life stage, size and purebred judgement from all three, comparable age
+  ranges, usable Spanish names. **30x cheaper and 8x faster for an equivalent
+  answer**, and the entire difference is that Flash-Lite does not reason by
+  default while thinking is billed at the *output* rate. `thinkingBudget: 0`
+  is **not** an escape — `gemini-3.6-flash` rejects it with HTTP 400, so
+  changing tier is the only way to stop paying for reasoning this task does not
+  need. Latency matters as much as cost: this runs while someone is standing in
+  a shelter with an animal in their arms, and 1.2 s against 9.6 s is the
+  difference between an accelerator and something people learn to skip. Two
+  price rows were **annotated rather than deleted** when `gemini-2.5-flash` and
+  `-lite` began 404ing as unavailable to new users — a deleted row means an
+  accidental call is costed at the Flash fallback, which is worse than an
+  unused row.
+
+  **Reasoning tokens were being dropped from every cost estimate** and are now
+  billed. That defect existed for exactly as long as the project had never
+  called a model, which is why it surfaced the moment one was called.
+
+  **Dictation's shape IS its safety design** (plan §4.7). Three calls: a
+  dedicated speech-to-text model produces the record of what was said, and
+  **two extractors on different tiers each read the AUDIO**. Both reading the
+  audio is the whole point — the error that harms an animal is a *mishearing*,
+  and two extractors sharing one transcript would agree perfectly on the same
+  wrong number while the consensus check waved it through. Independent acoustic
+  paths are what can catch *"medio mililitro"* against *"cinco mililitros"*.
+  A disputed dose or unit is **nulled, never resolved**: picking one
+  extractor's number would present a coin flip as a reading, and a null shows
+  up as something the vet must fill in. Medications only one extractor heard
+  are kept as singletons rather than dropped, and a lone surviving extractor is
+  compared against an *empty* extraction rather than against itself, so it
+  cannot manufacture confirmations out of a single opinion. **The plan
+  specified a hard block on critical disagreement; the owner chose flag-and-edit
+  on 2026-08-26**, recorded as a named constant carrying the reasoning and the
+  condition for reverting it rather than quietly softened.
+
+  **Medical records (step 7) is the first writer `pets/{petId}/medical` has
+  ever had** — the fourth time in this project a decision turned out to be
+  already made and merely uncalled. Rules written 2026-08-02, both composite
+  indexes deployed and READY since 2026-08-16, **no caller until now**, and
+  **no rules or index change was needed**. Errors block and clinical warnings
+  do not, and that split is the design: only structurally impossible things
+  stop a save, while a rabies vaccination recorded *before* the microchip, or
+  given under twelve weeks, is shown clearly and **stays saveable** — the
+  shelter is usually recording something that already happened at a municipal
+  campaign and cannot be changed, and a form that refuses the truth gets
+  replaced by a paper notebook. **A missing veterinarian or lot number is not
+  an incomplete record**: Bolivia's free national rabies campaign produces
+  exactly that shape and Cochabamba receives the country's largest allocation,
+  so any validation assuming those fields would have rejected the common case.
+  This also closes a gap the 2026-08-16 standards research left open — Reg.
+  (EU) 2026/131's twelve-week minimum is now checked, **three-state rather than
+  boolean**, so an unknown birthdate does not read as a violation when most
+  street rescues have none.
+
+  **The tests were broken on purpose and two of the failures were the tests.**
+  Thirteen medical rules broken, thirteen caught; fifteen dictation safety
+  rules broken, fourteen caught by name and the fifteenth found to be a
+  redundant guard `isFinite` already covers — documented as redundant rather
+  than pretending the line was covered. Two first-run failures were the
+  instrument: **the rabies-delay assertion compared against the same constant
+  the function uses**, a tautology that can never fail (the 21 days is now
+  pinned as a literal), and one break needle had the wrong indentation.
+
+  **The deploy was then verified rather than inferred from a green pipeline.**
+  Deployed Cloud Run tag `app:365cbd0a…` **equals `git rev-parse HEAD`**.
+  All **20** route/host combinations return 200. The bundle check validated
+  every needle against its own source file before trusting anything, and the
+  result is a **clean per-route split** a stale edge entry could not fake:
+  `/admin/pets/{id}` carries `Historial médico`, `Protege desde (opcional)`,
+  `Laboratorio (opcional)` and both new Spanish rabies warnings (13 chunks,
+  1391 KB), while `/admin/areas` carries **none** of them (13 chunks, 1352 KB).
+  Cache headers reconfirmed the 2026-08-24 finding in production: the static
+  routes serve `s-maxage=300, stale-while-revalidate`, `/admin/pets/{id}`
+  serves `private, no-cache, no-store` — `revalidate` is inert there. The
+  homepage split still holds at **9 chunks / 635 KB** with all five Firebase
+  fingerprints absent, and **`GEMINI_API_KEY`, `generativelanguage` and
+  `createGoogleGenerativeAI` are absent from every client chunk on every route
+  checked**, so the `server-only` guard holds through a real CI build. The
+  route's auth boundary still answers **401 / 401 / 405** on both hosts.
+
+  **The single most useful number this session is `api_usage_daily` = 0.**
+  `recordAiUsage` is wired into `intake-suggest.ts` and `dictate.ts`, and
+  `scripts/ai-probe.mjs` deliberately calls the model directly instead — so a
+  zero there is **measured proof that no AI call has ever gone through the app
+  path**, not merely an absence of evidence. Playbook §15 item 20 is still
+  unsatisfied: the feature is not shipped until the real flow ran on the real
+  deployment.
+
+  **Credentials were correct on arrival for the first time in three sessions**
+  — no repair needed. All three stores checked separately: `gcloud` on
+  `israel.rocha.clarke@gmail.com` / `wawitas`, the Firebase CLI on the same
+  account, and **ADC verified at the `oauth2/v3/userinfo` endpoint** rather
+  than at the `quota_project_id` label, which has lied here before. A real
+  Admin SDK read against live Firestore succeeded.
+
+  Verified at the end: **236/236 tests** (180 before), typecheck clean, and
+  Firestore unchanged — **0 pets, 0 areas, 0 adoptions, 1 user (the real
+  admin), 1 blank `petDraft` deliberately left alone, and 0 in every
+  collection group**. No probe data was created; every check was a read.
 ---
 
 ## Next session — start here
 
-**Last session: 2026-08-26. STEP 5a — the arrival pipeline UI — is MERGED,
-DEPLOYED, and VERIFIED SERVING IN PRODUCTION.** PR #14, merged at `16082da`;
-CI and Deploy both green; the deployed Cloud Run tag equals
-`git rev-parse HEAD`. Read the 2026-08-24 log entry for what it does and the
-2026-08-26 entry for the deploy and the credential recovery.
+**Last session: 2026-08-27. PR #16 is MERGED, DEPLOYED, and VERIFIED SERVING
+IN PRODUCTION** — merged at `365cbd0`, deployed Cloud Run tag equals
+`git rev-parse HEAD`, all 20 route/host combinations 200, and the served
+bundle carries copy only this build contains with a clean per-route split.
+Read the 2026-08-27 log entry first.
 
-The step before it — STEP 6, re-admission / dedup — is merged (PR #13,
-`f2f2042`) and deployed.
+It brought **step 7 (medical records)** and the **model layer of step 11
+(voice dictation)**, switched photo intake to `gemini-3.1-flash-lite` on a
+live benchmark, and fixed reasoning tokens being dropped from every cost
+estimate. Steps 1-8 including 5a and 6 are done.
 
-### ⛔ Photo-assisted intake is DEPLOYED but has never called a model
+**Credentials were correct on arrival and needed no repair** — but check them
+anyway, because they have broken at the start of three of the last five
+sessions. Verify the ADC *identity* at `oauth2/v3/userinfo`, never at the
+`quota_project_id` label, which has lied here before. `firebase login:list`
+is a separate check; it is a third credential store.
 
-**Merged and live** (PR #15, `ee2e1df`), serving on both hosts, deployed tag
-equal to HEAD. And **not one Gemini call has ever been made from this
-project**, because no API key exists — so the feature is shipped switched
-off. Read every claim about it as "unfalsified", not "working". It is
-exactly the state this file warns about, arrived at deliberately.
+### ⛔ The models have been called — but never from the APP
 
-**The one human step nobody can automate:** create a key at
-https://aistudio.google.com/apikey and put it in `.env.local` as
-`GEMINI_API_KEY` (and `GOOGLE_GENERATIVE_AI_API_KEY`, which some AI SDK paths
-read instead). `.env.example` documents both.
+**This section used to say no API key existed. That is now false.** A real
+`GEMINI_API_KEY` is in `.env.local` (gitignored, untracked), all three model
+ids are **verified live** via `npm run ai:probe`, and the photo-intake tier
+was chosen by a benchmark against that key rather than off a docs page.
 
-⚠️ **It is a REAL secret** — unlike every `NEXT_PUBLIC_FIREBASE_*` value,
-which are public by design. Never give it a `NEXT_PUBLIC_` alias, and do not
-remove the `server-only` import at the top of `src/lib/ai/google.ts`: that
-import is what makes a client component touching the key fail the BUILD
-rather than ship it. Measured 2026-08-26 — the key and `generativelanguage`
-are in the server build and absent from all 25 client chunks.
+**What is still NOT true is the claim that matters.** `api_usage_daily` holds
+**0 documents**, and that zero is *measured proof*, not an absence of
+evidence: `recordAiUsage` is wired into `intake-suggest.ts` and
+`dictate.ts`, while `scripts/ai-probe.mjs` deliberately calls the model
+directly and bypasses metering. So **no AI call has ever gone through the
+application path**, and no `[ai-usage]` line has ever been observed from it.
+
+Read the three AI features as follows, and say which claim you have:
+
+| Feature | Claim earned |
+|---|---|
+| **Photo intake** | Deployed, serving, benchmarked live. **Never driven through `/admin/intake` with a real photograph by a human** |
+| **Voice dictation** | Model + pure decision layers, 29 tests, deployed. **No model has heard one second of audio, and there is no review UI** |
+| **Medical records** | Deployed, renders, 27 tests. **No human has ever saved a record** — it is behind `AdminGate`, which needs a password |
+
+⚠️ **The key is a REAL secret** — unlike every `NEXT_PUBLIC_FIREBASE_*`
+value, which are public by design. Never give it a `NEXT_PUBLIC_` alias, and
+do not remove the `server-only` import at the top of `src/lib/ai/google.ts`:
+that import is what makes a client component touching the key fail the BUILD
+rather than ship it. Re-measured 2026-08-27 against the **served production
+bundle** — `GEMINI_API_KEY`, `generativelanguage` and
+`createGoogleGenerativeAI` are absent from every client chunk on the
+homepage, `/admin/areas` and `/admin/pets/{id}`.
+
+**One correction:** the code reads **`GEMINI_API_KEY` only**.
+`src/lib/ai/google.ts` builds the provider with an explicit `apiKey`, so the
+`GOOGLE_GENERATIVE_AI_API_KEY` alias this file used to insist on is **not
+required** and is not set.
 
 **Then, in order:**
 
-1. **Verify the model IDs.** `src/lib/ai/model-ids.ts` carries the playbook’s
-   IDs, which came from the sibling stack on 2026-08-16 and have never been
-   checked against a live API here. All three are env-overridable so a churned
-   ID is a config change, not a deploy.
-2. **Drive one real photo through `/admin/intake`** and find the `[ai-usage]`
-   log line proving the call happened and was metered. Playbook §15 item 20:
-   the feature is not shipped until the real flow ran on the real deployment.
-3. **Re-derive the price table from an actual invoice.** `pricing.mjs` is
+1. **Drive one real photo through `/admin/intake`** and find the
+   `[ai-usage]` log line proving the call happened and was metered. Playbook
+   §15 item 20: the feature is not shipped until the real flow ran on the real
+   deployment. This needs a human to sign in — the panel is behind
+   `AdminGate`.
+2. **Record ~30 s of Spanish audio with a dose spoken aloud** — ideally
+   *"medio mililitro"*, the exact pair the two-extractor consensus exists to
+   catch — and benchmark dictation against it. Nothing is known about its real
+   behaviour until then.
+3. **Build the dictation review UI**, once there is audio to test against.
+4. **Re-derive the price table from an actual invoice.** `pricing.mjs` is
    bill-derived from the SIBLING stack, which makes it a hypothesis here. The
-   sibling under-reported spend ~9× with plausible proxies.
-4. **Deploying needs Terraform, not a CI flag.** `GEMINI_API_KEY` is a RUNTIME
-   env var (contrast `NEXT_PUBLIC_*`, which `next build` inlines as build
-   args). Terraform owns the Cloud Run env list, so it belongs in Secret
-   Manager and in `terraform/`. **Never** add `--set-env-vars` to `deploy.yml`
-   — a CI-injected var Terraform does not declare is planned for deletion on
-   every apply. Secret Manager is currently EMPTY; this would be its first
-   secret.
+   sibling under-reported spend ~9x with plausible proxies. The benchmark
+   figures in the 2026-08-27 log entry are the first real numbers.
+5. **Production `GEMINI_API_KEY` needs Terraform, not a CI flag.** It is a
+   RUNTIME env var (contrast `NEXT_PUBLIC_*`, which `next build` inlines as
+   build args). Terraform owns the Cloud Run env list, so it belongs in Secret
+   Manager and in `terraform/`. **Never** add `--set-env-vars` to
+   `deploy.yml` — a CI-injected var Terraform does not declare is planned for
+   deletion on every apply. **Secret Manager is currently EMPTY; this would be
+   its first secret, and it is THREE steps, not one:** create the secret, add
+   the version carrying the value, *then* bind it to Cloud Run. A
+   `version = "latest"` binding applied in the same pass as an empty secret
+   makes the revision fail to boot.
 
-**Until the key exists the feature degrades politely and that is deliberate:**
-`/api/intake/suggest` answers 503, the wizard shows the manual form and says
-suggestions are unavailable. Admitting an animal never depends on it — plan
-§3’s rule that a gate stricter than the shelter’s reality gets worked around.
+**In production the feature is still switched off, and that is deliberate:**
+no key reaches Cloud Run, so `/api/intake/suggest` answers 503 to an
+authenticated admin and the wizard shows the manual form. Admitting an animal
+never depends on it, by design: plan §3 holds that a gate stricter than the
+reality of the shelter gets worked around. The auth boundary in front of it was re-verified
+2026-08-27: **401 / 401 / 405** on both hosts.
 
-**Build-order steps 1–6 including 5a are done. `pets` still holds 0 documents,
+**Build-order steps 1-8 including 5a, 6 and 7 are done. `pets` still holds 0 documents,
 and that is the whole remaining gap in step 3.** It is no longer a technical one: the
 shelter's animal and photograph are what is missing, and the way in is a form
 at **https://wawitas.org/admin/intake**.
