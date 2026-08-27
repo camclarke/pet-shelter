@@ -1076,6 +1076,47 @@ textarea {
   font-size: 12px;
 }
 
+/* ---- photo suggestions (intake step 1) ---------------------------------- */
+/* The accelerator panel. Visually recessed on purpose: it is optional, and it
+   must not read as the main event on a form whose real job is the shelter
+   entering what it already knows. */
+.admin-suggest {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream-2);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.admin-suggest__result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-self: stretch;
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.admin-suggest__applied {
+  margin: 0;
+}
+
+.admin-suggest__offers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.admin-suggest__withheld {
+  margin: 0;
+  padding-left: var(--space-2);
+}
+
 /* ---- forms -------------------------------------------------------------- */
 .admin-form {
   display: flex;

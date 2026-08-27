@@ -66,8 +66,28 @@ export interface Messages {
    */
   pastParticiple(stem: 'identificad' | 'conocid' | 'perdid', sex: PetSex): string;
 
+  /**
+   * "mestizo" / "mestiza" — the honest breed for most street rescues.
+   *
+   * Takes `sex` and NOT an optional sex, deliberately. A vision model is
+   * never asked for sex (it cannot see it, and a wrong guess breaks gender
+   * agreement across the whole site), so the word cannot even be SPELLED
+   * until a human supplies it. Making that a required argument turns the
+   * constraint into a compile error rather than a "mestizo/a" fudge
+   * reaching a public listing.
+   */
+  mixedBreed(sex: PetSex): string;
+
   /** "3 meses", "1 año", "edad desconocida". */
   formatAge(ageMonths: number | null): string;
+
+  /**
+   * "entre 4 y 7 meses", "entre 8 meses y 1 año".
+   *
+   * For an ESTIMATED age, where presenting the midpoint alone would state
+   * a guess as a fact.
+   */
+  formatAgeRange(minMonths: number, maxMonths: number): string;
 
   /** The uppercase data line under a name: "3 MESES · MACHO · MEDIANO". */
   formatMeta(pet: { ageMonths: number | null; sex: PetSex; size: PetSize }): string;
