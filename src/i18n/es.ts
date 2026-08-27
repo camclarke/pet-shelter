@@ -7,6 +7,7 @@
  */
 
 import type { Messages } from './messages';
+import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type {
   AreaKind,
   MedicalRecordKind,
@@ -75,6 +76,27 @@ const MEDICAL_KIND: Record<MedicalRecordKind, string> = {
   treatment: 'Tratamiento',
   sterilization: 'Esterilización',
   serology: 'Serología',
+};
+
+const MEDICAL_ERROR: Record<MedicalError, string> = {
+  'kind-required': 'Elegí qué tipo de registro es.',
+  'name-required': 'Escribí qué se aplicó o qué se hizo. Por ejemplo «Rabia» o «Quíntuple».',
+  'performed-required': 'Falta la fecha en que se hizo.',
+  'performed-in-future': 'Esa fecha todavía no llegó. Revisá el día.',
+  'due-before-performed': 'La próxima dosis no puede ser antes de la que se aplicó.',
+  'valid-until-before-valid-from':
+    'La protección no puede terminar antes de empezar. Revisá las dos fechas.',
+};
+
+const MEDICAL_WARNING: Record<MedicalWarning, string> = {
+  'rabies-before-microchip':
+    'La antirrábica figura ANTES de la colocación del microchip. Para viajar a la Unión Europea eso anula la vacuna: haría falta repetirla después del chip. Igual podés guardar el registro tal como pasó.',
+  'rabies-under-age':
+    'El animalito habría tenido menos de 12 semanas al momento de la antirrábica. Es el mínimo que exige la norma europea. Guardalo igual si así fue.',
+  'rabies-no-valid-from':
+    'Falta desde cuándo protege. En la antirrábica la protección empieza 21 días después de la dosis, y esa es la fecha que vale en un cruce de frontera.',
+  'vaccination-no-next-due':
+    'No pusiste cuándo toca la próxima. Sin eso no va a aparecer en los recordatorios.',
 };
 
 const MICROCHIP_ERROR: Record<MicrochipError, string> = {
@@ -257,6 +279,10 @@ export const es: Messages = {
   statusLabel: (status) => STATUS[status],
 
   medicalKindLabel: (kind) => MEDICAL_KIND[kind],
+
+  medicalError: (error) => MEDICAL_ERROR[error],
+
+  medicalWarning: (warning) => MEDICAL_WARNING[warning],
 
   microchipError: (error) => MICROCHIP_ERROR[error],
 

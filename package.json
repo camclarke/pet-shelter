@@ -15,9 +15,11 @@
     "//seed:pet": "Publish one pet: validates the document, strips EXIF from the photo, uploads it, and DERIVES coverPhoto from the upload. See scripts/seed-pet.mjs. Usage: npm run seed:pet -- seed/luna.json",
     "seed:pet": "node scripts/seed-pet.mjs",
     "//test": "node --test globs do not work on Node 20, so every test file is named explicitly. Revisit when this machine moves to Node 22.",
-    "test": "node --test --import tsx src/lib/__tests__/microchip.test.ts src/lib/__tests__/placements.test.ts src/lib/__tests__/arrival.test.ts src/lib/__tests__/intake.test.ts src/lib/__tests__/readmission.test.ts src/lib/__tests__/areas.test.ts src/lib/__tests__/intake-suggestion.test.ts src/lib/__tests__/pricing.test.ts",
+    "test": "node --test --import tsx src/lib/__tests__/microchip.test.ts src/lib/__tests__/placements.test.ts src/lib/__tests__/arrival.test.ts src/lib/__tests__/intake.test.ts src/lib/__tests__/readmission.test.ts src/lib/__tests__/areas.test.ts src/lib/__tests__/intake-suggestion.test.ts src/lib/__tests__/pricing.test.ts src/lib/__tests__/dictation.test.ts src/lib/__tests__/medical.test.ts",
     "//grant:admin": "Grant/revoke the admin custom auth claim, the thing firestore.rules and storage.rules gate every write on. Needs GOOGLE_CLOUD_PROJECT set. Usage: npm run grant:admin -- someone@example.com  |  -- --list",
-    "grant:admin": "node scripts/grant-admin.mjs"
+    "grant:admin": "node scripts/grant-admin.mjs",
+  "//ai:probe": "Verify the Gemini setup: is there a key, does it work, and do the model IDs in src/lib/ai/model-ids.ts actually exist for that key? Those IDs came from a SIBLING project and have never been checked here. Never prints the key. Usage: npm run ai:probe  |  -- --call",
+  "ai:probe": "node scripts/ai-probe.mjs"
   },
   "engines": {
     "node": ">=20.9.0"

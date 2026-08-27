@@ -18,7 +18,12 @@ export declare function estimateCostUsd(args: {
   model: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** Billed at the OUTPUT rate. Omitting these under-reports badly. */
+  reasoningTokens?: number;
   groundingRequests?: number;
 }): number;
 
 export declare function hasPricingRow(model: string): boolean;
+
+/** Callable with this key but lacking a bill-derived price row. */
+export declare const UNPRICED_BUT_AVAILABLE: readonly string[];

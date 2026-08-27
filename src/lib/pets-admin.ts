@@ -250,10 +250,23 @@ export async function stripAndResize(file: File): Promise<Blob> {
  * cover URL is DERIVED here and never typed by hand, the same rule
  * `scripts/seed-pet.mjs` enforces.
  */
-export async function uploadPetPhoto(petId: string, file: File): Promise<DraftMedia> {
+/**
+ * Upload bytes that have ALREADY been through stripAndResize().
+ *
+ * Exists so a caller that needs the processed bytes for something else —
+ * photo-assisted intake sends them to Gemini — can strip ONCE and use the
+ * same Blob for both, instead of stripping twice or, far worse, sending the
+ * original somewhere while storing the stripped copy.
+ *
+ * ⚠️ Never pass a raw File here. The whole EXIF/GPS guarantee lives in
+ * stripAndResize(); this function assumes it has already run.
+ */
+export async function uploadProcessedPhoto(
+  petId: string,
+  processed: Blob,
+): Promise<DraftMedia> {
   const { storage } = getFirebase();
 
-  const processed = await stripAndResize(file);
   const dimensions = await readDimensions(processed);
 
   const id = crypto.randomUUID();
@@ -264,6 +277,10 @@ export async function uploadPetPhoto(petId: string, file: File): Promise<DraftMe
   const url = await getDownloadURL(storageRef);
 
   return { id, path, url, alt: '', ...dimensions };
+}
+
+export async function uploadPetPhoto(petId: string, file: File): Promise<DraftMedia> {
+  return uploadProcessedPhoto(petId, await stripAndResize(file));
 }
 
 /**
