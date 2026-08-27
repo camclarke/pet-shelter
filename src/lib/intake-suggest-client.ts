@@ -29,9 +29,19 @@ export interface SuggestOutcome {
 
 const NOTHING: SuggestOutcome = { suggestion: null, modelKey: null, failure: 'failed' };
 
+/**
+ * ⚠️ `processed` MUST be the output of stripAndResize(), never a raw File.
+ *
+ * This call sends the photograph to a third party. A phone photo carries
+ * EXIF GPS, and a photo taken in a foster home therefore carries a
+ * volunteer’s home address — which is concern #2 in CLAUDE.md arriving
+ * through the image pipeline rather than through the location field. The
+ * stripped copy is also smaller (1600px long edge), so this is cheaper and
+ * faster too, but the reason is privacy.
+ */
 export async function requestSuggestion(
   user: User,
-  file: File
+  processed: Blob
 ): Promise<SuggestOutcome> {
   try {
     // Not forced: a forced refresh costs a round-trip on every photo, and
@@ -40,7 +50,9 @@ export async function requestSuggestion(
     const token = await user.getIdToken();
 
     const body = new FormData();
-    body.append('photo', file);
+    // A filename is required for the server to see this as a File rather
+    // than a bare Blob. stripAndResize always emits JPEG.
+    body.append('photo', processed, 'photo.jpg');
 
     const res = await fetch('/api/intake/suggest', {
       method: 'POST',

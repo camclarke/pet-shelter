@@ -32,11 +32,27 @@ export const PRO_MODEL =
   process.env.GEMINI_PRO_MODEL?.trim() || 'gemini-3.1-pro-preview';
 
 /**
+ * Dedicated speech-to-text, for the veterinary dictation transcript.
+ *
+ * A purpose-built ASR rather than a general multimodal model, for two
+ * reasons that matter to plan §4.7: it returns WORD TIMESTAMPS, which let a
+ * reviewer click a dose and hear the vet say that word instead of replaying
+ * four minutes of audio; and it diarises, so the vet is separable from an
+ * owner or assistant talking over them.
+ *
+ * ⚠️ This produces the RECORD of what was said. It is never the input to
+ * the extractors — see the header of `src/lib/dictation.ts` for why feeding
+ * one transcript to two extractors defeats the whole consensus design.
+ */
+export const TRANSCRIBE_MODEL =
+  process.env.GEMINI_TRANSCRIBE_MODEL?.trim() || 'gemini-3.5-transcribe';
+
+/**
  * Stable keys. These are PERSISTED — on `Pet.extractedByModel`, and on
  * `MedicalRecord.extractedByModel` when step 7 lands. Adding a key is cheap;
  * renaming one is a backfill.
  */
-export type ModelKey = 'flash' | 'flash-lite' | 'pro';
+export type ModelKey = 'flash' | 'flash-lite' | 'pro' | 'transcribe';
 
 export interface ModelConfig {
   id: string;
@@ -50,6 +66,7 @@ export const MODELS: Record<ModelKey, ModelConfig> = {
   flash: { id: FLASH_MODEL, label: 'Estándar', supportsVision: true },
   'flash-lite': { id: FLASH_LITE_MODEL, label: 'Rápido', supportsVision: true },
   pro: { id: PRO_MODEL, label: 'Detallado', supportsVision: true },
+  transcribe: { id: TRANSCRIBE_MODEL, label: 'Transcripción', supportsVision: false },
 };
 
 /** Resolve a persisted key to the ID to call today. */
