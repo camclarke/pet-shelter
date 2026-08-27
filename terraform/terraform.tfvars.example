@@ -17,6 +17,22 @@ environment = "production"
 # also creating its own pool is handing deploy rights to the original repo.
 github_repository = "camclarke/pet-shelter"
 
+# Whether Cloud Run reads GEMINI_API_KEY from Secret Manager.
+#
+# LEAVE THIS FALSE until a secret VERSION exists. Secret Manager secrets are
+# created empty, and Cloud Run resolves "latest" when a revision starts — so
+# binding an empty secret fails the startup probe, and traffic is pinned to
+# LATEST, which makes that a live outage rather than a failed deploy.
+#
+# The order is: apply (creates the empty secret) -> add the version with
+# `gcloud secrets versions add gemini-api-key --data-file=-` -> set this true
+# and apply again. terraform/secrets.tf carries the full runbook.
+#
+# False is a supported steady state, not a half-finished one: with no key the
+# app answers 503 from /api/intake/suggest and the manual intake form works
+# unchanged.
+gemini_api_key_enabled = false
+
 # BOOTSTRAP ONLY. Cloud Run cannot be created without an image, so this must
 # name a tag that already exists at the first apply — Terraform does not build
 # images, and `plan` never checks that the reference resolves.

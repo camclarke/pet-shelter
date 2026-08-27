@@ -61,6 +61,30 @@ resource "google_cloud_run_v2_service" "app" {
         value = var.project_id
       }
 
+      # The Gemini API key, read from Secret Manager at revision start.
+      #
+      # Gated on a variable rather than simply written, because the binding and
+      # the secret's first version cannot land in the same apply: the secret is
+      # created empty, and a revision that cannot resolve "latest" fails its
+      # startup probe while traffic is pinned to LATEST. See terraform/secrets.tf
+      # for the three-step runbook.
+      #
+      # Contrast the NEXT_PUBLIC_* values below: those are build args, not env
+      # vars. This one is a genuine runtime secret and must never be given a
+      # NEXT_PUBLIC_ prefix — that would compile it into the browser bundle.
+      dynamic "env" {
+        for_each = var.gemini_api_key_enabled ? [1] : []
+        content {
+          name = "GEMINI_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.gemini_api_key.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       # The rest of the NEXT_PUBLIC_* Firebase web config, the Maps key, and
       # the App Check site key are intentionally NOT set here. They are
       # public values baked in at *build* time (see Dockerfile's ARGs), not
