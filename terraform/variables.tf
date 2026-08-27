@@ -71,6 +71,32 @@ variable "github_repository" {
   default     = "camclarke/pet-shelter"
 }
 
+variable "gemini_api_key_enabled" {
+  description = <<-EOT
+    Whether Cloud Run should read GEMINI_API_KEY from Secret Manager.
+
+    This exists ONLY to enforce an ordering, and it defaults to false for a
+    reason worth reading before flipping it.
+
+    Secret Manager secrets are created empty. Cloud Run resolves a
+    `version = "latest"` binding when a revision starts, so binding a secret
+    that has no version yet makes the revision fail its startup probe. Traffic
+    is pinned to LATEST, so that is a live outage on wawitas.org rather than a
+    failed deploy sitting off to one side.
+
+    Set this to true only AFTER a version exists. Confirm with:
+
+      gcloud secrets versions list gemini-api-key --project=wawitas
+
+    Leaving it false is a supported state, not a half-finished one: the app
+    degrades politely with no key, answering 503 from /api/intake/suggest while
+    the manual intake form works unchanged. See terraform/secrets.tf for the
+    full three-step runbook.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "container_image" {
   description = <<-EOT
     Full Artifact Registry image reference to deploy, e.g.
