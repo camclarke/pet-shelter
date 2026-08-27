@@ -26,6 +26,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import { useAuth } from '@/components/AuthProvider';
+import { formatDate, parseDateInput, todayInputValue } from '@/lib/date-input';
+import MedicalPanel from './MedicalPanel';
 import {
   placementWarnings,
   summarizeArea,
@@ -59,35 +61,8 @@ const REASONS: PlacementReason[] = [
 
 const PATHOGENS: Pathogen[] = ['moquillo', 'parvovirus'];
 
-/** `YYYY-MM-DD` in the browser's own timezone, for a date input's default. */
-function todayInputValue(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-}
-
-/**
- * A `YYYY-MM-DD` field value as a local-midday Date.
- *
- * Midday rather than midnight, and local rather than UTC. `new Date('2026-08-24')`
- * parses as UTC midnight, which in Bolivia (UTC-4) is the 23rd at 20:00 — so a
- * date the vet picked would silently shift the whole exposure window by a day,
- * in the direction that drops contacts off the end of it.
- */
-function parseDateInput(value: string): Date {
-  const parts = value.split('-').map(Number);
-  const [year, month, day] = parts;
-  if (parts.length !== 3 || !year || !month || !day) return new Date();
-  return new Date(year, month - 1, day, 12, 0, 0);
-}
-
-function formatDate(ms: number): string {
-  return new Date(ms).toLocaleDateString('es-BO', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
+// Date helpers live in `@/lib/date-input`, shared with the medical form.
+// They carry a timezone trap worth reading before touching either caller.
 
 export function PetAdminPanel({ petId }: { petId: string }) {
   const { user } = useAuth();
@@ -378,6 +353,12 @@ export function PetAdminPanel({ petId }: { petId: string }) {
           </form>
         )}
       </section>
+
+      {/* ── medical history: build-order step 7 ───────────────────────────── */}
+      <MedicalPanel
+        petId={petId}
+        birthdateApprox={pet?.birthdateApprox ? pet.birthdateApprox.toMillis() : null}
+      />
 
       {/* ── the history ──────────────────────────────────────────────────── */}
       <section className="admin-list">
