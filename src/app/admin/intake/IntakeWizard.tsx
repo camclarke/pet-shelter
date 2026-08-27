@@ -80,6 +80,8 @@ import {
 } from '@/lib/readmission';
 import { formatMicrochipCode, validateMicrochip, type MicrochipError } from '@/lib/microchip';
 import type { PetSex, PetSize, PetStatus, Species } from '@/lib/types';
+import { requestSuggestion, type SuggestOutcome } from '@/lib/intake-suggest-client';
+import PhotoSuggestions from './PhotoSuggestions';
 import { t } from '@/i18n';
 
 const STEPS: { key: IntakeStep; label: string }[] = [
@@ -168,6 +170,14 @@ export function IntakeWizard() {
   } | null>(null);
   /** True once the admin edits the slug by hand, so we stop deriving it. */
   const [slugTouched, setSlugTouched] = useState(false);
+
+  /**
+   * The photo accelerator. `suggesting` is separate from `busy` on purpose:
+   * `busy` disables the whole form, and a model call that takes 20 seconds
+   * must not lock an admin out of typing the name they already know.
+   */
+  const [suggestOutcome, setSuggestOutcome] = useState<SuggestOutcome | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
 
   /**
    * The chip lookup — plan section 3.1.
@@ -373,6 +383,85 @@ export function IntakeWizard() {
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Take one photo, keep it, and ask what can be seen in it.
+   *
+   * ⚠️ The UPLOAD happens first and the model call second, and the order is
+   * load-bearing. The photograph is the durable thing — an animal in front
+   * of someone right now — and a model timeout must never lose it. If the
+   * suggestion fails the photo is already saved and already the cover.
+   */
+  async function handleSuggestPhoto(file: File) {
+    if (!user || !draft) return;
+    setSuggesting(true);
+    setError(null);
+    setSuggestOutcome(null);
+    try {
+      const uploaded = await uploadPetPhoto(draft.id, file);
+      let next: PetDraft = { ...draft, media: [...draft.media, uploaded] };
+      setDraft(next);
+      await saveDraft(next);
+
+      const outcome = await requestSuggestion(user, file);
+      setSuggestOutcome(outcome);
+
+      const s = outcome.suggestion;
+      if (!s) return;
+
+      // Only the two fields the policy marks `prefill` are applied here.
+      // Breed, size and names are buttons — see PhotoSuggestions.
+      const patch: Partial<PetDraft> = {};
+      const applied: string[] = [];
+
+      if (s.species) {
+        patch.species = s.species;
+        applied.push('species');
+      }
+
+      if (!s.age.refused && s.age.ageMonths !== null) {
+        patch.ageYears = Math.floor(s.age.ageMonths / 12);
+        patch.ageMonthsPart = s.age.ageMonths % 12;
+        // The bounds travel with it. Without them the public page would
+        // render the midpoint as though it were a known age.
+        patch.ageMonthsMin = s.age.ageMonthsMin;
+        patch.ageMonthsMax = s.age.ageMonthsMax;
+        patch.ageUnknown = false;
+        applied.push('ageMonths');
+      }
+
+      if (applied.length > 0) {
+        next = {
+          ...next,
+          ...patch,
+          suggestedFields: [...new Set([...next.suggestedFields, ...applied])],
+          suggestedByModel: outcome.modelKey,
+        };
+        setDraft(next);
+        await saveDraft(next);
+      }
+    } catch (caught) {
+      report(caught);
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  /**
+   * Accept one offered suggestion, recording that a model influenced it.
+   *
+   * Provenance is written at the moment of ACCEPTANCE rather than when the
+   * suggestion arrived, because a suggestion nobody took did not influence
+   * anything and should not be recorded as if it had.
+   */
+  function acceptSuggested(patch: Partial<PetDraft>, field: string) {
+    if (!draft) return;
+    update({
+      ...patch,
+      suggestedFields: [...new Set([...draft.suggestedFields, field])],
+      suggestedByModel: suggestOutcome?.modelKey ?? draft.suggestedByModel,
+    });
   }
 
   function setAlt(id: string, alt: string) {
@@ -768,6 +857,22 @@ export function IntakeWizard() {
       {/* ── step 1: identity ───────────────────────────────────────────────── */}
       {step === 'identity' && (
         <section className="admin-form">
+          <PhotoSuggestions
+            outcome={suggestOutcome}
+            busy={suggesting}
+            disabled={busy}
+            sex={draft.sex}
+            onPick={(file) => void handleSuggestPhoto(file)}
+            onApplyBreed={(breed) => acceptSuggested({ breed }, 'breed')}
+            onApplySize={(size) => acceptSuggested({ size }, 'size')}
+            onApplyName={(name) =>
+              acceptSuggested(
+                slugTouched ? { name } : { name, slug: slugify(name) },
+                'name',
+              )
+            }
+          />
+
           <label className="auth__field">
             <span className="t-label">Nombre</span>
             <input

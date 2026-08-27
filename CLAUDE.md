@@ -65,6 +65,8 @@ scanned chip resolves to a name and a phone call.
 | Arrival pipeline — model layer | ✅ **Built + tested 2026-08-16.** Statuses, `areas`, `placements`, rules, indexes. **Outbreak trace verified against live Firestore with known data**, not just deployed |
 | **Arrival pipeline — UI (step 5a)** | ✅ **BUILT + PROVEN AGAINST LIVE FIRESTORE AND IN A BROWSER 2026-08-24** — plan §13. `/admin/areas` (occupancy board + area editor) and `/admin/pets/{petId}` (where it is, where it has been, move / clear / release, and the outbreak trace). `src/lib/areas.ts` is pure (34 tests), `src/lib/areas-admin.ts` is the client Firestore layer. **No rules change and no index change were needed** — both were written 2026-08-16 and had simply never had a caller |
 | Veterinary record standards | ✅ **Researched 2026-08-16** — [`veterinary-records-standards.md`](docs/veterinary-records-standards.md). No international EMR standard exists; modelled on the EU passport + WSAVA 2024 |
+| **AI foundations (step 8)** | ✅ **Built 2026-08-26** — `src/lib/ai/`: provider, model ids with the key/id split, a bill-derived `pricing.mjs`, and `recordAiUsage` wired at the FIRST call site. ⛔ **No `GEMINI_API_KEY` exists yet**, so nothing has ever called Gemini |
+| **Photo-assisted intake** | ✅ **Built 2026-08-26, NOT yet exercised against a live model.** Photo at intake step 1 → species + age prefilled, breed/size/names offered. Pure policy layer in `src/lib/intake-suggestion.ts` (38 tests, all break-verified). **`sex` is absent from the schema by construction** — see the log |
 | LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
 | LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
 | Arrival pipeline + shelter areas | ⬜ Planned, plan §13. Placement intervals for outbreak tracing, not a current-area field |
@@ -206,6 +208,114 @@ scanned chip resolves to a name and a phone call.
   time because its `updatedAt` was ~2 hours old, so an `/admin/intake` tab may
   have been open. `users` is 1 (the real admin) and every other collection and
   collection group is 0.
+- **2026-08-26** — **Built photo-assisted intake and the AI foundations under
+  it — and nothing has yet called Gemini, because no API key exists.** That
+  gap is the honest headline: the whole pipeline is written, typechecked,
+  built and unit-tested, and the one claim NOT available is "it works against
+  a live model". Getting a key is a human step at AI Studio.
+
+  **Step 8 landed first, on purpose.** Plan §9 puts metering before the first
+  AI call and the playbook §4.2 records the cost of the alternative — an audit
+  that found 14 unmetered call sites. So `src/lib/ai/` has the provider, model
+  ids with the KEY/ID split (persist the key, resolve the id — ids churn),
+  a `pricing.mjs` whose fallback is Flash-tier and **never zero** (a model
+  reporting $0 is indistinguishable from one never called), and
+  `recordAiUsage` wired at the very first call site rather than retrofitted.
+
+  **The design question was not "can a model do this" but "what is each answer
+  worth", and the answers differ per field.** Playbook §6.2 made this explicit
+  and it is the centre of the feature. Species and names fail toward
+  suggesting — species is reliable and a name is not a truth claim. **Breed
+  fails toward `mestizo`**, because visual breed identification disagrees badly
+  with DNA even among shelter staff, and a confident wrong breed on a public
+  listing attracts the wrong family and ends with the animal returned; the
+  model returns a *visible type* ("rasgos de pastor") instead of asserting a
+  breed. **Age fails toward a wider range**, because deciduous tooth eruption
+  is genuinely tight for puppies and adult wear is not — a street dog does not
+  wear teeth like a house dog — so a range wider than two years is refused
+  outright rather than collapsed to a midpoint that would read as a fact.
+  **Size fails toward not answering** unless the photo held a scale reference,
+  since a lone chihuahua and a lone mastiff frame identically.
+
+  **`sex` is ABSENT from the extraction schema rather than nullable, and that
+  is the single most transferable idea here.** It drives Spanish gender
+  agreement across the whole site — species noun, size adjective, every past
+  participle — so one wrong guess makes every sentence about that animal
+  ungrammatical in the only language its readers use. A nullable field invites
+  a guess; an absent one cannot be filled. **The safest way to stop a model
+  asserting something is to remove the place it would put the assertion** — a
+  structural guarantee, where a prompt instruction is the thing that erodes.
+  The same idea shaped `t.mixedBreed(sex)`, which takes a REQUIRED sex: the
+  word "mestizo"/"mestiza" cannot even be spelled until a human supplies what
+  the camera never saw, so the UI blocks that one offer until they do.
+
+  **`Pet` gained an age range, an estimate flag and provenance — free today,
+  a backfill tomorrow.** `ageMonthsMin`/`ageMonthsMax`/`ageIsEstimate` exist so
+  the page can say "entre 4 y 7 meses" instead of asserting a midpoint;
+  `suggestedFields`/`extractedByModel`/`extractedAt` mirror `MedicalRecord`, so
+  a later reader can tell "the vet said 18 months" from "a model read a wear
+  photo". These are STORED fields and `pets` holds 0 documents, which is the
+  whole reason this cost nothing.
+
+  **Adding them found a three-week-old hole nothing had exercised: the `Pet`
+  interface and the code that writes pets were not connected by the type
+  system at all.** `batch.set(petRef, {…})` took an untyped object literal, so
+  adding a REQUIRED field to `Pet` produced a green typecheck and a document
+  without it — the interface described a document the writer did not produce.
+  `PetDocumentWrite` now ties them together, and **it caught a real mismatch on
+  its very first run** (`serverTimestamp()` is a `FieldValue`, not a
+  `Timestamp`). Same family as the rules-comment lesson: a declaration that
+  nothing checks is documentation, and it drifts.
+
+  **The route handler is outside `firestore.rules`, and that is the security
+  point.** Every other admin write goes browser → Firestore with the rules as
+  the boundary and `AdminGate` as mere UX. `/api/intake/suggest` holds a real
+  secret and spends money, so it verifies the ID token and the `admin` claim
+  itself, with `checkRevoked: true` — the one-hour claim lag cuts both ways and
+  on the spending path the strict side is the safe one. **Verified live**: no
+  header → 401, garbage token → 401, GET → 405, and the 401 is returned BEFORE
+  the configured-check so an unauthenticated caller learns nothing.
+
+  **The key cannot reach the browser, and this was measured with a validated
+  needle rather than asserted.** `src/lib/ai/google.ts` imports `server-only`,
+  so a client component touching it fails the BUILD. The probe found
+  `GEMINI_API_KEY` and `generativelanguage` present in the server build (the
+  known-positive control) and absent from all 25 client chunks. **One scare
+  worth keeping:** `x-goog-api-key` IS in the client bundle — and it is
+  `@firebase/firestore` setting the header to `databaseInfo.apiKey`, the
+  PUBLIC Firebase key, confirmed by reading the surrounding bytes rather than
+  guessing. Two strings with opposite severities; only the context separates
+  them.
+
+  **Four traps, three of them recurrences of lessons already in this file.**
+  (1) **The deliberate-break probe reported 15 of 15 rules uncovered, and it
+  was the probe.** A 100% miss rate is not a finding, it is a broken
+  instrument. `node --test` emits the **spec** reporter (`✔`/`✖`) here, not
+  TAP, so a regex for `not ok` never matched; the exit code was the reliable
+  signal all along. Fixed, and the real answer is **15 of 15 caught, 0
+  uncovered**, each break named by exactly the test that catches it. Sixth time
+  running that the probe was wrong before the code was. (2) **A `.mjs` module
+  needs a `.d.mts`, not a `.d.ts`** — the `.d.ts` is silently ignored and TS
+  reports the module as implicitly `any`. (3) **`node -e` with DOUBLE quotes
+  lets bash eat backticks as command substitution**, which silently deleted a
+  word from `.env.example`. Fifth recurrence of *escaping-sensitive edits go in
+  a file you run* — and this time the violation was mine, in the same session
+  that re-read the rule. (4) **`cat -A` under Git Bash still does not show
+  `^M`**, so line endings were counted in Node throughout; `types.ts` is CRLF
+  (663 after patching, 0 lone LF) while newly written files are LF and are
+  normalised by `autocrlf` on commit.
+
+  **One playbook correction, measured:** it pins `zod` at v3 and says "Zod v3",
+  but `ai@6.0.270` declares `zod: "^3.25.76 || ^4.1.8"`, so **zod 4 is
+  explicitly supported** and is what installed. The playbook was extracted
+  against an older AI SDK.
+
+  Verified at the end: typecheck clean, **180/180 tests** (142 before), build
+  clean with `/api/intake/suggest` registered dynamic, **0 vulnerabilities in
+  both trees**, and Firestore untouched — 0 pets, 1 user (the real admin), and
+  the same 1 blank `petDraft` that was already there, deliberately left alone
+  because an `/admin/intake` tab may be open on it. No probe data was created
+  this session; every check was a read.
 ---
 
 ## Next session — start here
@@ -218,6 +328,50 @@ CI and Deploy both green; the deployed Cloud Run tag equals
 
 The step before it — STEP 6, re-admission / dedup — is merged (PR #13,
 `f2f2042`) and deployed.
+
+### ⛔ Photo-assisted intake is BUILT but has never called a model
+
+On branch `feature/ai-intake-suggestions`, not merged. Everything compiles,
+typechecks, builds and passes 180/180 tests — and **not one Gemini call has
+ever been made from this project**, because no API key exists. Read that as
+"unfalsified", not "working". It is exactly the state this file warns about.
+
+**The one human step nobody can automate:** create a key at
+https://aistudio.google.com/apikey and put it in `.env.local` as
+`GEMINI_API_KEY` (and `GOOGLE_GENERATIVE_AI_API_KEY`, which some AI SDK paths
+read instead). `.env.example` documents both.
+
+⚠️ **It is a REAL secret** — unlike every `NEXT_PUBLIC_FIREBASE_*` value,
+which are public by design. Never give it a `NEXT_PUBLIC_` alias, and do not
+remove the `server-only` import at the top of `src/lib/ai/google.ts`: that
+import is what makes a client component touching the key fail the BUILD
+rather than ship it. Measured 2026-08-26 — the key and `generativelanguage`
+are in the server build and absent from all 25 client chunks.
+
+**Then, in order:**
+
+1. **Verify the model IDs.** `src/lib/ai/model-ids.ts` carries the playbook’s
+   IDs, which came from the sibling stack on 2026-08-16 and have never been
+   checked against a live API here. All three are env-overridable so a churned
+   ID is a config change, not a deploy.
+2. **Drive one real photo through `/admin/intake`** and find the `[ai-usage]`
+   log line proving the call happened and was metered. Playbook §15 item 20:
+   the feature is not shipped until the real flow ran on the real deployment.
+3. **Re-derive the price table from an actual invoice.** `pricing.mjs` is
+   bill-derived from the SIBLING stack, which makes it a hypothesis here. The
+   sibling under-reported spend ~9× with plausible proxies.
+4. **Deploying needs Terraform, not a CI flag.** `GEMINI_API_KEY` is a RUNTIME
+   env var (contrast `NEXT_PUBLIC_*`, which `next build` inlines as build
+   args). Terraform owns the Cloud Run env list, so it belongs in Secret
+   Manager and in `terraform/`. **Never** add `--set-env-vars` to `deploy.yml`
+   — a CI-injected var Terraform does not declare is planned for deletion on
+   every apply. Secret Manager is currently EMPTY; this would be its first
+   secret.
+
+**Until the key exists the feature degrades politely and that is deliberate:**
+`/api/intake/suggest` answers 503, the wizard shows the manual form and says
+suggestions are unavailable. Admitting an animal never depends on it — plan
+§3’s rule that a gate stricter than the shelter’s reality gets worked around.
 
 **Build-order steps 1–6 including 5a are done. `pets` still holds 0 documents,
 and that is the whole remaining gap in step 3.** It is no longer a technical one: the
