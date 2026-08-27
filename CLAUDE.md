@@ -1401,6 +1401,18 @@ From building the arrival pipeline UI (2026-08-24):
   `81 insertions, 12 deletions`. Source files are unaffected — their blobs are
   LF. **Never judge a CLAUDE.md change, or review one, without that flag**, and
   expect the first commit that touches it to normalise the blob to LF.
+- **⚠️ This file mixes straight and typographic apostrophes, so a needle
+  containing one can silently miss.** Found 2026-08-27: a patch script anchored
+  on `plan §3's rule that a gate stricter…` reported NEEDLE NOT FOUND, because
+  the file has `§3’s` — U+2019, not U+0027. Nothing was broken; the script
+  simply could not see the block it was told to replace, and the failure reads
+  exactly like "that text has already been changed". Same family as the CRLF
+  trap above, and it applies to `grep` just as much as to an edit script.
+  **Anchor patch scripts on apostrophe-free text**, or copy the needle out of
+  the file rather than retyping it. Confirm which character is actually there
+  with `grep -n "…" CLAUDE.md | cat -v` — U+2019 shows as `M-bM-^@M-^Y`.
+  Quotes have the same hazard (`“”` versus `"`), as do the en and em dashes
+  this file uses heavily.
 - **Python's text-mode read turns CRLF into LF**, so every `io.open(p).read()`
   → `write()` patch script silently converts a file in this CRLF tree. Git
   normalises on commit so no content is at risk, but it warns on every command
