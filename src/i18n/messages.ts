@@ -33,6 +33,7 @@ import type { Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
+import type { MedicalError, MedicalWarning } from '@/lib/medical';
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -96,6 +97,17 @@ export interface Messages {
   statusLabel(status: PetStatus): string;
 
   medicalKindLabel(kind: MedicalRecordKind): string;
+
+  /** Why a medical record cannot be saved. Structural problems only. */
+  medicalError(error: MedicalError): string;
+
+  /**
+   * A clinical note worth showing that must NOT block saving.
+   *
+   * Phrased as information rather than as a refusal: the shelter is often
+   * recording a campaign dose it did not administer and cannot change.
+   */
+  medicalWarning(warning: MedicalWarning): string;
 
   /** Validation message for a rejected microchip code. */
   microchipError(error: MicrochipError): string;
