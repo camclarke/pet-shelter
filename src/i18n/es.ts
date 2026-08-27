@@ -222,11 +222,30 @@ export const es: Messages = {
 
   pastParticiple: (stem, sex) => stem + (sex === 'female' ? 'a' : 'o'),
 
+  mixedBreed: (sex) => (sex === 'female' ? 'mestiza' : 'mestizo'),
+
   formatAge(ageMonths) {
     if (ageMonths === null) return 'edad desconocida';
     if (ageMonths < 12) return `${ageMonths} ${ageMonths === 1 ? 'mes' : 'meses'}`;
     const years = Math.floor(ageMonths / 12);
     return `${years} ${years === 1 ? 'año' : 'años'}`;
+  },
+
+  formatAgeRange(minMonths, maxMonths) {
+    const bothMonths = maxMonths < 12;
+    // Collapse the unit when both bounds share it ("entre 4 y 7 meses");
+    // spell both out when they do not ("entre 8 meses y 2 años"), because
+    // "entre 8 y 2 años" would be simply wrong.
+    if (bothMonths) {
+      return `entre ${minMonths} y ${maxMonths} ${maxMonths === 1 ? 'mes' : 'meses'}`;
+    }
+    const bothYears = minMonths >= 12 && minMonths % 12 === 0 && maxMonths % 12 === 0;
+    if (bothYears) {
+      const lo = minMonths / 12;
+      const hi = maxMonths / 12;
+      return `entre ${lo} y ${hi} ${hi === 1 ? 'año' : 'años'}`;
+    }
+    return `entre ${this.formatAge(minMonths)} y ${this.formatAge(maxMonths)}`;
   },
 
   formatMeta(pet) {
