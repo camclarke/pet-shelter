@@ -162,7 +162,12 @@ const res = await fetch(`${BASE}/models/${model}:generateContent`, {
   headers: { ...headers, 'content-type': 'application/json' },
   body: JSON.stringify({
     contents: [{ role: 'user', parts: [{ text: 'Respondé solamente: listo' }] }],
-    generationConfig: { maxOutputTokens: 16 },
+    // ⚠️ NOT a tight budget. Gemini 3.x reasons by default and thinking is
+    // billed as output while `maxOutputTokens` does NOT bound it — measured
+    // 2026-08-26, a budget of 16 returned finishReason MAX_TOKENS, 13
+    // thinking tokens and no answer at all. A tight cap here looks exactly
+    // like a broken key.
+    generationConfig: { maxOutputTokens: 512 },
   }),
 });
 const elapsed = Date.now() - started;
@@ -178,15 +183,25 @@ const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '(no text)';
 const usage = json.usageMetadata ?? {};
 
 const { estimateCostUsd, hasPricingRow } = await import('../src/lib/ai/pricing.mjs');
+// thoughtsTokenCount is reported SEPARATELY from candidatesTokenCount and is
+// additive. It is billed at the output rate, and on this model it routinely
+// dwarfs the visible answer.
+const reasoning = usage.thoughtsTokenCount ?? 0;
 const cost = estimateCostUsd({
   model,
   inputTokens: usage.promptTokenCount ?? 0,
   outputTokens: usage.candidatesTokenCount ?? 0,
+  reasoningTokens: reasoning,
 });
 
 console.log(`  reply:   ${JSON.stringify(text.trim())}`);
 console.log(`  latency: ${elapsed} ms`);
-console.log(`  tokens:  in=${usage.promptTokenCount ?? 0} out=${usage.candidatesTokenCount ?? 0}`);
+console.log(`  finish:  ${json.candidates?.[0]?.finishReason ?? '(none)'}`);
+console.log(`  tokens:  in=${usage.promptTokenCount ?? 0} out=${usage.candidatesTokenCount ?? 0} thinking=${reasoning}`);
+if (reasoning > (usage.candidatesTokenCount ?? 0)) {
+  console.log('           ^ thinking exceeds the visible answer. That is normal here,');
+  console.log('             and it is billed at the OUTPUT rate.');
+}
 console.log(`  est cost: $${cost.toFixed(6)}${hasPricingRow(model) ? '' : '  (⚠️ no pricing row — costed at Flash fallback)'}`);
 console.log('\nThe key works. Next: drive a real photo through /admin/intake and find');
 console.log('the [ai-usage] line in the server log — that is what proves the app path,');
