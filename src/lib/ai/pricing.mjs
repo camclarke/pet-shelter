@@ -24,7 +24,25 @@ export const MODEL_PRICING = {
   'gemini-3.1-flash-lite': { inputPer1M: 0.25, outputPer1M: 1.5 },
   'gemini-3.1-pro-preview': { inputPer1M: 2.0, outputPer1M: 12.0 },
   'gemini-embedding-2': { inputPer1M: 0.2, outputPer1M: 0.0 },
+
+  // ⚠️ 404 "no longer available to new users" for THIS project’s key,
+  // verified 2026-08-26. Rows kept rather than deleted: deleting one means
+  // an accidental call is costed at the Flash fallback instead of its real
+  // rate, which is a worse failure than a row nobody uses.
+  'gemini-2.5-flash': { inputPer1M: 0.3, outputPer1M: 2.5 },
+  'gemini-2.5-flash-lite': { inputPer1M: 0.1, outputPer1M: 0.4 },
 };
+
+/**
+ * Models this key can call that have NO bill-derived row yet, so they are
+ * costed at the Flash fallback and will read far too expensive.
+ *
+ * `gemini-3.5-flash-lite` is the main one, and it is a genuine candidate:
+ * measured at 1252ms with 0 thinking tokens, essentially matching
+ * gemini-3.1-flash-lite. It is not adopted only because its real price is
+ * unknown here, and the playbook rule is to add the row BEFORE swapping.
+ */
+export const UNPRICED_BUT_AVAILABLE = ['gemini-3.5-flash-lite', 'gemini-3.7-flash'];
 
 /**
  * Assume Flash, NEVER zero. An unknown model reporting $0 is indistinguishable

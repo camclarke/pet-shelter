@@ -24,3 +24,6 @@ export declare function estimateCostUsd(args: {
 }): number;
 
 export declare function hasPricingRow(model: string): boolean;
+
+/** Callable with this key but lacking a bill-derived price row. */
+export declare const UNPRICED_BUT_AVAILABLE: readonly string[];

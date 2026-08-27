@@ -4,7 +4,7 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 
 import { google } from './google';
-import { FLASH_MODEL, modelKeyFor } from './model-ids';
+import { FLASH_LITE_MODEL, modelKeyFor } from './model-ids';
 import { recordAiUsage } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
 
@@ -138,7 +138,25 @@ export async function suggestFromPhoto(
   mediaType: string
 ): Promise<SuggestResult> {
   const { object, usage, providerMetadata } = await generateObject({
-    model: google(FLASH_MODEL),
+    // ⚠️ Flash-LITE, and this is a measured choice rather than thrift.
+    //
+    // Measured 2026-08-26 on this exact schema, against a live key:
+    //   gemini-3.6-flash       9570ms  1131 thinking tokens  $0.009591
+    //   gemini-3.1-flash-lite  1230ms     0 thinking tokens  $0.000317
+    // Equivalent answers on species, life stage, size and the purebred
+    // judgement. 30x cheaper and 8x faster, entirely because Flash-Lite
+    // does not reason by default and thinking is billed as OUTPUT.
+    //
+    // `thinkingConfig: { thinkingBudget: 0 }` is NOT an alternative here:
+    // gemini-3.6-flash rejects it with HTTP 400. Changing tier is the only
+    // way to stop paying for reasoning this task does not need.
+    //
+    // ⚠️ NOT yet measured on a real PHOTOGRAPH. The open question is dental
+    // age estimation, which is the one sub-task where a stronger model
+    // might genuinely read better. Re-measure before trusting age from a
+    // photo, and remember decideAge() already refuses anything it is not
+    // confident about.
+    model: google(FLASH_LITE_MODEL),
     schema: SuggestionSchema,
     system: INTAKE_SUGGEST_SYSTEM,
     messages: [
@@ -157,13 +175,13 @@ export async function suggestFromPhoto(
   // measures, and must not add latency to an admin waiting on a form.
   void recordAiUsage({
     process: 'intake_suggest',
-    model: FLASH_MODEL,
+    model: FLASH_LITE_MODEL,
     usage,
     providerMetadata,
   });
 
   return {
     suggestion: object as RawPhotoSuggestion,
-    modelKey: String(modelKeyFor(FLASH_MODEL)),
+    modelKey: String(modelKeyFor(FLASH_LITE_MODEL)),
   };
 }
