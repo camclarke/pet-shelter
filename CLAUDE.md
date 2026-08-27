@@ -34,6 +34,7 @@ scanned chip resolves to a name and a phone call.
 | Template config for other shelters | ✅ `src/config/shelter.ts`, `README.md`, MIT licensed |
 | Dockerfile + Cloud Run target | ✅ **Built and deployed 2026-08-12.** Now built by **GitHub Actions** (`docker buildx`); the first build was Cloud Build, since there is no local Docker on this machine. `ENV HOSTNAME=0.0.0.0` is proven, not assumed: Cloud Run's startup probe passed |
 | Terraform | ✅ **APPLIED — 40 resources live.** GCS backend in `gs://wawitas-terraform-state`. One known-benign perpetual diff on `cloud_run scaling`, documented in `cloud_run.tf` |
+| **Secret Manager** | 🟡 **DECLARED, NOT APPLIED** — PR #17 (`40b764d`). `terraform/secrets.tf` + a `dynamic "env"` block gated on `gemini_api_key_enabled`, default **false**. `gcloud secrets list` still returns **0 items**. Applying is THREE steps and the first two are safe; see Next-session item 5 |
 | **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf`. **All seven actions moved to Node 24 majors 2026-08-23** (PR #10) — the deprecation annotation is gone, measured against a back-to-back run on the old versions |
 | Dependency security | ✅ **0 vulnerabilities** in both the production and dev trees. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
@@ -475,6 +476,57 @@ scanned chip resolves to a name and a phone call.
   Firestore unchanged — **0 pets, 0 areas, 0 adoptions, 1 user (the real
   admin), 1 blank `petDraft` deliberately left alone, and 0 in every
   collection group**. No probe data was created; every check was a read.
+- **2026-08-27** — **PR #17 merged (`40b764d`): the Gemini key is declared as a
+  Secret Manager secret, and deliberately NOT applied.** Secret Manager has
+  been empty since the project began and still is — `gcloud secrets list`
+  returns 0 items after the merge. That is the design, not an omission.
+
+  **Merging an infrastructure change deploys nothing here, and that was
+  confirmed rather than assumed:** no Deploy run fired on `40b764d`, because
+  `terraform/**` sits in `deploy.yml`'s `paths-ignore`. The newest Deploy is
+  still PR #16's. CI did run on the PR and was green in 48 s.
+
+  **The ordering trap is enforced by config rather than by a comment.** Secrets
+  are created empty, Cloud Run resolves `version = "latest"` when a revision
+  *starts*, and traffic is pinned to LATEST — so binding a versionless secret
+  fails the startup probe and takes **wawitas.org down**, rather than failing
+  off to one side where someone could notice it calmly. Creating the secret and
+  binding it therefore cannot be the same apply. `gemini_api_key_enabled`
+  defaults to `false` and gates a `dynamic "env"` block, so **the safe state is
+  the default** and reaching the unsafe one takes a deliberate tfvars edit.
+  Checked against a real plan on merged `main`, not reasoned about: 1 to add,
+  1 to change, and that change is *only* the documented benign `scaling` no-op
+  with the env list untouched.
+
+  **The VALUE is not a Terraform resource, and that is the other half of the
+  design.** Terraform state stores attributes in plaintext, so a
+  `google_secret_manager_secret_version` would put the key in
+  `gs://wawitas-terraform-state`, in plan files, and potentially in CI logs —
+  which is exactly how the sibling stack leaked a salt and had to rotate it.
+  Declaring only the container keeps the key in two places: Secret Manager, and
+  a gitignored `.env.local`. The version goes in by hand with
+  `gcloud secrets versions add --data-file=-`, which reads stdin so it misses
+  shell history too.
+
+  **Replication is automatic, not `user_managed`.** No data-residency
+  requirement applies to an API key, and pinning a location adds an
+  apply-time-only failure mode — the most repeated lesson in the GCP playbook —
+  for no benefit.
+
+  **One thing noted and deliberately not changed:** the runtime service account
+  already holds `roles/secretmanager.secretAccessor` at PROJECT level from
+  `iam.tf`, granted 2026-08-07 before any secret existed. That is broader than
+  this one secret needs. Narrowing a live IAM binding deserves its own commit
+  and its own verification rather than riding along in an unrelated one, and
+  with exactly one secret the two are equivalent in practice. **The moment a
+  second secret exists that Cloud Run should not read, they stop being
+  equivalent** — tighten it then.
+
+  Also recorded this session: **CLAUDE.md mixes straight and typographic
+  apostrophes**, so a patch script anchored on `§3's rule…` reported NEEDLE NOT
+  FOUND against a file containing `§3’s` (U+2019). Nothing was broken; the
+  failure simply reads exactly like "that text has already been changed". Same
+  family as the CRLF trap, and it applies to `grep` as much as to an editor.
 ---
 
 ## Next session — start here
@@ -483,7 +535,13 @@ scanned chip resolves to a name and a phone call.
 IN PRODUCTION** — merged at `365cbd0`, deployed Cloud Run tag equals
 `git rev-parse HEAD`, all 20 route/host combinations 200, and the served
 bundle carries copy only this build contains with a clean per-route split.
-Read the 2026-08-27 log entry first.
+Read the 2026-08-27 log entries first — there are two.
+
+**PR #17 is also merged (`40b764d`) and deliberately NOT applied:** it declares
+the Gemini key as a Secret Manager secret, gated so it cannot bind an empty one
+and take the live site down. Merging it changed nothing in GCP — `terraform/**`
+is path-ignored by `deploy.yml`, confirmed by no Deploy run firing. Secret
+Manager still holds 0 secrets.
 
 It brought **step 7 (medical records)** and the **model layer of step 11
 (voice dictation)**, switched photo intake to `gemini-3.1-flash-lite` on a
@@ -548,16 +606,39 @@ required** and is not set.
    bill-derived from the SIBLING stack, which makes it a hypothesis here. The
    sibling under-reported spend ~9x with plausible proxies. The benchmark
    figures in the 2026-08-27 log entry are the first real numbers.
-5. **Production `GEMINI_API_KEY` needs Terraform, not a CI flag.** It is a
-   RUNTIME env var (contrast `NEXT_PUBLIC_*`, which `next build` inlines as
-   build args). Terraform owns the Cloud Run env list, so it belongs in Secret
-   Manager and in `terraform/`. **Never** add `--set-env-vars` to
-   `deploy.yml` — a CI-injected var Terraform does not declare is planned for
-   deletion on every apply. **Secret Manager is currently EMPTY; this would be
-   its first secret, and it is THREE steps, not one:** create the secret, add
-   the version carrying the value, *then* bind it to Cloud Run. A
-   `version = "latest"` binding applied in the same pass as an empty secret
-   makes the revision fail to boot.
+5. **Production `GEMINI_API_KEY`: the Terraform is WRITTEN and MERGED, and
+   deliberately NOT APPLIED.** PR #17, merged `40b764d`. `terraform/secrets.tf`
+   declares the secret; `cloud_run.tf` carries a `dynamic "env"` block gated on
+   `gemini_api_key_enabled`, which defaults to **false**. Secret Manager still
+   holds **0 secrets** — merging changed nothing in GCP, because `terraform/**`
+   is in `deploy.yml`'s `paths-ignore` and infrastructure is a deliberate human
+   apply.
+
+   **It is THREE steps, not one, and the reason is an outage:** secrets are
+   created empty, Cloud Run resolves `version = "latest"` at revision start,
+   and traffic is pinned to LATEST — so binding an empty secret takes the live
+   site down rather than failing off to one side.
+
+   ```bash
+   terraform -chdir=terraform apply
+   ```
+   ```bash
+   gcloud secrets versions add gemini-api-key --project=wawitas --data-file=-
+   ```
+   ```bash
+   # then set gemini_api_key_enabled = true in terraform.tfvars and apply again
+   ```
+
+   Step 2 must be a human: `--data-file=-` reads stdin so the key never enters
+   shell history, and the value is deliberately **not** a Terraform resource
+   because state is plaintext. Verify between 2 and 3 with
+   `gcloud secrets versions list gemini-api-key`.
+
+   **Verified before merging:** with the flag false, `plan` is 1 to add and 1
+   to change, and that one change is *only* the known-benign `scaling` no-op —
+   the Cloud Run env list is untouched. **Never** add `--set-env-vars` to
+   `deploy.yml`; a CI-injected var Terraform does not declare is planned for
+   deletion on every apply.
 
 **In production the feature is still switched off, and that is deliberate:**
 no key reaches Cloud Run, so `/api/intake/suggest` answers 503 to an
