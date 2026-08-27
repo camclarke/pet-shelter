@@ -42,7 +42,15 @@ export const MODEL_PRICING = {
  * gemini-3.1-flash-lite. It is not adopted only because its real price is
  * unknown here, and the playbook rule is to add the row BEFORE swapping.
  */
-export const UNPRICED_BUT_AVAILABLE = ['gemini-3.5-flash-lite', 'gemini-3.7-flash'];
+export const UNPRICED_BUT_AVAILABLE = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.7-flash',
+  // Audio is charged per token like anything else, but no bill-derived
+  // rate exists for this model here. It will read at the Flash fallback,
+  // i.e. TOO EXPENSIVE, until a real invoice says otherwise. Over-reporting
+  // is the safe direction; do not "fix" it with a guess.
+  'gemini-3.5-transcribe',
+];
 
 /**
  * Assume Flash, NEVER zero. An unknown model reporting $0 is indistinguishable
