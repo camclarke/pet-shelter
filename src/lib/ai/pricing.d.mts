@@ -18,6 +18,8 @@ export declare function estimateCostUsd(args: {
   model: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** Billed at the OUTPUT rate. Omitting these under-reports badly. */
+  reasoningTokens?: number;
   groundingRequests?: number;
 }): number;
 

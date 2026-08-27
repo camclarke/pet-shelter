@@ -79,9 +79,11 @@ export async function recordAiUsage({
   try {
     const inputTokens = usage?.inputTokens ?? usage?.tokens ?? 0;
     const outputTokens = usage?.outputTokens ?? 0;
-    // Thinking tokens are billed as OUTPUT and `maxOutputTokens` does not bound
-    // them, so they are logged separately to make the reasoning share visible
-    // before anyone decides whether a thinkingConfig budget is worth applying.
+    // Thinking tokens are billed as OUTPUT and `maxOutputTokens` does not
+    // bound them. Tracked SEPARATELY from outputTokens because the provider
+    // reports them separately and they are additive — but they are costed
+    // together, see estimateCostUsd. Keeping the split visible is what lets
+    // anyone judge whether a thinkingConfig budget is worth applying.
     const reasoningTokens = usage?.reasoningTokens ?? 0;
 
     const grounding =
@@ -93,6 +95,9 @@ export async function recordAiUsage({
       model,
       inputTokens,
       outputTokens,
+      // Billed as output. On Gemini 3.x these routinely DWARF the visible
+      // answer, so leaving them out is not a rounding error.
+      reasoningTokens,
       groundingRequests: grounding,
     });
 

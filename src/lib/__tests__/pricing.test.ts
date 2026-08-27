@@ -87,3 +87,44 @@ test('the fallback is a real Flash-tier rate, not zero', () => {
   assert.ok(FALLBACK_PRICING.inputPer1M > 0);
   assert.ok(FALLBACK_PRICING.outputPer1M > 0);
 });
+
+// ─── reasoning tokens ────────────────────────────────────────────────────────
+// Measured on gemini-3.6-flash 2026-08-26: a ONE-token reply carried 168
+// thinking tokens. These are billed as output, and omitting them under-reports
+// by ~100x on this model.
+
+test('reasoning tokens are billed, at the OUTPUT rate', () => {
+  const withReasoning = estimateCostUsd({ model: FLASH, reasoningTokens: 1_000_000 });
+  const asOutput = estimateCostUsd({ model: FLASH, outputTokens: 1_000_000 });
+  assert.equal(withReasoning, asOutput);
+});
+
+test('reasoning is ADDITIVE to visible output, not overlapping', () => {
+  // The provider reports thoughtsTokenCount and candidatesTokenCount
+  // separately, and totalTokenCount is their sum plus the prompt.
+  const both = estimateCostUsd({ model: FLASH, outputTokens: 500, reasoningTokens: 500 });
+  const merged = estimateCostUsd({ model: FLASH, outputTokens: 1000 });
+  assert.equal(both, merged);
+});
+
+test('the real measured call is not costed as though thinking were free', () => {
+  // promptTokenCount 6, candidatesTokenCount 1, thoughtsTokenCount 168.
+  const honest = estimateCostUsd({
+    model: FLASH,
+    inputTokens: 6,
+    outputTokens: 1,
+    reasoningTokens: 168,
+  });
+  const ignoringThinking = estimateCostUsd({ model: FLASH, inputTokens: 6, outputTokens: 1 });
+  assert.ok(honest > ignoringThinking);
+  // Not a rounding error: dropping thinking would under-report by >50x here.
+  assert.ok(honest / ignoringThinking > 50, `ratio was ${honest / ignoringThinking}`);
+});
+
+test('omitting reasoningTokens still costs the visible output correctly', () => {
+  // Back-compat: callers that never pass it must not silently change price.
+  assert.equal(
+    estimateCostUsd({ model: FLASH, inputTokens: 10, outputTokens: 20 }),
+    estimateCostUsd({ model: FLASH, inputTokens: 10, outputTokens: 20, reasoningTokens: 0 })
+  );
+});

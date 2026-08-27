@@ -66,19 +66,32 @@ export function countGroundedQueries(providerMetadata) {
 }
 
 /**
- * @param {{ model: string, inputTokens?: number, outputTokens?: number, groundingRequests?: number }} args
+ * ⚠️ `reasoningTokens` are billed at the OUTPUT rate and MUST be included.
+ *
+ * Gemini 3.x reasons by default and reports thinking separately from the
+ * visible answer — the provider returns `thoughtsTokenCount` alongside
+ * `candidatesTokenCount`, and they are additive, not overlapping. Measured
+ * on gemini-3.6-flash 2026-08-26: a ONE-token reply carried 168 thinking
+ * tokens. Costing only the visible output under-reports by ~100x on this
+ * model — the same shape as the sibling stack’s 9x under-report, worse.
+ *
+ * `maxOutputTokens` does NOT bound thinking. A budget of 16 produced
+ * finishReason MAX_TOKENS, 13 thinking tokens and no answer at all.
+ *
+ * @param {{ model: string, inputTokens?: number, outputTokens?: number, reasoningTokens?: number, groundingRequests?: number }} args
  * @returns {number} estimated USD
  */
 export function estimateCostUsd({
   model,
   inputTokens = 0,
   outputTokens = 0,
+  reasoningTokens = 0,
   groundingRequests = 0,
 }) {
   const p = MODEL_PRICING[model] ?? FALLBACK_PRICING;
   return (
     (inputTokens / 1e6) * p.inputPer1M +
-    (outputTokens / 1e6) * p.outputPer1M +
+    ((outputTokens + reasoningTokens) / 1e6) * p.outputPer1M +
     groundingRequests * GROUNDING_USD_PER_REQUEST
   );
 }
