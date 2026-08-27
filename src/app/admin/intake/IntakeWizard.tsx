@@ -69,7 +69,9 @@ import {
   reopenPet,
   saveDraft,
   loadDraft,
+  stripAndResize,
   uploadPetPhoto,
+  uploadProcessedPhoto,
 } from '@/lib/pets-admin';
 import { shouldHaveOpenPlacement } from '@/lib/arrival';
 import {
@@ -399,12 +401,19 @@ export function IntakeWizard() {
     setError(null);
     setSuggestOutcome(null);
     try {
-      const uploaded = await uploadPetPhoto(draft.id, file);
+      // Strip EXIF ONCE, then use the same bytes for both the upload and
+      // the model call. Sending the original to Gemini while storing the
+      // stripped copy would ship a foster volunteer’s home GPS to a third
+      // party — the exact harm stripAndResize exists to prevent, arriving by
+      // a route the Storage rules cannot see.
+      const processed = await stripAndResize(file);
+
+      const uploaded = await uploadProcessedPhoto(draft.id, processed);
       let next: PetDraft = { ...draft, media: [...draft.media, uploaded] };
       setDraft(next);
       await saveDraft(next);
 
-      const outcome = await requestSuggestion(user, file);
+      const outcome = await requestSuggestion(user, processed);
       setSuggestOutcome(outcome);
 
       const s = outcome.suggestion;
