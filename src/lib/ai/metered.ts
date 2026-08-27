@@ -43,6 +43,8 @@ import { countGroundedQueries, estimateCostUsd, hasPricingRow } from './pricing.
  */
 export const PROCESS_LABELS = {
   intake_suggest: 'Sugerencias de ingreso',
+  dictation_transcribe: 'Transcripción de consulta',
+  dictation_extract: 'Extracción de receta',
 } as const;
 
 export type AiProcess = keyof typeof PROCESS_LABELS;
