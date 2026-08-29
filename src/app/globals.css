@@ -402,11 +402,68 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  /* ⚠️ DO NOT hide .header__account here again.
+     It used to be `display: none` alongside the nav, and the consequence was
+     not cosmetic: the header carries the ONLY link to /account anywhere on the
+     site, /account is the only way to sign in, and signing in is the only way
+     to reach /admin/intake. So on a phone the entire intake flow was
+     unreachable — on the one device that HAS the camera and microphone the
+     flow is designed around. Reported from a real phone, 2026-08-29.
+
+     The nav is not hidden either. It moves to its own row and scrolls
+     horizontally if it has to. A phone visitor with no route to /adopt is the
+     primary objective failing on the majority device. */
+  .header__row {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  /* Row 1 is brand + actions; the nav wraps to row 2. `margin-left: auto`
+     moves from the nav to the actions, because the nav is no longer the
+     element that has to push them right. */
+  .header__actions {
+    margin-left: auto;
+  }
+
   .header__nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    gap: var(--space-3);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .header__nav::-webkit-scrollbar {
     display: none;
   }
+  .header__nav a {
+    white-space: nowrap;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+  }
+
+  /* The label is the email local part, which can be long. Truncate rather than
+     let it push the theme toggle off the row. */
   .header__account {
-    display: none;
+    max-width: 38vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 11px 14px;
+    font-size: 11px;
+  }
+
+  /* Touch targets. Both header controls are tapped with a thumb, often
+     one-handed while holding an animal. 38px was a mouse-sized target. */
+  .header__account,
+  .icon {
+    min-height: 42px;
+  }
+  .icon {
+    width: 42px;
+    height: 42px;
   }
 }
 
