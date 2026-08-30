@@ -104,12 +104,33 @@ export function AdminDashboard() {
               return (
                 <li key={draft.id} className="admin-list__item">
                   <Link href={`/admin/intake?draft=${draft.id}`}>
+                    {/* Unfinished drafts are usually unnamed — a shelter photographs
+                        the animal first and names it later — so a list of "Sin
+                        nombre" rows is unusable without the photo. Reported from a
+                        phone showing three identical rows, 2026-08-30.
+                        Plain <img>: these are already resized to a 1600px long edge
+                        by stripAndResize, and next/image would add a proxy hop for
+                        an admin-only thumbnail nobody crawls. */}
+                    {draft.media[0] ? (
+                      <img
+                        className="admin-list__thumb"
+                        src={draft.media[0].url}
+                        alt={draft.media[0].alt || ''}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="admin-list__thumb admin-list__thumb--empty" aria-hidden="true">
+                        🐾
+                      </span>
+                    )}
+                    <span className="admin-list__text">
                     <strong>{draft.name.trim() || 'Sin nombre'}</strong>
                     <span className="t-data">
                       {progress.done} de {progress.total} pasos
                       {draft.media.length > 0 && ` · ${draft.media.length} foto${
                         draft.media.length === 1 ? '' : 's'
                       }`}
+                    </span>
                     </span>
                   </Link>
                 </li>

@@ -105,6 +105,11 @@ export default function PhotoSuggestions({
 
   const s = outcome?.suggestion ?? null;
 
+  // Hoisted rather than read as s.breed.resembles at each call site:
+  // TypeScript drops narrowing on a property access inside a closure, and
+  // these are read from onClick handlers. A plain const needs no narrowing.
+  const resembles: string[] = s && s.breed.kind === 'mixed' ? s.breed.resembles : [];
+
   return (
     <div className="admin-suggest">
       <h2 className="t-label">Foto para autocompletar (opcional)</h2>
@@ -197,7 +202,7 @@ export default function PhotoSuggestions({
           {/* ── offered, never applied ────────────────────────────────────── */}
           <div className="admin-suggest__offers">
             <span className="t-label">Raza</span>
-            {s.breed.kind === 'purebred' ? (
+            {s.breed.kind !== 'mixed' ? (
               <button
                 type="button"
                 className="btn btn--muted"
@@ -207,14 +212,33 @@ export default function PhotoSuggestions({
                 {s.breed.breed}
               </button>
             ) : sex ? (
-              <button
-                type="button"
-                className="btn btn--muted"
-                disabled={disabled || busy}
-                onClick={() => onApplyBreed(t.mixedBreed(sex))}
-              >
-                {t.mixedBreed(sex)}
-              </button>
+              <>
+                {/* The resemblance offer comes first, because "mestizo" alone is
+                    true but tells an adopter nothing. Plain "mestizo" stays
+                    available beside it — the shelter may know the likeness is
+                    wrong, and taking the option away would force them to
+                    retype it. */}
+                <button
+                  type="button"
+                  className="btn btn--muted"
+                  disabled={disabled || busy}
+                  onClick={() =>
+                    onApplyBreed(t.mixedBreedWithTraits(sex, resembles))
+                  }
+                >
+                  {t.mixedBreedWithTraits(sex, resembles)}
+                </button>
+                {resembles.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn--muted"
+                    disabled={disabled || busy}
+                    onClick={() => onApplyBreed(t.mixedBreed(sex))}
+                  >
+                    {t.mixedBreed(sex)}
+                  </button>
+                )}
+              </>
             ) : (
               <span className="admin__sub">
                 Elegí primero el sexo: la palabra cambia entre &laquo;mestizo&raquo; y

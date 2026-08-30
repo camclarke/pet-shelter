@@ -47,6 +47,14 @@ const SuggestionSchema = z.object({
   visibleType: z.string().nullable(),
   isLikelyPurebred: z.boolean(),
   purebredGuess: z.string().nullable(),
+  /**
+   * Breeds the animal RESEMBLES, for a mixed-breed. Structured rather than
+   * left inside `visibleType` prose, because the wizard has to compose a
+   * label — "mestizo con rasgos de pastor alemán" — and cannot parse a
+   * sentence for it. Capped at 3: a longer list stops reading as a
+   * resemblance and starts reading as a guess.
+   */
+  resemblesBreeds: z.array(z.string()).max(3),
 
   lifeStage: z.enum(['puppy', 'young', 'adult', 'senior']).nullable(),
   ageMonthsMin: z.number().nullable(),
@@ -91,6 +99,14 @@ duda, es mestizo. En visibleType describí lo que se ve — por ejemplo "mestizo
 mediano de pelo corto con rasgos de pastor" — sin afirmar una raza. Una raza
 equivocada en un aviso público atrae a la familia equivocada y el animal
 termina devuelto.
+
+Además, en resemblesBreeds poné entre una y tres razas a las que este animal se
+PAREZCA, ordenadas de más a menos parecida — por ejemplo ["pastor alemán",
+"husky siberiano"]. Esto NO afirma que sea de esa raza: describe a qué se
+parece, que es lo que una persona buscando adoptar entiende de un vistazo.
+Usá nombres de raza comunes en español. Si de verdad no se parece a ninguna
+raza reconocible, devolvé una lista vacía — eso también es una respuesta
+válida y es mejor que inventar un parecido.
 
 EDAD. Indicá en ageBasis en qué te basaste. Si se ven los dientes, usalos: en
 cachorros la erupción dentaria sigue un calendario estrecho y es confiable; en
