@@ -93,17 +93,45 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // ── 4. ask the model ──────────────────────────────────────────────────────
+  // Timed on BOTH branches. A 25.3s timeout in production on 2026-08-30 was
+  // undiagnosable because the only record was the abort itself: no elapsed
+  // time, no photo size, and no sign of whether a retry had eaten the budget.
+  // The same call takes ~3s from a laptop with a 1.2 MB photo, so the gap is
+  // environmental and the numbers are the only way to find it.
+  const started = Date.now();
+  const photoKb = Math.round(bytes.byteLength / 1024);
+
   try {
     const { suggestion, modelKey } = await suggestFromPhoto(bytes, mediaType);
+    console.info(
+      `[intake-suggest] ok in ${Date.now() - started}ms photo=${photoKb}KB type=${mediaType}`
+    );
 
     // The policy is applied HERE, server-side, so there is exactly one place
     // that decides what a model is allowed to influence. A policy enforced only
     // in the browser is advice, not a rule.
     return NextResponse.json({ suggestion: reviewSuggestion(suggestion), modelKey });
   } catch (err) {
+    const elapsed = Date.now() - started;
+    const name = err instanceof Error ? err.name : typeof err;
+    // Structured first, so a grep finds it without wading through a minified
+    // stack. The stack still follows, because the cause is usually in it.
+    console.warn(
+      `[intake-suggest] failed after ${elapsed}ms photo=${photoKb}KB type=${mediaType} error=${name}`
+    );
     console.warn('[intake-suggest] failed', err);
     // 502 rather than 500: the failure is upstream, and the wizard's handling
     // is the same either way — carry on without suggestions.
+    // A timeout is a different fact from a failure: the photo is already
+    // saved, nothing is wrong with it, and trying again on better signal may
+    // well work. Collapsing it into 502 made the UI say "no pudimos analizar",
+    // which reads as permanent. Measured in production 2026-08-30.
+    const timedOut =
+      err instanceof Error &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError');
+    if (timedOut) {
+      return NextResponse.json({ error: 'suggest-timeout' }, { status: 504 });
+    }
     return NextResponse.json({ error: 'suggest-failed' }, { status: 502 });
   }
 }
