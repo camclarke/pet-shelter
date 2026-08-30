@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { google } from './google';
 import { FLASH_LITE_MODEL, FLASH_MODEL, modelKeyFor } from './model-ids';
+import type { PetPhotoSlot } from '../types';
 import { recordAiUsage } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
 
@@ -43,6 +44,29 @@ import type { RawPhotoSuggestion } from '../intake-suggestion';
 const SuggestionSchema = z.object({
   species: z.enum(['dog', 'cat', 'rabbit', 'other']).nullable(),
   speciesConfidence: z.enum(['high', 'medium', 'low']),
+
+  /**
+   * ⚠️ A DELIBERATE REVERSAL, made by the owner on 2026-08-30.
+   *
+   * Sex was absent from this schema by construction, and there was a test
+   * asserting it could not be added. The reasoning stands and is worth
+   * keeping in view: sex drives Spanish gender agreement in every sentence
+   * on the site — the species noun, the size adjective, every past
+   * participle — so one wrong value makes the whole page ungrammatical in
+   * the only language its readers use.
+   *
+   * What changed is the evidence available. The guided capture asks for a
+   * GENITAL photograph, which makes this readable rather than guessable.
+   * Two guards remain: decideSex refuses unless that slot was actually
+   * supplied, and the value is OFFERED for one tap rather than prefilled.
+   * Do not promote it to prefill without re-reading the above.
+   */
+  sex: z.enum(['male', 'female']).nullable(),
+  sexConfidence: z.enum(['high', 'medium', 'low']),
+  /** True only if the model actually saw genitalia, not inferred from build. */
+  sexFromGenitalPhoto: z.boolean(),
+  /** Visible desexing evidence: absent testicles, a spay scar. */
+  apparentlySterilized: z.enum(['yes', 'no', 'unknown']),
 
   visibleType: z.string().nullable(),
   isLikelyPurebred: z.boolean(),
@@ -136,6 +160,22 @@ Usá nombres de raza comunes en español. Si de verdad no se parece a ninguna
 raza reconocible, devolvé una lista vacía — eso también es una respuesta
 válida y es mejor que inventar un parecido.
 
+FOTOS. Vas a recibir entre una y cuatro fotografías, cada una precedida de
+una etiqueta que dice qué es: «frente», «perfil», «dientes» o «genitales».
+Usá cada una para lo que sirve y no para otra cosa:
+
+- La EDAD se estima SÓLO de la foto de dientes. Si no hay foto de dientes,
+  poné ageConfidence en "low" y devolvé un rango honesto o ninguno. El pelo
+  claro alrededor del hocico NO es canas: en muchas razas es la máscara
+  facial y no dice nada de la edad.
+- El SEXO se determina SÓLO de la foto de genitales. Si no hay foto de
+  genitales, poné sex en null, sexFromGenitalPhoto en false y
+  sexConfidence en "low". No lo deduzcas del tamaño ni de la forma del
+  cuerpo: no se ve ahí.
+- En apparentlySterilized poné "yes" sólo si se ve evidencia clara
+  (testículos ausentes, cicatriz de castración). Ante la duda, "unknown".
+- La RAZA, el COLOR y el PELAJE se leen de las fotos de frente y de perfil.
+
 COLOR Y PELAJE. Son dos campos distintos y no los mezcles. En colorPattern
 poné los colores y las marcas visibles — por ejemplo "negro, gris y blanco, con
 máscara facial y pecho blanco". En coatType poné la textura, el largo y la
@@ -228,11 +268,35 @@ export const SUGGEST_ATTEMPT_TIMEOUT_MS = 12_000;
  */
 export const SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH = 25_000;
 
-/** Per-attempt budget for whichever tier is actually being called. */
-export function attemptTimeoutMsFor(modelId: string): number {
-  return modelId.includes('lite')
-    ? SUGGEST_ATTEMPT_TIMEOUT_MS
-    : SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH;
+/**
+ * Extra budget per photo beyond the first.
+ *
+ * The budget has to scale with the photo count, not just the tier. Measured
+ * 2026-08-30 on Flash-Lite: one image 4978ms, two images 7240ms, so roughly
+ * +2.2s per image. Flash runs about 2.5x slower, hence ~6s.
+ *
+ * ⚠️ Extrapolated from TWO images, not measured at four. A two-photo Flash
+ * run took ~13s on the attempt that succeeded. Re-measure when guided capture
+ * actually sends four, and do not trust this constant until then — the last
+ * two times a timeout was set from a guess rather than a measurement it was
+ * wrong in production.
+ */
+export const SUGGEST_PER_EXTRA_PHOTO_MS_FLASH = 6_000;
+export const SUGGEST_PER_EXTRA_PHOTO_MS_LITE = 2_500;
+
+/**
+ * Per-attempt budget for the tier being called AND the number of photos.
+ *
+ * A single shared budget across attempts was the bug fixed earlier today; a
+ * budget that ignores photo count is the same mistake one axis over.
+ */
+export function attemptTimeoutMsFor(modelId: string, photoCount = 1): number {
+  const lite = modelId.includes('lite');
+  const base = lite ? SUGGEST_ATTEMPT_TIMEOUT_MS : SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH;
+  const perExtra = lite
+    ? SUGGEST_PER_EXTRA_PHOTO_MS_LITE
+    : SUGGEST_PER_EXTRA_PHOTO_MS_FLASH;
+  return base + perExtra * Math.max(0, photoCount - 1);
 }
 
 /** Attempts in total, not retries after the first. */
@@ -278,6 +342,28 @@ export const SUGGEST_MODEL = FLASH_MODEL;
  * produced a given record.
  */
 export const SUGGEST_FALLBACK_MODEL = FLASH_LITE_MODEL;
+
+/** One photograph plus the slot it was taken for. */
+export interface SlottedPhoto {
+  slot: PetPhotoSlot;
+  bytes: Uint8Array;
+  mediaType: string;
+}
+
+/**
+ * The Spanish label each slot is announced with in the prompt. These strings
+ * are read by the MODEL, not by a person, but they are Spanish because the
+ * whole prompt is — mixing languages in one instruction measurably degrades
+ * following, and the prompt is the one place this project does not keep
+ * Spanish out of code.
+ */
+const SLOT_LABEL: Record<PetPhotoSlot, string> = {
+  front: 'frente',
+  side: 'perfil',
+  teeth: 'dientes',
+  genitals: 'genitales',
+  other: 'otra',
+};
 
 export interface SuggestResult {
   suggestion: RawPhotoSuggestion;
@@ -333,12 +419,21 @@ async function withRetry<T>(call: () => Promise<T>): Promise<T> {
   throw lastErr;
 }
 
+/**
+ * ⚠️ Takes the WHOLE photo set in ONE call, never one call per photo.
+ *
+ * Measured 2026-08-30: an image costs ~1064 input tokens and the prompt
+ * costs ~990, paid once. So four photos batched is 5246 tokens against 8216
+ * for four separate calls — but the tokens are not the point. Free-tier
+ * quota is counted in REQUESTS, and the Flash tier gets 20 a day. Batched
+ * that is 20 animals a day; one call per photo would be five.
+ */
 export async function suggestFromPhoto(
-  image: Uint8Array,
-  mediaType: string
+  photos: readonly SlottedPhoto[]
 ): Promise<SuggestResult> {
+  if (photos.length === 0) throw new Error('suggestFromPhoto: at least one photo is required');
   try {
-    return await extractWith(SUGGEST_MODEL, image, mediaType);
+    return await extractWith(SUGGEST_MODEL, photos);
   } catch (err) {
     if (!isQuotaExhausted(err)) throw err;
     // Degrade rather than fail. Plan §3: a gate stricter than the reality of
@@ -347,14 +442,13 @@ export async function suggestFromPhoto(
     console.warn(
       `[intake-suggest] ${SUGGEST_MODEL} out of quota; falling back to ${SUGGEST_FALLBACK_MODEL}`
     );
-    return extractWith(SUGGEST_FALLBACK_MODEL, image, mediaType);
+    return extractWith(SUGGEST_FALLBACK_MODEL, photos);
   }
 }
 
 async function extractWith(
   modelId: string,
-  image: Uint8Array,
-  mediaType: string
+  photos: readonly SlottedPhoto[]
 ): Promise<SuggestResult> {
   const { object, usage, providerMetadata } = await withRetry(() =>
     generateObject({
@@ -382,16 +476,23 @@ async function extractWith(
       messages: [
         {
           role: 'user',
+          // Each image is preceded by its own label. Without it the model has
+          // to work out which photo is which — the AI Studio run that got the
+          // age right had to write "Dental Indicators (Image 1)" to say so.
+          // Two labels measured at ~14 tokens, so this is effectively free.
           content: [
             { type: 'text', text: USER_INSTRUCTION },
-            { type: 'image', image, mediaType },
+            ...photos.flatMap((p) => [
+              { type: 'text' as const, text: `Foto: ${SLOT_LABEL[p.slot]}` },
+              { type: 'image' as const, image: p.bytes, mediaType: p.mediaType },
+            ]),
           ],
         },
       ],
       // A FRESH signal per attempt — see SUGGEST_ATTEMPT_TIMEOUT_MS. Creating
       // it inside the callback is load-bearing: hoisting it out would restore
       // the single shared budget this replaced.
-      abortSignal: AbortSignal.timeout(attemptTimeoutMsFor(modelId)),
+      abortSignal: AbortSignal.timeout(attemptTimeoutMsFor(modelId, photos.length)),
       // 0, because withRetry owns retrying. Leaving the SDK's own retries on
       // would nest two policies and make the timing impossible to reason about.
       maxRetries: 0,

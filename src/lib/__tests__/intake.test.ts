@@ -38,6 +38,7 @@ import {
 function photo(overrides: Partial<DraftMedia> = {}): DraftMedia {
   return {
     id: 'm1',
+    slot: 'front',
     path: 'pets/p1/cover.jpg',
     url: 'https://firebasestorage.googleapis.com/v0/b/wawitas-app/o/pets%2Fp1%2Fcover.jpg',
     alt: 'Perra mestiza color caramelo sentada en el patio',
