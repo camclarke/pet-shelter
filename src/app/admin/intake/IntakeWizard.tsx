@@ -429,6 +429,20 @@ export function IntakeWizard() {
         applied.push('species');
       }
 
+      // Colour and coat are prefilled rather than offered: anyone standing
+      // next to the animal can check them in a second, and a wrong one is
+      // embarrassing rather than harmful. Contrast breed, which reaches a
+      // public listing as a claim.
+      if (s.colorPattern) {
+        patch.colorPattern = s.colorPattern;
+        applied.push('colorPattern');
+      }
+
+      if (s.coatType) {
+        patch.coatType = s.coatType;
+        applied.push('coatType');
+      }
+
       if (!s.age.refused && s.age.ageMonths !== null) {
         patch.ageYears = Math.floor(s.age.ageMonths / 12);
         patch.ageMonthsPart = s.age.ageMonths % 12;
@@ -874,6 +888,9 @@ export function IntakeWizard() {
             onPick={(file) => void handleSuggestPhoto(file)}
             onApplyBreed={(breed) => acceptSuggested({ breed }, 'breed')}
             onApplySize={(size) => acceptSuggested({ size }, 'size')}
+            onApplyWeight={(minKg, maxKg) =>
+              acceptSuggested({ weightKgMin: minKg, weightKgMax: maxKg }, 'weightKg')
+            }
             onApplyName={(name) =>
               acceptSuggested(
                 slugTouched ? { name } : { name, slug: slugify(name) },
@@ -961,6 +978,74 @@ export function IntakeWizard() {
               onChange={(e) => update({ breed: e.target.value })}
             />
           </label>
+
+          <label className="auth__field">
+            <span className="t-label">Color y manchas</span>
+            <input
+              type="text"
+              value={draft.colorPattern}
+              placeholder="negro, gris y blanco, con máscara facial"
+              disabled={busy}
+              onChange={(e) => update({ colorPattern: e.target.value })}
+            />
+            <small className="auth__hint">
+              Es lo que escribe alguien que busca a su perro perdido.
+            </small>
+          </label>
+
+          <label className="auth__field">
+            <span className="t-label">Pelaje</span>
+            <input
+              type="text"
+              value={draft.coatType}
+              placeholder="doble capa, largo y denso"
+              disabled={busy}
+              onChange={(e) => update({ coatType: e.target.value })}
+            />
+            <small className="auth__hint">
+              Largo, textura y densidad. Le dice a quien adopta cuánto cepillado le espera.
+            </small>
+          </label>
+
+          <fieldset className="admin-form__fieldset">
+            <legend className="t-label">Peso aproximado (opcional)</legend>
+            <div className="admin-form__row">
+              <label className="auth__field">
+                <span className="t-label">Desde (kg)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.1"
+                  inputMode="decimal"
+                  value={draft.weightKgMin ?? ''}
+                  disabled={busy}
+                  onChange={(e) =>
+                    update({ weightKgMin: e.target.value === '' ? null : Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label className="auth__field">
+                <span className="t-label">Hasta (kg)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.1"
+                  inputMode="decimal"
+                  value={draft.weightKgMax ?? ''}
+                  disabled={busy}
+                  onChange={(e) =>
+                    update({ weightKgMax: e.target.value === '' ? null : Number(e.target.value) })
+                  }
+                />
+              </label>
+            </div>
+            <small className="auth__hint">
+              Un rango, no un número exacto — se guarda siempre como estimación.
+              Sirve para elegir el área y calcular raciones aproximadas, y
+              <strong> nunca para calcular una dosis</strong>: eso lo hace el
+              veterinario con una balanza.
+            </small>
+          </fieldset>
 
           <fieldset className="admin-form__fieldset">
             <legend className="t-label">Edad aproximada</legend>

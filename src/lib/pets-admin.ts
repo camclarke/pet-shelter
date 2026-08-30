@@ -374,6 +374,14 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
     birthdateApprox: null,
     sex: draft.sex!,
     size: draft.size!,
+    colorPattern: draft.colorPattern.trim() || null,
+    coatType: draft.coatType.trim() || null,
+    weightKgMin: draft.weightKgMin,
+    weightKgMax: draft.weightKgMax,
+    // Always an estimate while it comes from a photograph. It turns false
+    // only when someone weighs the animal, which happens in a measurement
+    // record rather than here.
+    weightIsEstimate: draft.weightKgMin !== null || draft.weightKgMax !== null,
     status: draft.status,
     hasMicrochip: draft.hasMicrochip,
     // Derived from the first uploaded photo, never typed. See uploadPetPhoto.
