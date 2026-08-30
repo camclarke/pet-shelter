@@ -14,7 +14,7 @@
  */
 
 import { normalizeMicrochipCode, type MicrochipStandard } from './microchip';
-import type { PetSex, PetSize, PetStatus, Species } from './types';
+import type { PetPhotoSlot, PetSex, PetSize, PetStatus, Species } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The draft
@@ -36,6 +36,8 @@ import type { PetSex, PetSize, PetStatus, Species } from './types';
  */
 export interface DraftMedia {
   id: string;
+  /** Which guided shot this is — sent to the model as a label. */
+  slot: PetPhotoSlot;
   path: string;
   url: string;
   /** Spanish alt text. Required before publish — see `IntakeError.alt-required`. */
