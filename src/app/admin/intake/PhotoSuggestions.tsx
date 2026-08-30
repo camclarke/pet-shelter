@@ -37,6 +37,8 @@ export interface PhotoSuggestionsProps {
   onPick: (file: File) => void;
   onApplyBreed: (breed: string) => void;
   onApplySize: (size: PetSize) => void;
+  /** A RANGE, never a single number — see decideWeight. */
+  onApplyWeight: (minKg: number, maxKg: number) => void;
   onApplyName: (name: string) => void;
 }
 
@@ -50,6 +52,8 @@ const WITHHELD_REASON: Record<string, string> = {
   species: 'No se pudo reconocer la especie con seguridad en esta foto.',
   age: 'No se pudo estimar la edad. Ayuda una foto de los dientes, de frente y con buena luz.',
   size: 'No se puede estimar el tamaño sin algo que dé escala: una mano, una puerta, un plato.',
+  weight:
+    'No se puede estimar el peso sin algo que dé escala en la foto. Sacá otra con una mano, una puerta o un plato al lado.',
 };
 
 // ⚠️ Every one of these must say what happened to the PHOTO, because the photo
@@ -90,6 +94,7 @@ export default function PhotoSuggestions({
   onPick,
   onApplyBreed,
   onApplySize,
+  onApplyWeight,
   onApplyName,
 }: PhotoSuggestionsProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -247,6 +252,24 @@ export default function PhotoSuggestions({
             )}
           </div>
 
+          {!s.weight.refused &&
+            s.weight.weightKgMin !== null &&
+            s.weight.weightKgMax !== null && (
+              <div className="admin-suggest__offers">
+                <span className="t-label">Peso aproximado</span>
+                <button
+                  type="button"
+                  className="btn btn--muted"
+                  disabled={disabled || busy}
+                  onClick={() =>
+                    onApplyWeight(s.weight.weightKgMin!, s.weight.weightKgMax!)
+                  }
+                >
+                  {s.weight.weightKgMin}–{s.weight.weightKgMax} kg
+                </button>
+              </div>
+            )}
+
           {s.size && (
             <div className="admin-suggest__offers">
               <span className="t-label">Tamaño</span>
@@ -284,7 +307,13 @@ export default function PhotoSuggestions({
               Lo que se ve: <em>{s.visibleType}</em>
             </p>
           )}
-          {s.coatDescription && <p className="admin__sub">Pelaje: {s.coatDescription}</p>}
+          {s.colorPattern && (
+            <p className="admin__sub">Color: {s.colorPattern}</p>
+          )}
+          {s.coatType && <p className="admin__sub">Pelaje: {s.coatType}</p>}
+          {s.generalObservations && (
+            <p className="admin__sub">Se observa: {s.generalObservations}</p>
+          )}
           {s.distinguishingMarks && (
             <p className="admin__sub">Señas: {s.distinguishingMarks}</p>
           )}
