@@ -246,6 +246,19 @@ export const es: Messages = {
 
   mixedBreed: (sex) => (sex === 'female' ? 'mestiza' : 'mestizo'),
 
+  mixedBreedWithTraits: (sex, traits) => {
+    const base = sex === 'female' ? 'mestiza' : 'mestizo';
+    if (traits.length === 0) return base;
+    // Spanish joins a final item with "y", not a comma — "pastor alemán y
+    // husky", never "pastor alemán, husky". With the cap at 2 this is the
+    // only case, but the reduce keeps it correct if the cap ever rises.
+    const list =
+      traits.length === 1
+        ? traits[0]
+        : `${traits.slice(0, -1).join(', ')} y ${traits[traits.length - 1]}`;
+    return `${base} con rasgos de ${list}`;
+  },
+
   formatAge(ageMonths) {
     if (ageMonths === null) return 'edad desconocida';
     if (ageMonths < 12) return `${ageMonths} ${ageMonths === 1 ? 'mes' : 'meses'}`;

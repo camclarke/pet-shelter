@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   MAX_NAME_SUGGESTIONS,
+  MAX_RESEMBLES,
   MAX_PLAUSIBLE_AGE_MONTHS,
   SUGGESTION_POLICY,
   cleanNameSuggestions,
@@ -10,6 +11,7 @@ import {
   decideBreed,
   decideSize,
   meetsBar,
+  normalizeResembles,
   reviewSuggestion,
   type RawPhotoSuggestion,
 } from '../intake-suggestion';
@@ -26,6 +28,7 @@ function suggestion(over: Partial<RawPhotoSuggestion> = {}): RawPhotoSuggestion 
     visibleType: null,
     isLikelyPurebred: false,
     purebredGuess: null,
+    resemblesBreeds: [],
     lifeStage: null,
     ageMonthsMin: null,
     ageMonthsMax: null,
@@ -70,7 +73,7 @@ test('a high bar admits only high', () => {
 
 test('breed defaults to mixed even when the model is confident about species', () => {
   const d = decideBreed(suggestion({ speciesConfidence: 'high', species: 'dog' }));
-  assert.deepEqual(d, { kind: 'mixed' });
+  assert.deepEqual(d, { kind: 'mixed', resembles: [] });
 });
 
 test('a purebred claim without high species confidence is still mixed', () => {
@@ -81,7 +84,7 @@ test('a purebred claim without high species confidence is still mixed', () => {
       speciesConfidence: 'medium',
     })
   );
-  assert.deepEqual(d, { kind: 'mixed' });
+  assert.deepEqual(d, { kind: 'mixed', resembles: [] });
 });
 
 test('a purebred claim WITH high confidence is offered as purebred', () => {
@@ -99,7 +102,7 @@ test('a blank purebred guess falls back to mixed rather than an empty breed', ()
   const d = decideBreed(
     suggestion({ isLikelyPurebred: true, purebredGuess: '   ', speciesConfidence: 'high' })
   );
-  assert.deepEqual(d, { kind: 'mixed' });
+  assert.deepEqual(d, { kind: 'mixed', resembles: [] });
 });
 
 test('a breed decision is never a Spanish string — rendering needs sex', () => {
@@ -258,4 +261,74 @@ test('breed is offered, never prefilled', () => {
 
 test('size is offered, never prefilled', () => {
   assert.equal(SUGGESTION_POLICY.size, 'offer');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Breed resemblances — "mestizo con rasgos de …"
+//
+// "mestizo" alone is honest but tells an adopter nothing, which is why the
+// resemblance exists. It must stay a RESEMBLANCE: the label says "con rasgos
+// de", never a bare breed, because a confident wrong breed on a public listing
+// attracts the wrong family and the animal comes back.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('resemblances are trimmed and blanks dropped', () => {
+  assert.deepEqual(normalizeResembles(['  pastor alemán  ', '', '   ']), [
+    'pastor alemán',
+  ]);
+});
+
+test('resemblances fold duplicates that differ only by case or accent', () => {
+  // A model returning both "husky" and "Husky" would otherwise render as
+  // "con rasgos de husky y Husky", which reads as a bug to the shelter.
+  assert.deepEqual(normalizeResembles(['husky', 'HUSKY', 'Húsky']), ['husky']);
+});
+
+test('resemblances collapse internal whitespace', () => {
+  assert.deepEqual(normalizeResembles(['pastor    alemán']), ['pastor alemán']);
+});
+
+test('resemblances are capped, keeping the most-alike first', () => {
+  // The model is told to order them most- to least-alike, so the cap must take
+  // from the FRONT. Taking the tail would keep the weakest likenesses.
+  const many = ['uno', 'dos', 'tres', 'cuatro'];
+  assert.equal(MAX_RESEMBLES, 2);
+  assert.deepEqual(normalizeResembles(many), ['uno', 'dos']);
+});
+
+test('an empty resemblance list is a valid answer, not a failure', () => {
+  assert.deepEqual(normalizeResembles([]), []);
+});
+
+test('decideBreed carries resemblances on the mixed branch', () => {
+  const d = decideBreed(
+    suggestion({ resemblesBreeds: ['pastor alemán', 'husky siberiano'] })
+  );
+  assert.deepEqual(d, {
+    kind: 'mixed',
+    resembles: ['pastor alemán', 'husky siberiano'],
+  });
+});
+
+test('a purebred decision carries no resemblances', () => {
+  // Belt and braces: a purebred branch that also carried "con rasgos de" would
+  // render two competing claims about the same animal.
+  const d = decideBreed(
+    suggestion({
+      isLikelyPurebred: true,
+      purebredGuess: 'beagle',
+      speciesConfidence: 'high',
+      resemblesBreeds: ['pastor alemán'],
+    })
+  );
+  assert.deepEqual(d, { kind: 'purebred', breed: 'beagle' });
+});
+
+test('resemblances never turn a mixed animal into a purebred claim', () => {
+  // The whole safety property in one assertion: whatever the model puts in
+  // resemblesBreeds, the decision stays 'mixed' unless the purebred bar is met.
+  const d = decideBreed(
+    suggestion({ resemblesBreeds: ['pastor alemán'], speciesConfidence: 'high' })
+  );
+  assert.equal(d.kind, 'mixed');
 });

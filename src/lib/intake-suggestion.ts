@@ -71,6 +71,12 @@ export interface RawPhotoSuggestion {
   isLikelyPurebred: boolean;
   /** Only meaningful when `isLikelyPurebred`; still never auto-applied. */
   purebredGuess: string | null;
+  /**
+   * Breeds a MIXED animal resembles, most-alike first. May be empty, and an
+   * empty list is a valid answer rather than a failure — the prompt says so
+   * explicitly, because inventing a likeness is worse than admitting none.
+   */
+  resemblesBreeds: string[];
 
   lifeStage: LifeStage | null;
   ageMonthsMin: number | null;
@@ -142,8 +148,46 @@ export function meetsBar(c: Confidence, bar: Confidence = MIN_CONFIDENCE_TO_SHOW
  * sex ("mestizo" / "mestiza") and Spanish lives only in `src/i18n`.
  */
 export type BreedDecision =
-  | { kind: 'mixed' }
+  | {
+      kind: 'mixed';
+      /**
+       * Breeds this animal RESEMBLES, most-alike first, possibly empty.
+       * A resemblance, never a claim — the UI renders it as "mestizo con
+       * rasgos de …", which is what a person recognises at a glance without
+       * asserting a pedigree nobody can see in a photograph.
+       */
+      resembles: string[];
+    }
   | { kind: 'purebred'; breed: string };
+
+/** At most this many resemblances survive. More reads as a guess, not a likeness. */
+export const MAX_RESEMBLES = 2;
+
+/**
+ * Normalise the model's breed resemblances: trim, drop blanks, fold duplicates
+ * that differ only by case or accent, and cap the count.
+ *
+ * Deliberately does NOT validate against a breed list. There is no canonical
+ * Spanish breed vocabulary for the mixes a Cochabamba street rescue produces,
+ * and a whitelist would silently drop the honest answers it does not know.
+ */
+export function normalizeResembles(raw: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const trimmed = item.trim().replace(/\s+/g, ' ');
+    if (!trimmed) continue;
+    const key = trimmed
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+    if (out.length === MAX_RESEMBLES) break;
+  }
+  return out;
+}
 
 /**
  * ⚠️ Returns `mixed` unless the model both claims purebred AND is confident.
@@ -155,7 +199,10 @@ export function decideBreed(s: RawPhotoSuggestion): BreedDecision {
   if (s.isLikelyPurebred && guess && meetsBar(s.speciesConfidence, 'high')) {
     return { kind: 'purebred', breed: guess };
   }
-  return { kind: 'mixed' };
+  // "mestizo" alone is true but useless to someone scrolling a wall of dogs.
+  // What it resembles is the thing a person actually recognises, and it stays
+  // a resemblance rather than a claim — see t.mixedBreed().
+  return { kind: 'mixed', resembles: normalizeResembles(s.resemblesBreeds ?? []) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

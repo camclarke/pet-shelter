@@ -79,6 +79,16 @@ export interface Messages {
    */
   mixedBreed(sex: PetSex): string;
 
+  /**
+   * "mestiza con rasgos de pastor alemán y husky siberiano".
+   *
+   * A resemblance, never a claim. Falls back to plain `mixedBreed(sex)` when
+   * the list is empty, because "mestizo" on its own is still the honest
+   * answer — it is just a less useful one to someone scrolling a wall of
+   * dogs, which is what the traits fix.
+   */
+  mixedBreedWithTraits(sex: PetSex, traits: readonly string[]): string;
+
   /** "3 meses", "1 año", "edad desconocida". */
   formatAge(ageMonths: number | null): string;
 
