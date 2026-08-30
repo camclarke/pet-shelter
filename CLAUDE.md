@@ -627,6 +627,119 @@ scanned chip resolves to a name and a phone call.
   Verified at the end: 236/236 tests, typecheck clean, build clean with every
   route keeping its `revalidate`, deployed tag equals `git rev-parse HEAD`, and
   Firestore unchanged at 0 pets / 1 user / 1 blank draft / `api_usage_daily` 0.
+- **2026-08-30** — **THE AI PATH RAN END TO END FROM A PHONE. The claim this
+  file has been unable to make since 2026-08-26 is now earned.** Four PRs
+  (#19 → #22) plus one commit that went straight to main. Production log:
+
+  ```
+  [intake-suggest] ok in 4683ms photo=323KB type=image/jpeg
+  [ai-usage] {"process":"intake_suggest","model":"gemini-3.1-flash-lite",
+              "inputTokens":1643,"outputTokens":252,"estCostUsd":0.00078875}
+  ```
+
+  `api_usage_daily` holds a document, the draft carries `species: dog`,
+  `suggestedFields: ["species"]` and `suggestedByModel: flash-lite`. Playbook
+  §15 item 20 is satisfied: the real flow ran on the real deployment.
+
+  **The Cloud Run hang, and a defect of my own inside the fix for it.** Four
+  real calls: ok 4683ms/323KB, FAILED 25009ms/393KB, ok 6795ms/435KB, FAILED
+  25001ms/229KB. **Photo size is not the variable** — the largest succeeded and
+  the smallest failed — and the failures sit on the abort to the millisecond,
+  so the request never returns rather than being slow. Roughly half hang.
+  Then the part worth keeping: PR #19 had added `maxRetries: 1` alongside a
+  single `AbortSignal.timeout(25_000)`, reasoning the budget would cover two
+  attempts. **It does not.** The signal spans every attempt, so a hang on the
+  first consumed the whole budget and the retry never started — which the logs
+  prove: exactly 25001ms, one attempt. **A retry that cannot run is worse than
+  no retry, because it reads like resilience that is not there.** Fixed with a
+  per-attempt budget and our own retry loop, proven against a socket that
+  accepts and never answers: attempt 1 abandoned, attempt 2 actually made, two
+  fetch calls not one.
+
+  **The Lite tier gets age dangerously wrong, and it is diagnosable.** From two
+  AI Studio conversations, same prompt and photographs: a Lite model read the
+  white facial MASK of a husky-type dog as *muzzle greying* and returned
+  "mature adult to senior, 6-8+ years", while a full Flash model with thinking
+  read the **dentition** and returned "young adult, 1.5-3 years". The Lite run
+  noted the teeth were clean and then overrode itself with the coat. It also
+  called a dog lying on cool tile "lethargic" and advised a vet. **The tier is
+  what fixes this, not the point release** — so intake moved to
+  `gemini-3.6-flash` and NOT to `gemini-3.7-flash`, which was what got
+  evaluated: 3.7 is in `UNPRICED_BUT_AVAILABLE` and the rule recorded there is
+  to add the price row before swapping. One env var switches it later.
+
+  **The tier change broke the timeout, and the first real run returned
+  nothing.** Measured on the same photograph: `gemini-3.6-flash` **10060 ms**,
+  `gemini-3.1-flash-lite` **3991 ms**. The 12s per-attempt budget was
+  calibrated for Lite and left Flash no headroom once the structured schema was
+  added. Flash now gets 25s, and the reasoning latency is the feature rather
+  than overhead — it is what buys the correct age. **A timeout is calibrated to
+  a model, and changing tier invalidates it.**
+
+  **Free-tier quota, read off the project's own quota rather than guessed:**
+
+  | model | requests/day | /min |
+  |---|---|---|
+  | `gemini-3.1-flash-lite` / `3.5-flash-lite` | **500** | 15 |
+  | `gemini-3.5` / `3.6` / `3.7-flash` | **20** | 5 |
+
+  One photo is one call, so RPD is intakes-per-day one for one. Google no
+  longer publishes this table — it is per project, behind AI Studio — but
+  `gcloud alpha services quota list --service=generativelanguage.googleapis.com`
+  reads it directly, which is how these numbers were obtained. Hence the 429
+  fallback from Flash to Flash-Lite: a weaker answer beats no answer.
+
+  **⚠️ Two billing facts that are easy to get wrong.** The AI Studio key does
+  NOT belong to `wawitas`. It lives on **`gen-lang-client-0564433675`**
+  ("Default Gemini Project"), auto-created by AI Studio, with
+  `billingEnabled: false` — which is what puts it on the free tier. And
+  **the $300 trial credit cannot pay for it**: Google's free-tier docs list
+  "Gemini API in AI Studio" as an explicit exclusion. **Consequence nobody had
+  in view: the Terraform budget alert is scoped to `wawitas` and is therefore
+  structurally incapable of ever seeing AI spend.** Harmless while the free
+  tier cannot bill, and exactly the shape of the sibling stack's $665 surprise
+  the moment someone links billing on that project.
+
+  **The mobile UI took three passes, each driven by a photograph from a real
+  phone rather than by reasoning.** PR #19 gave the photo step a camera button
+  — the copy said *"Sacale una foto"* while the only control opened a file
+  picker — and made every failure message say the photo was already saved,
+  because it is uploaded before the model is called and a message that omits
+  that reads as "nothing happened". PR #20 fixed three defects a screenshot
+  showed, one of them mine: `text-overflow: ellipsis` does **not** apply to a
+  flex container's own text, so the account label hard-clipped as
+  "ISRAEL.ROCHA.ROCH" with no ellipsis — it needs an inner block box with
+  `min-width: 0`. Also "Nosotros" clipped at **360px**, the width the device
+  actually reported, while the previous change had been verified at 375px:
+  **the breakpoint was right and the test width was wrong.** PR #21 added
+  breed resemblances ("mestizo con rasgos de husky siberiano y alaskan
+  malamute") and put thumbnails on draft rows, because unfinished drafts are
+  normally unnamed and three rows reading "Sin nombre" cannot be told apart.
+
+  **PR #22 recorded the basics.** Colour and coat were one `coatDescription`
+  string and are now separate fields on the public `Pet` — colour is what
+  someone types searching for a lost dog, coat is what tells an adopter about
+  grooming. Weight is an **estimated range** that refuses without a scale
+  reference, because the same photograph fits a 4 kg dog and a 40 kg one;
+  `weightIsEstimate` travels with it and it is barred from mg/kg dosing.
+  Verified on the real photograph at 12402ms: colour and coat separated and
+  rich, weight 18-26 kg because the floor tiles gave scale, and **age still
+  correctly REFUSED because that photo has no teeth** — which is the argument
+  for guided multi-photo capture, the next piece and the one that unlocks age.
+
+  **⚠️ One process failure worth recording.** The retry fix was committed and
+  pushed **directly to `main`** and auto-deployed. The branch was printed in
+  the same command as the commit, so it was seen only afterwards. The code had
+  gone through CI and full local verification and landed cleanly, but it
+  bypassed review. **Check the branch before committing, not in the same
+  command.**
+
+  Verified at the end: **251/251 tests**, typecheck clean, build clean,
+  deployed tag equals `git rev-parse HEAD` on every merge, all routes 200 on
+  both hosts, the auth boundary still 401/401/405, and `GEMINI_API_KEY`,
+  `generativelanguage` and `createGoogleGenerativeAI` absent from every client
+  chunk. `pets` still holds **0 documents** — the drafts are real animals and
+  publishing is deliberately a decision.
 ---
 
 ## Next session — start here
@@ -636,6 +749,15 @@ IN PRODUCTION** — merged at `365cbd0`, deployed Cloud Run tag equals
 `git rev-parse HEAD`, all 20 route/host combinations 200, and the served
 bundle carries copy only this build contains with a clean per-route split.
 Read the 2026-08-27 log entries first — there are two.
+
+**Last session 2026-08-30 merged PRs #19-#22 and one commit straight to main.**
+The headline is that **the AI path finally ran end to end from a phone** —
+read the 2026-08-30 log entry first. It also carries the Cloud Run hang
+diagnosis, the Lite-tier age error that moved intake to Flash, the measured
+free-tier quotas (500/day Lite vs 20/day Flash), and two billing facts worth
+knowing: the AI Studio key lives on a DIFFERENT project
+(`gen-lang-client-0564433675`) and the $300 trial credit explicitly cannot pay
+for Gemini API, so the budget alert cannot see AI spend at all.
 
 **PR #18 is merged and DEPLOYED (`9253cda`): the mobile header bug is fixed.**
 Below 760px the header hid BOTH the nav and the account button, and the account
@@ -673,25 +795,35 @@ sessions. Verify the ADC *identity* at `oauth2/v3/userinfo`, never at the
 `quota_project_id` label, which has lied here before. `firebase login:list`
 is a separate check; it is a third credential store.
 
-### ⛔ The models have been called — but never from the APP
+### ✅ The AI path is PROVEN from the app — 2026-08-30
 
 **This section used to say no API key existed. That is now false.** A real
 `GEMINI_API_KEY` is in `.env.local` (gitignored, untracked), all three model
 ids are **verified live** via `npm run ai:probe`, and the photo-intake tier
 was chosen by a benchmark against that key rather than off a docs page.
 
-**What is still NOT true is the claim that matters.** `api_usage_daily` holds
-**0 documents**, and that zero is *measured proof*, not an absence of
-evidence: `recordAiUsage` is wired into `intake-suggest.ts` and
-`dictate.ts`, while `scripts/ai-probe.mjs` deliberately calls the model
-directly and bypasses metering. So **no AI call has ever gone through the
-application path**, and no `[ai-usage]` line has ever been observed from it.
+**A real photograph of a real animal went through `/admin/intake` from a
+phone on 2026-08-30, and the server logged it:**
+
+```
+[intake-suggest] ok in 4683ms photo=323KB type=image/jpeg
+[ai-usage] {"process":"intake_suggest","model":"gemini-3.1-flash-lite", …}
+```
+
+`api_usage_daily` is no longer zero, and the draft carries
+`suggestedByModel`. Playbook §15 item 20 is satisfied. **Dictation and the
+medical panel have NOT had their equivalent moment** — see the table.
+
+⚠️ **Intake now runs on the Flash tier**, which is **20 requests/day** on the
+free tier against Flash-Lite's 500, with an automatic 429 fallback to Lite.
+Read the 2026-08-30 log entry before changing models or timeouts: a per-attempt
+timeout is calibrated to a tier and changing tier invalidates it.
 
 Read the three AI features as follows, and say which claim you have:
 
 | Feature | Claim earned |
 |---|---|
-| **Photo intake** | Deployed, serving, benchmarked live. **Never driven through `/admin/intake` with a real photograph by a human** |
+| **Photo intake** | ✅ **PROVEN END TO END 2026-08-30** — driven from a real phone with a real animal, metered, `api_usage_daily` non-zero. Now on the **Flash tier**; age still refuses without a teeth photo |
 | **Voice dictation** | Model + pure decision layers, 29 tests, deployed. **No model has heard one second of audio, and there is no review UI** |
 | **Medical records** | Deployed, renders, 27 tests. **No human has ever saved a record** — it is behind `AdminGate`, which needs a password |
 
