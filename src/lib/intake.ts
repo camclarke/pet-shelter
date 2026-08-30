@@ -60,6 +60,19 @@ export interface PetDraft {
   sex: PetSex | null;
   size: PetSize | null;
 
+  /** Colours and markings. Free text — see Pet.colorPattern. */
+  colorPattern: string;
+  /** Texture, length, density of the coat. */
+  coatType: string;
+
+  /**
+   * Estimated weight range in kg, from a photo that contained something
+   * giving scale. Both null is the normal state: the rescuer has no
+   * balance and the vet has not arrived yet.
+   */
+  weightKgMin: number | null;
+  weightKgMax: number | null;
+
   ageYears: number | null;
   ageMonthsPart: number | null;
   /**
@@ -168,6 +181,10 @@ export function draftDefaults(id: string): PetDraft {
     breed: '',
     sex: null,
     size: null,
+    colorPattern: '',
+    coatType: '',
+    weightKgMin: null,
+    weightKgMax: null,
     ageYears: null,
     ageMonthsPart: null,
     ageUnknown: false,

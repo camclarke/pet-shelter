@@ -89,8 +89,18 @@ export interface RawPhotoSuggestion {
   /** Whether anything in frame gave a sense of scale. */
   hasSizeReference: boolean;
 
-  coatDescription: string | null;
+  /** Colours and markings, e.g. "negro, gris y blanco con mascara facial". */
+  colorPattern: string | null;
+  /** Texture, length, density, e.g. "doble capa, largo y denso". */
+  coatType: string | null;
   distinguishingMarks: string | null;
+  /** Posture and bearing. Never health — that is notes, and only notes. */
+  generalObservations: string | null;
+
+  /** Estimated weight RANGE in kg. Null unless the photo gave a scale. */
+  weightKgMin: number | null;
+  weightKgMax: number | null;
+  weightConfidence: Confidence;
 
   nameSuggestions: string[];
 
@@ -123,7 +133,16 @@ export const SUGGESTION_POLICY = {
   /** Prefilled only when the photo actually contained a scale reference. */
   size: 'offer',
   names: 'offer',
-  coat: 'display',
+  /**
+   * Prefilled, unlike breed. Colour and coat are things anyone standing next
+   * to the animal can check in a second, and a wrong one is embarrassing
+   * rather than harmful — where a wrong breed attracts the wrong family.
+   */
+  colorPattern: 'prefill',
+  coatType: 'prefill',
+  /** Offered. It is a guess from a photograph, and it feeds rations. */
+  weight: 'offer',
+  observations: 'display',
   marks: 'display',
 } as const satisfies Record<string, SuggestionUse>;
 
@@ -286,6 +305,70 @@ export function decideSize(s: RawPhotoSuggestion): PetSize | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Weight
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A range wider than this is not worth showing: it spans so much of the dog
+ * population that it cannot inform a pen or a ration, and a number on screen
+ * always reads as more certain than it is.
+ */
+export const MAX_WEIGHT_RANGE_FACTOR = 3;
+
+/** Nothing this project handles weighs less. Below it, the model has erred. */
+export const MIN_PLAUSIBLE_WEIGHT_KG = 0.3;
+/** A 100 kg dog is not impossible, but from a photograph it is a misread. */
+export const MAX_PLAUSIBLE_WEIGHT_KG = 100;
+
+export interface WeightDecision {
+  weightKgMin: number | null;
+  weightKgMax: number | null;
+  /** Always true when it came from a photo. There is no other honest value. */
+  isEstimate: boolean;
+  /** True when there was no scale in frame, or the range was too wide. */
+  refused: boolean;
+}
+
+const REFUSED_WEIGHT: WeightDecision = {
+  weightKgMin: null,
+  weightKgMax: null,
+  isEstimate: true,
+  refused: true,
+};
+
+/**
+ * ⚠️ Refuses far more readily than it answers, and that is the design.
+ *
+ * The rescuer has no scale, so this is the only weight the record has until a
+ * vet arrives — which makes it tempting to always produce one. Resist that. A
+ * lone animal in a frame has no scale at all: the same photograph fits a 4 kg
+ * dog and a 40 kg one, and the model cannot tell. So without a scale reference
+ * this refuses outright rather than guessing.
+ *
+ * Whatever it returns is barred from dosing. isEstimate is always true and
+ * travels with the value, so no caller can lose that fact.
+ */
+export function decideWeight(s: RawPhotoSuggestion): WeightDecision {
+  if (!s.hasSizeReference) return REFUSED_WEIGHT;
+  if (!meetsBar(s.weightConfidence)) return REFUSED_WEIGHT;
+
+  const min = s.weightKgMin;
+  const max = s.weightKgMax;
+  if (min == null || max == null) return REFUSED_WEIGHT;
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return REFUSED_WEIGHT;
+  if (min <= 0 || max <= 0) return REFUSED_WEIGHT;
+  if (min > max) return REFUSED_WEIGHT;
+  if (min < MIN_PLAUSIBLE_WEIGHT_KG || max > MAX_PLAUSIBLE_WEIGHT_KG) {
+    return REFUSED_WEIGHT;
+  }
+  // Ratio rather than difference: 2-6kg and 40-44kg are both 4kg wide, and
+  // only the first is a useful answer.
+  if (max / min > MAX_WEIGHT_RANGE_FACTOR) return REFUSED_WEIGHT;
+
+  return { weightKgMin: min, weightKgMax: max, isEstimate: true, refused: false };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Names
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -317,9 +400,12 @@ export interface ReviewedSuggestion {
   age: AgeDecision;
   size: PetSize | null;
   names: string[];
+  weight: WeightDecision;
   visibleType: string | null;
-  coatDescription: string | null;
+  colorPattern: string | null;
+  coatType: string | null;
   distinguishingMarks: string | null;
+  generalObservations: string | null;
   notes: string | null;
   /** Field keys that were dropped, so the UI can say WHY rather than go quiet. */
   withheld: string[];
@@ -341,15 +427,21 @@ export function reviewSuggestion(s: RawPhotoSuggestion): ReviewedSuggestion {
   const size = decideSize(s);
   if (size == null) withheld.push('size');
 
+  const weight = decideWeight(s);
+  if (weight.refused) withheld.push('weight');
+
   return {
     species,
     breed: decideBreed(s),
     age,
     size,
     names: cleanNameSuggestions(s.nameSuggestions),
+    weight,
     visibleType: s.visibleType?.trim() || null,
-    coatDescription: s.coatDescription?.trim() || null,
+    colorPattern: s.colorPattern?.trim() || null,
+    coatType: s.coatType?.trim() || null,
     distinguishingMarks: s.distinguishingMarks?.trim() || null,
+    generalObservations: s.generalObservations?.trim() || null,
     notes: s.notes?.trim() || null,
     withheld,
   };
@@ -360,7 +452,15 @@ export function reviewSuggestion(s: RawPhotoSuggestion): ReviewedSuggestion {
  * later reader can tell "the vet said 18 months" from "a model read a wear
  * photo" — a distinction `Pet` could not previously express.
  */
-export type SuggestedField = 'species' | 'breed' | 'ageMonths' | 'size' | 'name';
+export type SuggestedField =
+  | 'species'
+  | 'breed'
+  | 'ageMonths'
+  | 'size'
+  | 'name'
+  | 'colorPattern'
+  | 'coatType'
+  | 'weightKg';
 
 export const SUGGESTIBLE_FIELDS: readonly SuggestedField[] = [
   'species',
@@ -368,6 +468,9 @@ export const SUGGESTIBLE_FIELDS: readonly SuggestedField[] = [
   'ageMonths',
   'size',
   'name',
+  'colorPattern',
+  'coatType',
+  'weightKg',
 ] as const;
 
 /** Unused type-level guard: every PetSex is still handled by i18n, not here. */

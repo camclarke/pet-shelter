@@ -4,12 +4,14 @@ import assert from 'node:assert/strict';
 import {
   MAX_NAME_SUGGESTIONS,
   MAX_RESEMBLES,
+  MAX_WEIGHT_RANGE_FACTOR,
   MAX_PLAUSIBLE_AGE_MONTHS,
   SUGGESTION_POLICY,
   cleanNameSuggestions,
   decideAge,
   decideBreed,
   decideSize,
+  decideWeight,
   meetsBar,
   normalizeResembles,
   reviewSuggestion,
@@ -37,8 +39,13 @@ function suggestion(over: Partial<RawPhotoSuggestion> = {}): RawPhotoSuggestion 
     size: null,
     sizeConfidence: 'low',
     hasSizeReference: false,
-    coatDescription: null,
+    colorPattern: null,
+    coatType: null,
     distinguishingMarks: null,
+    generalObservations: null,
+    weightKgMin: null,
+    weightKgMax: null,
+    weightConfidence: 'low',
     nameSuggestions: [],
     notes: null,
     ...over,
@@ -243,6 +250,11 @@ test('a good photo produces a full review with nothing withheld', () => {
       hasSizeReference: true,
       nameSuggestions: ['Luna', 'Nube'],
       visibleType: '  mestizo con rasgos de pastor  ',
+      colorPattern: '  negro y blanco  ',
+      coatType: '  doble capa  ',
+      weightKgMin: 8,
+      weightKgMax: 12,
+      weightConfidence: 'high',
     })
   );
   assert.equal(r.species, 'dog');
@@ -250,6 +262,10 @@ test('a good photo produces a full review with nothing withheld', () => {
   assert.equal(r.age.refused, false);
   assert.deepEqual(r.names, ['Luna', 'Nube']);
   assert.equal(r.visibleType, 'mestizo con rasgos de pastor');
+  assert.equal(r.colorPattern, 'negro y blanco');
+  assert.equal(r.coatType, 'doble capa');
+  assert.equal(r.weight.refused, false);
+  assert.equal(r.weight.isEstimate, true);
   assert.deepEqual(r.withheld, []);
 });
 
@@ -331,4 +347,82 @@ test('resemblances never turn a mixed animal into a purebred claim', () => {
     suggestion({ resemblesBreeds: ['pastor alemán'], speciesConfidence: 'high' })
   );
   assert.equal(d.kind, 'mixed');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Weight — a guess from a photograph, and it must never look like more
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('weight is refused outright without a scale reference', () => {
+  // A lone animal in a frame fits a 4kg dog and a 40kg one. This is the most
+  // important refusal in the file: the rescuer has no balance, so a number
+  // here is the only weight the record has until a vet arrives.
+  const w = decideWeight(
+    suggestion({ weightKgMin: 8, weightKgMax: 12, weightConfidence: 'high', hasSizeReference: false })
+  );
+  assert.equal(w.refused, true);
+  assert.equal(w.weightKgMin, null);
+  assert.equal(w.weightKgMax, null);
+});
+
+test('weight is refused when the range is too wide to act on', () => {
+  // Ratio, not difference: 2-6kg and 40-44kg are both 4kg wide and only the
+  // first is a useful answer.
+  const w = decideWeight(
+    suggestion({ weightKgMin: 5, weightKgMax: 20, weightConfidence: 'high', hasSizeReference: true })
+  );
+  assert.equal(MAX_WEIGHT_RANGE_FACTOR, 3);
+  assert.equal(w.refused, true);
+});
+
+test('a usable weight range survives and is always flagged an estimate', () => {
+  const w = decideWeight(
+    suggestion({ weightKgMin: 8, weightKgMax: 12, weightConfidence: 'high', hasSizeReference: true })
+  );
+  assert.equal(w.refused, false);
+  assert.equal(w.weightKgMin, 8);
+  assert.equal(w.weightKgMax, 12);
+  // There is no honest path to false here. A photograph cannot measure.
+  assert.equal(w.isEstimate, true);
+});
+
+test('weight is refused on an inverted range', () => {
+  const w = decideWeight(
+    suggestion({ weightKgMin: 20, weightKgMax: 8, weightConfidence: 'high', hasSizeReference: true })
+  );
+  assert.equal(w.refused, true);
+});
+
+test('weight is refused on implausible values', () => {
+  const tiny = decideWeight(
+    suggestion({ weightKgMin: 0.05, weightKgMax: 0.1, weightConfidence: 'high', hasSizeReference: true })
+  );
+  assert.equal(tiny.refused, true);
+  const huge = decideWeight(
+    suggestion({ weightKgMin: 90, weightKgMax: 200, weightConfidence: 'high', hasSizeReference: true })
+  );
+  assert.equal(huge.refused, true);
+});
+
+test('weight is refused on low confidence', () => {
+  const w = decideWeight(
+    suggestion({ weightKgMin: 8, weightKgMax: 12, weightConfidence: 'low', hasSizeReference: true })
+  );
+  assert.equal(w.refused, true);
+});
+
+test('a refused weight is reported in withheld, never silently dropped', () => {
+  const r = reviewSuggestion(suggestion({ hasSizeReference: false }));
+  assert.ok(r.withheld.includes('weight'));
+});
+
+test('colour and coat are separate fields, not one string', () => {
+  // They were one `coatDescription` until 2026-08-30. Colour is what someone
+  // types searching for a lost dog; coat is what tells an adopter about
+  // grooming. Merging them loses the search term.
+  const r = reviewSuggestion(
+    suggestion({ colorPattern: 'negro y blanco', coatType: 'corto y liso' })
+  );
+  assert.equal(r.colorPattern, 'negro y blanco');
+  assert.equal(r.coatType, 'corto y liso');
 });
