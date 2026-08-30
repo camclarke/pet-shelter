@@ -81,9 +81,10 @@ import {
   type ReadmissionInput,
 } from '@/lib/readmission';
 import { formatMicrochipCode, validateMicrochip, type MicrochipError } from '@/lib/microchip';
-import type { PetSex, PetSize, PetStatus, Species } from '@/lib/types';
+import type { PetPhotoSlot, PetSex, PetSize, PetStatus, Species } from '@/lib/types';
 import { requestSuggestion, type SuggestOutcome } from '@/lib/intake-suggest-client';
 import PhotoSuggestions from './PhotoSuggestions';
+import GuidedPhotoCapture from './GuidedPhotoCapture';
 import { t } from '@/i18n';
 
 const STEPS: { key: IntakeStep; label: string }[] = [
@@ -179,6 +180,8 @@ export function IntakeWizard() {
    * must not lock an admin out of typing the name they already know.
    */
   const [suggestOutcome, setSuggestOutcome] = useState<SuggestOutcome | null>(null);
+  /** Processed blobs by slot, so analysis need not re-download them. */
+  const [photoBlobs, setPhotoBlobs] = useState<Map<PetPhotoSlot, Blob>>(new Map());
   const [suggesting, setSuggesting] = useState(false);
 
   /**
@@ -395,11 +398,18 @@ export function IntakeWizard() {
    * of someone right now — and a model timeout must never lose it. If the
    * suggestion fails the photo is already saved and already the cover.
    */
-  async function handleSuggestPhoto(file: File) {
+  /**
+   * Capture only. Uploads and saves, and deliberately does NOT call the model.
+   *
+   * ⚠️ This used to analyse on every pick. With four guided slots that would
+   * spend four requests per animal, and the Flash tier gets 20 a day free —
+   * taking the shelter from 20 animals a day to five. Analysis is one explicit
+   * call over the whole set; see handleAnalyzePhotos.
+   */
+  async function handlePickPhoto(slot: PetPhotoSlot, file: File) {
     if (!user || !draft) return;
-    setSuggesting(true);
+    setBusy(true);
     setError(null);
-    setSuggestOutcome(null);
     try {
       // Strip EXIF ONCE, then use the same bytes for both the upload and
       // the model call. Sending the original to Gemini while storing the
@@ -408,16 +418,49 @@ export function IntakeWizard() {
       // a route the Storage rules cannot see.
       const processed = await stripAndResize(file);
 
-      const uploaded = await uploadProcessedPhoto(draft.id, processed);
-      let next: PetDraft = { ...draft, media: [...draft.media, uploaded] };
+      const uploaded = await uploadProcessedPhoto(draft.id, processed, slot);
+      // Re-taking a slot replaces it rather than piling up near-identical
+      // photos — the person is fixing a blurry shot, not adding a second one.
+      const kept = draft.media.filter((m) => m.slot !== slot);
+      const next: PetDraft = { ...draft, media: [...kept, uploaded] };
       setDraft(next);
       await saveDraft(next);
 
-      const outcome = await requestSuggestion(user, processed);
+      // Held in memory so analysis does not have to re-download what was just
+      // uploaded. Lost on reload, which handleAnalyzePhotos recovers from.
+      setPhotoBlobs((prev) => new Map(prev).set(slot, processed));
+    } catch (err) {
+      report(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * The ONE model call. Sends every captured slot together — see the quota
+   * reasoning on handlePickPhoto.
+   */
+  async function handleAnalyzePhotos() {
+    if (!user || !draft || draft.media.length === 0) return;
+    setSuggesting(true);
+    setError(null);
+    setSuggestOutcome(null);
+    try {
+      // A reload drops the in-memory blobs while the draft keeps its media,
+      // so fall back to re-fetching what was uploaded rather than refusing.
+      const photos = await Promise.all(
+        draft.media.map(async (m) => ({
+          slot: m.slot,
+          blob: photoBlobs.get(m.slot) ?? (await (await fetch(m.url)).blob()),
+        })),
+      );
+
+      const outcome = await requestSuggestion(user, photos);
       setSuggestOutcome(outcome);
 
       const s = outcome.suggestion;
       if (!s) return;
+      let next: PetDraft = draft;
 
       // Only the two fields the policy marks `prefill` are applied here.
       // Breed, size and names are buttons — see PhotoSuggestions.
@@ -880,12 +923,24 @@ export function IntakeWizard() {
       {/* ── step 1: identity ───────────────────────────────────────────────── */}
       {step === 'identity' && (
         <section className="admin-form">
+          <GuidedPhotoCapture
+            captured={draft.media.map((m) => ({
+              slot: m.slot,
+              url: m.url,
+              busy: false,
+            }))}
+            busy={busy}
+            disabled={busy || suggesting}
+            analysing={suggesting}
+            onPick={(slot, file) => void handlePickPhoto(slot, file)}
+            onAnalyze={() => void handleAnalyzePhotos()}
+          />
+
           <PhotoSuggestions
             outcome={suggestOutcome}
             busy={suggesting}
             disabled={busy}
             sex={draft.sex}
-            onPick={(file) => void handleSuggestPhoto(file)}
             onApplyBreed={(breed) => acceptSuggested({ breed }, 'breed')}
             onApplySize={(size) => acceptSuggested({ size }, 'size')}
             onApplyWeight={(minKg, maxKg) =>

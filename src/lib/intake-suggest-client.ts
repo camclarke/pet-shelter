@@ -1,6 +1,7 @@
 import type { User } from 'firebase/auth';
 
 import type { ReviewedSuggestion } from './intake-suggestion';
+import type { PetPhotoSlot } from './types';
 
 /**
  * Browser side of `/api/intake/suggest`.
@@ -41,9 +42,22 @@ const NOTHING: SuggestOutcome = { suggestion: null, modelKey: null, failure: 'fa
  * stripped copy is also smaller (1600px long edge), so this is cheaper and
  * faster too, but the reason is privacy.
  */
+/** One processed photograph and the guided slot it was taken for. */
+export interface SlottedBlob {
+  slot: PetPhotoSlot;
+  blob: Blob;
+}
+
+/**
+ * ⚠️ Sends the WHOLE set in ONE request, and that is not a convenience.
+ *
+ * Free-tier quota counts requests, not tokens, and the Flash tier gets 20 a
+ * day. One request per photo would take the shelter from 20 animals a day to
+ * five. Any code that calls this once per photo has quietly broken that.
+ */
 export async function requestSuggestion(
   user: User,
-  processed: Blob
+  photos: readonly SlottedBlob[]
 ): Promise<SuggestOutcome> {
   try {
     // Not forced: a forced refresh costs a round-trip on every photo, and
@@ -51,10 +65,15 @@ export async function requestSuggestion(
     // gone stale the route answers 401 and the outcome below says so.
     const token = await user.getIdToken();
 
+    if (photos.length === 0) return { ...NOTHING, failure: 'photo-rejected' };
+
     const body = new FormData();
-    // A filename is required for the server to see this as a File rather
-    // than a bare Blob. stripAndResize always emits JPEG.
-    body.append('photo', processed, 'photo.jpg');
+    // One field per slot, which is how the route tells them apart. A filename
+    // is required for the server to see each as a File rather than a bare
+    // Blob. stripAndResize always emits JPEG.
+    for (const { slot, blob } of photos) {
+      body.append(`photo_${slot}`, blob, `${slot}.jpg`);
+    }
 
     const res = await fetch('/api/intake/suggest', {
       method: 'POST',
