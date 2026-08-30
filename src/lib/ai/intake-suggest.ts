@@ -169,6 +169,15 @@ export async function suggestFromPhoto(
       },
     ],
     abortSignal: AbortSignal.timeout(SUGGEST_TIMEOUT_MS),
+    // ⚠️ Explicit, and LOWER than the AI SDK default of 2.
+    //
+    // The default gives three attempts sharing one 25s abort budget. That
+    // makes a timeout ambiguous: it cannot be told apart from one slow call,
+    // because the abort fires across the whole sequence and reports only
+    // itself. With one retry the budget is ~2 attempts, and an abort much more
+    // likely means the model really is slow rather than that retries ate the
+    // clock. Raise this only alongside a longer timeout.
+    maxRetries: 1,
   });
 
   // void, never awaited: metering must not be able to break the thing it

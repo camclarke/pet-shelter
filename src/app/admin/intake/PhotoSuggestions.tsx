@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, type ChangeEvent } from 'react';
 
 import { t } from '@/i18n';
 import type { PetSex, PetSize } from '@/lib/types';
@@ -52,11 +52,22 @@ const WITHHELD_REASON: Record<string, string> = {
   size: 'No se puede estimar el tamaño sin algo que dé escala: una mano, una puerta, un plato.',
 };
 
+// ⚠️ Every one of these must say what happened to the PHOTO, because the photo
+// is uploaded before the model is called and therefore survives every failure
+// below. Saying only "no pudimos analizar" reads as "nothing happened" and
+// sends someone hunting for a photo that is already saved — reported from a
+// real phone, 2026-08-30.
 const FAILURE_TEXT: Record<string, string> = {
-  'not-configured': 'Las sugerencias por foto todavía no están configuradas. Podés cargar los datos a mano.',
-  unauthorized: 'Tu sesión venció. Volvé a entrar y probá de nuevo.',
-  'photo-rejected': 'No pudimos leer esa imagen. Probá con una foto JPG o PNG de menos de 6 MB.',
-  failed: 'No pudimos analizar la foto. Cargá los datos a mano y seguí — no se pierde nada.',
+  'not-configured':
+    'La foto se guardó y queda como portada. Las sugerencias automáticas todavía no están configuradas, así que cargá los datos a mano.',
+  unauthorized:
+    'Tu sesión venció. La foto se guardó igual. Volvé a entrar y probá de nuevo.',
+  'photo-rejected':
+    'No pudimos leer esa imagen. Probá sacando la foto de nuevo, o elegí una JPG o PNG de menos de 6 MB.',
+  timeout:
+    'La foto se guardó y queda como portada. El análisis tardó demasiado y lo cortamos — puede ser la señal. Podés tocar «Tomar foto» otra vez para reintentar, o cargar los datos a mano y seguir.',
+  failed:
+    'La foto se guardó y queda como portada. Solo falló el análisis automático: cargá los datos a mano y seguí, no se pierde nada.',
 };
 
 export default function PhotoSuggestions({
@@ -70,6 +81,15 @@ export default function PhotoSuggestions({
   onApplyName,
 }: PhotoSuggestionsProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+
+  function handleChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Cleared so re-picking the same file fires change again — the same trap
+    // the media step already handles.
+    e.target.value = '';
+    if (file) onPick(file);
+  }
 
   const s = outcome?.suggestion ?? null;
 
@@ -79,40 +99,66 @@ export default function PhotoSuggestions({
       <p className="admin__sub">
         Sacale una foto al animalito y completamos lo que se pueda ver. <strong>Vos revisás
         todo antes de publicar</strong> — nada se guarda solo. La misma foto queda como
-        foto de portada, así no hay que sacar dos.
+        foto de portada, así no hay que sacar dos, y se guarda apenas la sacás:
+        si el análisis falla, la foto ya está.
       </p>
 
+      {/* TWO inputs rather than one whose `capture` is toggled before .click().
+          Intake happens on a phone with the animal in front of you, so "take a
+          photo" has to be a button, not an option buried in a file picker —
+          that was the actual complaint. `capture` opens the camera directly;
+          without it the same input offers the gallery. Toggling the attribute
+          on a shared input right before clicking is flaky across mobile
+          browsers, and two inputs cost nothing. */}
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        hidden
+        disabled={disabled || busy}
+        onChange={handleChange}
+      />
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/*"
         hidden
         disabled={disabled || busy}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          // Cleared so re-picking the same file fires change again — the same
-          // trap the media step already handles.
-          e.target.value = '';
-          if (file) onPick(file);
-        }}
+        onChange={handleChange}
       />
-      <button
-        type="button"
-        className="btn"
-        disabled={disabled || busy}
-        onClick={() => inputRef.current?.click()}
-      >
-        {busy ? 'Analizando…' : 'Elegir foto'}
-      </button>
+
+      <div className="admin-suggest__actions">
+        <button
+          type="button"
+          className="btn"
+          disabled={disabled || busy}
+          onClick={() => cameraRef.current?.click()}
+        >
+          {busy ? 'Analizando…' : 'Tomar foto'}
+        </button>
+        <button
+          type="button"
+          className="btn btn--muted"
+          disabled={disabled || busy}
+          onClick={() => inputRef.current?.click()}
+        >
+          Elegir de la galería
+        </button>
+      </div>
 
       {busy && (
-        <p className="admin__sub">
-          Subiendo la foto y mirándola. Esto tarda unos segundos.
+        <p className="auth__notice" role="status">
+          Subiendo la foto y mirándola. Puede tardar hasta medio minuto con
+          señal lenta. <strong>No cierres esta pantalla</strong> — la foto ya se
+          guardó y queda como portada aunque el análisis falle.
         </p>
       )}
 
       {outcome?.failure && (
-        <p className="auth__hint">{FAILURE_TEXT[outcome.failure] ?? FAILURE_TEXT.failed}</p>
+        <p className="auth__notice auth__notice--warn" role="status">
+          {FAILURE_TEXT[outcome.failure] ?? FAILURE_TEXT.failed}
+        </p>
       )}
 
       {s && (

@@ -19,6 +19,8 @@ export type SuggestFailure =
   | 'not-configured'
   | 'unauthorized'
   | 'photo-rejected'
+  /** The model did not answer in time. RETRYABLE — say so, and offer a retry. */
+  | 'timeout'
   | 'failed';
 
 export interface SuggestOutcome {
@@ -75,6 +77,11 @@ export async function requestSuggestion(
     if (res.status === 413 || res.status === 415 || res.status === 400) {
       return { ...NOTHING, failure: 'photo-rejected' };
     }
+    // 504 is the route's own timeout. Distinguished from a generic failure
+    // because it is worth retrying and a permanent-sounding message stops
+    // someone trying again on better signal — observed in production
+    // 2026-08-30, a 25.3s request that returned nothing the UI could explain.
+    if (res.status === 504) return { ...NOTHING, failure: 'timeout' };
     return NOTHING;
   } catch {
     return NOTHING;
