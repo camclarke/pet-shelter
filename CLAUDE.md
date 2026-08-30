@@ -573,6 +573,60 @@ scanned chip resolves to a name and a phone call.
 
   Firestore unchanged: 0 pets, 0 areas, 1 user, 1 blank draft, 0 everywhere
   else. No probe data created.
+- **2026-08-29** — **The site had no way to sign in on a phone, which made the
+  entire intake flow impossible on the only device it is designed for.** PR #18,
+  merged `9253cda`, deployed and verified live. Reported from a real phone.
+
+  **The cause was two lines of CSS.** Below 760px `globals.css` set both
+  `.header__nav` and `.header__account` to `display: none`, with no hamburger
+  and no replacement. The chain is account button → `/account` → sign in →
+  `/admin` → `/admin/intake`, and **the header carries the only link to
+  `/account` anywhere on the site**, so hiding it broke the whole chain.
+  Measured on the live site before changing anything: the sole `/account` link
+  resolved to a 0x0 hidden element and `header__actions` was 38x38 — the theme
+  toggle, alone.
+
+  **A second defect was hiding in the same block and was not in the report:**
+  the nav was hidden too, so a phone visitor had no route to `/adopt`. That is
+  the *primary objective* failing on the majority device for this audience.
+  The nav now moves to its own row and scrolls horizontally if it must.
+
+  **The rest of the phone path turned out to be sound, and that is worth
+  recording so nobody "fixes" it later.** Inputs are already `16px` carrying the
+  comment *"< 16px makes iOS Safari zoom on focus"*, and the intake wizard uses
+  the same `.auth__field` styles; auth fields carry `type="email"` +
+  `autocomplete`; the admin grids are `auto-fit`/`auto-fill` and collapse on
+  their own; and both photo inputs use `accept="image/*"`, which is what offers
+  the camera on iOS and Android. The header was the outlier, not the pattern.
+
+  **Claim boundary, stated because it matters:** the header fix is *measured* at
+  375px, on the edge-served page, before and after. `/admin/intake` itself is
+  behind `AdminGate`, which needs a password, so its mobile behaviour is an
+  **audit of its CSS, not a live run**.
+
+  **The credential trap fired mid-session, and it behaved exactly as this file
+  predicts.** All three stores — gcloud, ADC and the Firebase CLI — flipped to
+  `israel.rocha@trustcertllc.com` while `core/project` still read `wawitas`,
+  which is the dangerous split precisely because the project id looks right.
+  The symptom was the dev server logging `7 PERMISSION_DENIED` from
+  `getWall` — which reads like a rules or code bug and is neither. It was
+  isolated by running the same query outside Next and then checking the ADC
+  identity at `oauth2/v3/userinfo`, never at the `quota_project_id` label.
+  **The clean confirmation came after the re-login: same code, same query,
+  PERMISSION_DENIED under the work account and 0 docs under the personal one.**
+  The 2026-08-12 claim that a wrong identity now *fails loudly rather than
+  writing to the wrong project* is no longer theoretical.
+
+  **One interaction was exercised for the first time and passed:** Terraform had
+  just added the `GEMINI_API_KEY` `secretKeyRef` to Cloud Run, and this was the
+  first CI deploy afterwards. Revision `00018-89d` came up with the secret
+  binding **intact**, so `deploy.yml` really does own only the image tag and did
+  not clobber the env list Terraform owns. That separation had been asserted
+  since 2026-08-12 and never tested against a Terraform-set env var.
+
+  Verified at the end: 236/236 tests, typecheck clean, build clean with every
+  route keeping its `revalidate`, deployed tag equals `git rev-parse HEAD`, and
+  Firestore unchanged at 0 pets / 1 user / 1 blank draft / `api_usage_daily` 0.
 ---
 
 ## Next session — start here
@@ -583,11 +637,30 @@ IN PRODUCTION** — merged at `365cbd0`, deployed Cloud Run tag equals
 bundle carries copy only this build contains with a clean per-route split.
 Read the 2026-08-27 log entries first — there are two.
 
-**PR #17 is also merged (`40b764d`) and deliberately NOT applied:** it declares
-the Gemini key as a Secret Manager secret, gated so it cannot bind an empty one
-and take the live site down. Merging it changed nothing in GCP — `terraform/**`
-is path-ignored by `deploy.yml`, confirmed by no Deploy run firing. Secret
-Manager still holds 0 secrets.
+**PR #18 is merged and DEPLOYED (`9253cda`): the mobile header bug is fixed.**
+Below 760px the header hid BOTH the nav and the account button, and the account
+button is the only link to `/account` anywhere on the site — so signing in, and
+therefore the whole intake flow, was impossible on a phone. On the one device
+that has the camera and microphone the flow is built around. Verified live at
+375px on the edge-served page: account link 101x44, all four nav links, no
+horizontal overflow, and `/account` rendering its 56px 16px inputs.
+
+**Mobile is now a first-class constraint, not a nice-to-have.** Intake happens
+on a phone because that is where the camera and microphone are. Any new admin
+screen has to be checked at 375px before it is called done.
+
+**PR #17 is merged (`40b764d`) and its Terraform HAS BEEN APPLIED.** Secret
+Manager holds its first secret ever: `gemini-api-key`, version 1, enabled,
+39 bytes, and Cloud Run revision `00017-qf9` booted Ready carrying it as a
+`secretKeyRef`. Applied in the three separate steps the design requires — a
+`version = "latest"` binding on an empty secret fails the startup probe, and
+traffic is pinned to LATEST, so that would be a live outage rather than a
+failed deploy. Merging the PR alone changed nothing in GCP, because
+`terraform/**` is path-ignored by `deploy.yml`.
+
+⚠️ `gemini_api_key_enabled = true` lives ONLY in gitignored
+`terraform.tfvars`, so an apply from a fresh clone would plan to REMOVE that
+env binding. See the 2026-08-27 entries and the traps section.
 
 It brought **step 7 (medical records)** and the **model layer of step 11
 (voice dictation)**, switched photo intake to `gemini-3.1-flash-lite` on a
@@ -1650,6 +1723,13 @@ From bumping the actions to Node 24 (2026-08-23):
 
 Known from before:
 
+- **⚠️ The intake flow runs on a PHONE, so check every admin screen at 375px.**
+  The camera and the microphone are on the phone; that is the whole reason the
+  flow exists. From 2026-08-02 to 2026-08-29 the header hid the account button
+  below 760px, and because it carries the only link to `/account`, signing in
+  was impossible on mobile — so intake was too. It survived a year of work
+  because every check had been run at desktop width. **A feature verified only
+  at desktop width has not been verified.**
 - **The service-area bounds live in two places** — `src/config/shelter.ts` and
   `firestore.rules`. The rules copy is the enforced one. Change both together.
 - **`pets-server.ts` bypasses all security rules** (Admin SDK). It must never be
