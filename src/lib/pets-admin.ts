@@ -45,7 +45,8 @@ import {
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import type { FieldValue } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
-import type { Pet } from './types';
+import { mediaTierFor } from './types';
+import type { Pet, PetPhotoSlot } from './types';
 
 import { getFirebase } from './firebase-client';
 import { normalizeMicrochipCode, validateMicrochip } from './microchip';
@@ -264,6 +265,7 @@ export async function stripAndResize(file: File): Promise<Blob> {
 export async function uploadProcessedPhoto(
   petId: string,
   processed: Blob,
+  slot: PetPhotoSlot = 'other',
 ): Promise<DraftMedia> {
   const { storage } = getFirebase();
 
@@ -276,11 +278,15 @@ export async function uploadProcessedPhoto(
   await uploadBytes(storageRef, processed, { contentType: 'image/jpeg' });
   const url = await getDownloadURL(storageRef);
 
-  return { id, path, url, alt: '', ...dimensions };
+  return { id, slot, path, url, alt: '', ...dimensions };
 }
 
-export async function uploadPetPhoto(petId: string, file: File): Promise<DraftMedia> {
-  return uploadProcessedPhoto(petId, await stripAndResize(file));
+export async function uploadPetPhoto(
+  petId: string,
+  file: File,
+  slot: PetPhotoSlot = 'other',
+): Promise<DraftMedia> {
+  return uploadProcessedPhoto(petId, await stripAndResize(file), slot);
 }
 
 /**
@@ -421,7 +427,15 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
       // gated, matching the "public teaser, gated detail" decision. An
       // unauthenticated client MUST query with where('tier','==','public') or
       // the whole query is rejected rather than filtered — see types.ts.
-      tier: index === 0 ? 'public' : 'auth',
+      //
+      // ⚠️ The slot check is NOT redundant with the index check. A teeth or
+      // genital photo must never be public even if it somehow ends up first —
+      // and it can, because slots are filled in whatever order the animal
+      // tolerates being handled. Ordering is a UI concern; this is a
+      // disclosure decision, so it is made from the slot rather than from
+      // position.
+      tier: mediaTierFor(media.slot, index),
+      slot: media.slot,
       path: media.path,
       derivatives: {},
       width: media.width,

@@ -218,6 +218,46 @@ export interface PetDetail {
 // does not silently return a filtered subset. The first time this happens it
 // looks like a broken query, not a permission decision.
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Which guided intake shot a photo is.
+ *
+ * The slot is not decoration: it is sent to the model as a label so it
+ * knows which image answers which question, and the prompt then binds each
+ * inference to one slot — age comes from TEETH and sex from GENITALS and
+ * from nowhere else. A Lite-tier model reading a whole photo set
+ * unlabelled called a white facial mask "muzzle greying" and aged a young
+ * adult at 6-8 years; being told where the dentition is removes that
+ * inference entirely.
+ *
+ * `other` covers extra photos beyond the guided set, which stay welcome.
+ */
+export type PetPhotoSlot = 'front' | 'side' | 'teeth' | 'genitals' | 'other';
+
+/**
+ * ⚠️ The genital shot is NEVER public. It exists to read sex and, secondarily,
+ * whether the animal is already sterilised — neither of which belongs on an
+ * adoption listing. Anything in this set is forced to the `auth` tier at
+ * publish time regardless of its order.
+ */
+export const NEVER_PUBLIC_SLOTS: readonly PetPhotoSlot[] = ['teeth', 'genitals'];
+
+/**
+ * Which tier a photo publishes at.
+ *
+ * Pure and exported so it can be TESTED. It used to be an inline ternary in
+ * the publish batch, and a deliberate-break probe on 2026-08-30 found that
+ * emptying NEVER_PUBLIC_SLOTS broke nothing — meaning the rule that keeps a
+ * genital photograph off a public adoption listing had no coverage at all.
+ *
+ * The slot decides, not the position. Slots are filled in whatever order the
+ * animal tolerates being handled, so a teeth or genital shot can legitimately
+ * be first — and being first must never make it public.
+ */
+export function mediaTierFor(slot: PetPhotoSlot, index: number): MediaTier {
+  if (NEVER_PUBLIC_SLOTS.includes(slot)) return 'auth';
+  return index === 0 ? 'public' : 'auth';
+}
+
 export type MediaKind = 'photo' | 'video';
 export type MediaTier = 'public' | 'auth';
 
@@ -225,6 +265,8 @@ export interface PetMedia {
   id: string;
   kind: MediaKind;
   tier: MediaTier;
+  /** Which guided shot this is. `other` for anything outside the set. */
+  slot: PetPhotoSlot;
 
   /** Storage path, NOT a URL. URLs are derived at read time so they can expire. */
   path: string;

@@ -10,6 +10,7 @@ import {
   cleanNameSuggestions,
   decideAge,
   decideBreed,
+  decideSex,
   decideSize,
   decideWeight,
   meetsBar,
@@ -17,6 +18,7 @@ import {
   reviewSuggestion,
   type RawPhotoSuggestion,
 } from '../intake-suggestion';
+import { mediaTierFor } from '../types';
 
 /**
  * A deliberately BLAND baseline: everything null, every confidence low, no
@@ -27,6 +29,10 @@ function suggestion(over: Partial<RawPhotoSuggestion> = {}): RawPhotoSuggestion 
   return {
     species: null,
     speciesConfidence: 'low',
+    sex: null,
+    sexConfidence: 'low',
+    sexFromGenitalPhoto: false,
+    apparentlySterilized: 'unknown',
     visibleType: null,
     isLikelyPurebred: false,
     purebredGuess: null,
@@ -54,15 +60,16 @@ function suggestion(over: Partial<RawPhotoSuggestion> = {}): RawPhotoSuggestion 
 
 // ─── the structural guarantee ────────────────────────────────────────────────
 
-test('sex is not a field a suggestion can carry', () => {
-  // The guarantee is structural, not a runtime check: there is nowhere in
-  // RawPhotoSuggestion to put a sex, so no prompt change can reintroduce one.
-  // If someone adds the key, this fails to compile rather than failing here.
-  const s = suggestion();
-  assert.equal('sex' in s, false);
-  assert.equal(Object.keys(s).includes('sex'), false);
+test('sex is refused unless the model actually saw genitalia', () => {
+  // Replaces the old "sex can never be suggested" guarantee, reversed by the
+  // owner on 2026-08-30. The narrower rule is the one that still holds: a body
+  // shot is not evidence of sex, however confident the model sounds.
+  const guessed = decideSex(
+    suggestion({ sex: 'female', sexConfidence: 'high', sexFromGenitalPhoto: false })
+  );
+  assert.equal(guessed.sex, null);
+  assert.equal(guessed.refusedBecause, 'no-genital-photo');
 });
-
 // ─── confidence bar ──────────────────────────────────────────────────────────
 
 test('the confidence bar admits medium and high, rejects low', () => {
@@ -255,6 +262,9 @@ test('a good photo produces a full review with nothing withheld', () => {
       weightKgMin: 8,
       weightKgMax: 12,
       weightConfidence: 'high',
+      sex: 'female',
+      sexConfidence: 'high',
+      sexFromGenitalPhoto: true,
     })
   );
   assert.equal(r.species, 'dog');
@@ -425,4 +435,80 @@ test('colour and coat are separate fields, not one string', () => {
   );
   assert.equal(r.colorPattern, 'negro y blanco');
   assert.equal(r.coatType, 'corto y liso');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sex — added 2026-08-30 when guided capture made a genital photo available.
+// Every rule here exists because sex inflects every Spanish sentence about the
+// animal, so a wrong value is a page that reads as broken, not a wrong field.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('sex is read when the genital photo was supplied and confidence is high', () => {
+  const d = decideSex(
+    suggestion({ sex: 'male', sexConfidence: 'high', sexFromGenitalPhoto: true })
+  );
+  assert.equal(d.sex, 'male');
+  assert.equal(d.refusedBecause, null);
+});
+
+test('sex needs a HIGH bar, not the usual medium', () => {
+  // Deliberately stricter than every other field. Medium is good enough for a
+  // breed guess nobody has to live with grammatically.
+  const d = decideSex(
+    suggestion({ sex: 'female', sexConfidence: 'medium', sexFromGenitalPhoto: true })
+  );
+  assert.equal(d.sex, null);
+  assert.equal(d.refusedBecause, 'low-confidence');
+});
+
+test('a null sex with a genital photo still refuses rather than inventing one', () => {
+  const d = decideSex(
+    suggestion({ sex: null, sexConfidence: 'high', sexFromGenitalPhoto: true })
+  );
+  assert.equal(d.sex, null);
+  // Asserting the REASON as well, not just the null. A break probe showed
+  // that checking only `sex` let the guard be deleted with every test still
+  // green — the null arrived either way, and only the explanation was lost.
+  assert.equal(d.refusedBecause, 'low-confidence');
+});
+
+test('a refused sex is reported in withheld so the UI can ask for the photo', () => {
+  const r = reviewSuggestion(suggestion({ sexFromGenitalPhoto: false }));
+  assert.ok(r.withheld.includes('sex'));
+});
+
+test('sex is OFFERED, never prefilled', () => {
+  // If this ever flips to prefill, a model-read sex reaches the public page
+  // and inflects every sentence on it without anyone assenting.
+  assert.equal(SUGGESTION_POLICY.sex, 'offer');
+});
+
+test('sterilisation evidence passes through without becoming a claim', () => {
+  // It is what the model saw, not a clinical finding. The vet confirms.
+  const r = reviewSuggestion(suggestion({ apparentlySterilized: 'yes' }));
+  assert.equal(r.apparentlySterilized, 'yes');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Photo disclosure — which slots may ever be public
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a teeth or genital photo is NEVER public, even as the first photo', () => {
+  // The rule that keeps an intimate photograph off a public adoption listing.
+  // It had no coverage until a break probe emptied NEVER_PUBLIC_SLOTS and every
+  // test stayed green. Position must not override the slot: slots are filled in
+  // whatever order the animal tolerates being handled.
+  assert.equal(mediaTierFor('genitals', 0), 'auth');
+  assert.equal(mediaTierFor('genitals', 3), 'auth');
+  assert.equal(mediaTierFor('teeth', 0), 'auth');
+});
+
+test('the first ordinary photo is the public cover', () => {
+  assert.equal(mediaTierFor('front', 0), 'public');
+  assert.equal(mediaTierFor('side', 0), 'public');
+});
+
+test('later ordinary photos are gated, matching public teaser / gated detail', () => {
+  assert.equal(mediaTierFor('front', 1), 'auth');
+  assert.equal(mediaTierFor('other', 2), 'auth');
 });
