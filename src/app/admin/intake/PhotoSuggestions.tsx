@@ -1,7 +1,5 @@
 'use client';
 
-import { useRef, type ChangeEvent } from 'react';
-
 import { t } from '@/i18n';
 import type { PetSex, PetSize } from '@/lib/types';
 import type { SuggestOutcome } from '@/lib/intake-suggest-client';
@@ -34,7 +32,6 @@ export interface PhotoSuggestionsProps {
   disabled: boolean;
   /** Needed to spell "mestizo"/"mestiza" — the model is never asked for it. */
   sex: PetSex | null;
-  onPick: (file: File) => void;
   onApplyBreed: (breed: string) => void;
   onApplySize: (size: PetSize) => void;
   /** A RANGE, never a single number — see decideWeight. */
@@ -91,23 +88,11 @@ export default function PhotoSuggestions({
   busy,
   disabled,
   sex,
-  onPick,
   onApplyBreed,
   onApplySize,
   onApplyWeight,
   onApplyName,
 }: PhotoSuggestionsProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
-
-  function handleChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    // Cleared so re-picking the same file fires change again — the same trap
-    // the media step already handles.
-    e.target.value = '';
-    if (file) onPick(file);
-  }
-
   const s = outcome?.suggestion ?? null;
 
   // Hoisted rather than read as s.breed.resembles at each call site:
@@ -117,7 +102,7 @@ export default function PhotoSuggestions({
 
   return (
     <div className="admin-suggest">
-      <h2 className="t-label">Foto para autocompletar (opcional)</h2>
+      <h2 className="t-label">Lo que se ve en las fotos</h2>
       <p className="admin__sub">
         Sacale una foto al animalito y completamos lo que se pueda ver. <strong>Vos revisás
         todo antes de publicar</strong> — nada se guarda solo. La misma foto queda como
@@ -125,58 +110,11 @@ export default function PhotoSuggestions({
         si el análisis falla, la foto ya está.
       </p>
 
-      {/* TWO inputs rather than one whose `capture` is toggled before .click().
-          Intake happens on a phone with the animal in front of you, so "take a
-          photo" has to be a button, not an option buried in a file picker —
-          that was the actual complaint. `capture` opens the camera directly;
-          without it the same input offers the gallery. Toggling the attribute
-          on a shared input right before clicking is flaky across mobile
-          browsers, and two inputs cost nothing. */}
-      <input
-        ref={cameraRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        disabled={disabled || busy}
-        onChange={handleChange}
-      />
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        hidden
-        disabled={disabled || busy}
-        onChange={handleChange}
-      />
-
-      <div className="admin-suggest__actions">
-        <button
-          type="button"
-          className="btn"
-          disabled={disabled || busy}
-          onClick={() => cameraRef.current?.click()}
-        >
-          {busy ? 'Analizando…' : 'Tomar foto'}
-        </button>
-        <button
-          type="button"
-          className="btn btn--muted"
-          disabled={disabled || busy}
-          onClick={() => inputRef.current?.click()}
-        >
-          Elegir de la galería
-        </button>
-      </div>
-
-      {busy && (
-        <p className="auth__notice" role="status">
-          Subiendo la foto y mirándola. Puede tardar hasta medio minuto con
-          señal lenta. <strong>No cierres esta pantalla</strong> — la foto ya se
-          guardó y queda como portada aunque el análisis falle.
-        </p>
-      )}
-
+      {/* Capture moved to GuidedPhotoCapture on 2026-08-30. This panel now
+          only RENDERS an outcome — one component takes photographs, another
+          shows what the model made of them. Keeping the old single-photo
+          button here would give two ways to start an analysis, and one of
+          them would spend a request per photo. */}
       {outcome?.failure && (
         <p className="auth__notice auth__notice--warn" role="status">
           {FAILURE_TEXT[outcome.failure] ?? FAILURE_TEXT.failed}
