@@ -352,6 +352,16 @@ textarea {
   font-size: 11.5px;
 }
 
+/* min-width:0 is what actually lets a flex item shrink below its content
+   width; without it the ellipsis never engages no matter what overflow says. */
+.header__account-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ticker {
   background: var(--sun);
   color: var(--charcoal);
@@ -429,7 +439,13 @@ textarea {
     order: 3;
     width: 100%;
     margin-left: 0;
-    gap: var(--space-3);
+    /* 16px, not --space-3 (24px). Measured at 360px — the width a real Android
+       reported on 2026-08-30 — the four links need 253px and three 24px gaps
+       push the row to 325px against 312px available, so "Nosotros" clipped.
+       At 16px the row is 301px and fits. It still scrolls below ~330px, which
+       is the right behaviour at that extreme rather than shrinking the type. */
+    gap: 16px;
+    justify-content: space-between;
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
@@ -444,13 +460,11 @@ textarea {
     letter-spacing: 0.1em;
   }
 
-  /* The label is the email local part, which can be long. Truncate rather than
-     let it push the theme toggle off the row. */
+  /* The label is the email local part, which can be long. Cap the button and
+     let the inner span do the ellipsis — see AccountLink.tsx for why the span
+     is required rather than tidy. */
   .header__account {
-    max-width: 38vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    max-width: 42vw;
     padding: 11px 14px;
     font-size: 11px;
   }
@@ -1566,6 +1580,14 @@ textarea {
 
   .admin-photo {
     grid-template-columns: 1fr;
+  }
+
+  /* On a phone the label and its buttons were sharing a wrapped flex row, so
+     "TAMAÑO [MEDIANO]" sat staggered and the name buttons broke across three
+     ragged lines. Giving the label a full row puts the buttons in a clean
+     block underneath. Observed at 360px on a real device, 2026-08-30. */
+  .admin-suggest__offers > .t-label {
+    flex: 1 0 100%;
   }
 
   .admin-photo img {

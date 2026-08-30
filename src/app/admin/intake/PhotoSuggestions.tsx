@@ -70,6 +70,18 @@ const FAILURE_TEXT: Record<string, string> = {
     'La foto se guardó y queda como portada. Solo falló el análisis automático: cargá los datos a mano y seguí, no se pierde nada.',
 };
 
+/**
+ * The model's free text does not reliably end in punctuation, so it ran
+ * straight into the static disclaimer: "...en la toma superior Esto no es un
+ * diagnóstico". Seen on a real device 2026-08-30. Adding the stop here rather
+ * than asking the prompt for it, because prompt-enforced formatting is the
+ * kind of rule that erodes and this cannot fail.
+ */
+function endWithStop(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 export default function PhotoSuggestions({
   outcome,
   busy,
@@ -255,7 +267,7 @@ export default function PhotoSuggestions({
 
           {s.notes && (
             <p className="auth__hint">
-              <strong>Para revisar:</strong> {s.notes}{' '}
+              <strong>Para revisar:</strong> {endWithStop(s.notes)}{' '}
               <em>Esto no es un diagnóstico — que lo vea el veterinario.</em>
             </p>
           )}
