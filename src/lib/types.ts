@@ -112,6 +112,30 @@ export interface Pet {
 
   sex: PetSex;
   size: PetSize;
+
+  /**
+   * What it LOOKS like. Both public, both nullable, and separate on purpose:
+   * colour is what someone types when searching for a lost dog, coat is what
+   * tells an adopter how much grooming they are taking on. Free text rather
+   * than an enum — no closed vocabulary survives the mixes a street rescue
+   * produces.
+   */
+  colorPattern: string | null;
+  coatType: string | null;
+
+  /**
+   * An ESTIMATED weight range in kg. Both null until someone weighs the animal.
+   *
+   * The rescuer has no scale and the vet arrives hours or days later, so this
+   * is what a pen assignment and a rough ration get chosen from in the
+   * meantime. `weightIsEstimate` travels with it so a guess can never be read
+   * back as a measurement, and it must NEVER reach an mg/kg dose. A real
+   * weight belongs in a measurement recorded by whoever weighed it.
+   */
+  weightKgMin: number | null;
+  weightKgMax: number | null;
+  weightIsEstimate: boolean;
+
   status: PetStatus;
 
   /**

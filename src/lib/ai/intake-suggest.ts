@@ -4,7 +4,7 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 
 import { google } from './google';
-import { FLASH_LITE_MODEL, modelKeyFor } from './model-ids';
+import { FLASH_LITE_MODEL, FLASH_MODEL, modelKeyFor } from './model-ids';
 import { recordAiUsage } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
 
@@ -66,8 +66,36 @@ const SuggestionSchema = z.object({
   sizeConfidence: z.enum(['high', 'medium', 'low']),
   hasSizeReference: z.boolean(),
 
-  coatDescription: z.string().nullable(),
+  /**
+   * Colour and coat are SEPARATE questions and were one `coatDescription`
+   * string until 2026-08-30. "negro, gris y blanco con máscara facial" and
+   * "doble capa, largo y denso" are different facts: the first is what someone
+   * types when searching for a lost dog, the second is what tells an adopter
+   * how much brushing they are signing up for.
+   */
+  colorPattern: z.string().nullable(),
+  coatType: z.string().nullable(),
   distinguishingMarks: z.string().nullable(),
+
+  /**
+   * Posture, build, bearing — whatever stands out that is not covered above.
+   * Deliberately NOT the place for anything health-adjacent: `notes` is the
+   * only channel for that, so the vet has one field to read rather than
+   * hunting through a coat description.
+   */
+  generalObservations: z.string().nullable(),
+
+  /**
+   * An estimated weight RANGE in kg, never a single number.
+   *
+   * Rescuers have no scale, and the vet arrives hours or days later, so
+   * something is better than nothing for choosing a pen and planning rations.
+   * But a weight read off a photograph is a guess, and this one is barred from
+   * mg/kg dosing by `weightIsEstimate` travelling with it everywhere.
+   */
+  weightKgMin: z.number().nullable(),
+  weightKgMax: z.number().nullable(),
+  weightConfidence: z.enum(['high', 'medium', 'low']),
 
   // Deliberately loose. The pure layer trims, de-duplicates and caps. A schema
   // that rejects six names would throw away the whole extraction to enforce a
@@ -107,6 +135,23 @@ parece, que es lo que una persona buscando adoptar entiende de un vistazo.
 Usá nombres de raza comunes en español. Si de verdad no se parece a ninguna
 raza reconocible, devolvé una lista vacía — eso también es una respuesta
 válida y es mejor que inventar un parecido.
+
+COLOR Y PELAJE. Son dos campos distintos y no los mezcles. En colorPattern
+poné los colores y las marcas visibles — por ejemplo "negro, gris y blanco, con
+máscara facial y pecho blanco". En coatType poné la textura, el largo y la
+densidad — por ejemplo "doble capa, largo y denso, con flecos en las patas".
+El color es lo que escribe alguien que busca a su perro perdido; el pelaje es
+lo que le dice a quien adopta cuánto cepillado le espera.
+
+OBSERVACIONES. En generalObservations describí el porte, la postura y lo que
+llame la atención y no entre en los campos anteriores. NO pongas nada de salud
+acá: para eso está notes, y el veterinario necesita un solo campo que leer.
+
+PESO. Estimá un rango en kilos en weightKgMin y weightKgMax, nunca un número
+único, y sólo si hay algo en la foto que dé escala. Sin escala poné los dos en
+null y weightConfidence en "low": un perro solo en una foto puede pesar 4 kg o
+40 kg. Quien rescata no tiene balanza, así que este número sirve para elegir un
+área y calcular raciones aproximadas, y NUNCA para calcular una dosis.
 
 EDAD. Indicá en ageBasis en qué te basaste. Si se ven los dientes, usalos: en
 cachorros la erupción dentaria sigue un calendario estrecho y es confiable; en
@@ -167,6 +212,29 @@ const USER_INSTRUCTION =
  */
 export const SUGGEST_ATTEMPT_TIMEOUT_MS = 12_000;
 
+/**
+ * The Flash tier needs its own, larger budget. Measured on the same real
+ * photograph 2026-08-30:
+ *
+ *   gemini-3.6-flash       10060 ms
+ *   gemini-3.1-flash-lite   3991 ms
+ *
+ * Flash reasons before answering, which is exactly what buys the correct
+ * age — so the latency is the feature, not overhead to squeeze out. 12s was
+ * calibrated for Lite and left Flash no headroom once the structured schema
+ * was added: the first real run aborted twice and returned nothing.
+ *
+ * 25s is roughly 2.5x the measured time, matching the margin Lite has.
+ */
+export const SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH = 25_000;
+
+/** Per-attempt budget for whichever tier is actually being called. */
+export function attemptTimeoutMsFor(modelId: string): number {
+  return modelId.includes('lite')
+    ? SUGGEST_ATTEMPT_TIMEOUT_MS
+    : SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH;
+}
+
 /** Attempts in total, not retries after the first. */
 export const SUGGEST_MAX_ATTEMPTS = 2;
 
@@ -176,7 +244,40 @@ export const SUGGEST_MAX_ATTEMPTS = 2;
  * each attempt carries its own setup.
  */
 export const SUGGEST_TIMEOUT_MS =
-  SUGGEST_ATTEMPT_TIMEOUT_MS * SUGGEST_MAX_ATTEMPTS + 1_000;
+  SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH * SUGGEST_MAX_ATTEMPTS + 1_000;
+
+/**
+ * The Flash tier, not Flash-Lite — and the reason is an error, not a preference.
+ *
+ * Measured 2026-08-30 in AI Studio, same prompt and same photographs, on a
+ * husky-type dog: a Lite-tier model read the white facial MASK as muzzle
+ * greying and called the animal "mature adult to senior, 6-8+ years". A
+ * full Flash model with thinking on read the dentition instead and returned
+ * "young adult, 1.5-3 years". The Lite run even noted the teeth were clean
+ * and then overrode itself with the coat.
+ *
+ * On a public listing that gap decides whether an animal is passed over, so
+ * age is what buys the tier. Breed, colour and coat are comfortable on Lite.
+ *
+ * ⚠️ gemini-3.7-flash is available on this key and tested well, but it is
+ * listed in UNPRICED_BUT_AVAILABLE and the rule recorded there is to add the
+ * price row BEFORE swapping. Until an invoice gives a real rate, this stays
+ * on the priced model. Switching is one env var, GEMINI_FLASH_MODEL, and no
+ * deploy — do it once the row exists.
+ */
+export const SUGGEST_MODEL = FLASH_MODEL;
+
+/**
+ * Used only when the primary is out of daily quota.
+ *
+ * Free-tier limits on this project, read off its own quota 2026-08-30:
+ * Flash models get 20 requests/day, Flash-Lite gets 500. So the strong
+ * model runs out first, and falling back to a weaker answer beats failing
+ * — an intake must never depend on a suggestion. The degradation is
+ * recorded in the modelKey, so a later reader can tell which tier
+ * produced a given record.
+ */
+export const SUGGEST_FALLBACK_MODEL = FLASH_LITE_MODEL;
 
 export interface SuggestResult {
   suggestion: RawPhotoSuggestion;
@@ -188,6 +289,16 @@ export interface SuggestResult {
  * Ask the model what it sees. Throws on failure — the caller decides what a
  * failure means, and for intake it means "carry on without suggestions".
  */
+/**
+ * Out of quota, as opposed to broken. Matched on the status rather than the
+ * message, because the message is provider prose and will change.
+ */
+function isQuotaExhausted(err: unknown): boolean {
+  const status = (err as { statusCode?: number; status?: number } | null)?.statusCode
+    ?? (err as { status?: number } | null)?.status;
+  return status === 429;
+}
+
 /** A timeout or an abort — the shapes worth retrying, since both mean "no answer". */
 function isTimeout(err: unknown): boolean {
   return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
@@ -226,6 +337,25 @@ export async function suggestFromPhoto(
   image: Uint8Array,
   mediaType: string
 ): Promise<SuggestResult> {
+  try {
+    return await extractWith(SUGGEST_MODEL, image, mediaType);
+  } catch (err) {
+    if (!isQuotaExhausted(err)) throw err;
+    // Degrade rather than fail. Plan §3: a gate stricter than the reality of
+    // the shelter gets worked around, and an animal arriving at 22:00 must
+    // not wait on a daily quota.
+    console.warn(
+      `[intake-suggest] ${SUGGEST_MODEL} out of quota; falling back to ${SUGGEST_FALLBACK_MODEL}`
+    );
+    return extractWith(SUGGEST_FALLBACK_MODEL, image, mediaType);
+  }
+}
+
+async function extractWith(
+  modelId: string,
+  image: Uint8Array,
+  mediaType: string
+): Promise<SuggestResult> {
   const { object, usage, providerMetadata } = await withRetry(() =>
     generateObject({
       // ⚠️ Flash-LITE, and this is a measured choice rather than thrift.
@@ -246,7 +376,7 @@ export async function suggestFromPhoto(
       // might genuinely read better. Re-measure before trusting age from a
       // photo, and remember decideAge() already refuses anything it is not
       // confident about.
-      model: google(FLASH_LITE_MODEL),
+        model: google(modelId),
       schema: SuggestionSchema,
       system: INTAKE_SUGGEST_SYSTEM,
       messages: [
@@ -261,7 +391,7 @@ export async function suggestFromPhoto(
       // A FRESH signal per attempt — see SUGGEST_ATTEMPT_TIMEOUT_MS. Creating
       // it inside the callback is load-bearing: hoisting it out would restore
       // the single shared budget this replaced.
-      abortSignal: AbortSignal.timeout(SUGGEST_ATTEMPT_TIMEOUT_MS),
+      abortSignal: AbortSignal.timeout(attemptTimeoutMsFor(modelId)),
       // 0, because withRetry owns retrying. Leaving the SDK's own retries on
       // would nest two policies and make the timing impossible to reason about.
       maxRetries: 0,
@@ -272,13 +402,13 @@ export async function suggestFromPhoto(
   // measures, and must not add latency to an admin waiting on a form.
   void recordAiUsage({
     process: 'intake_suggest',
-    model: FLASH_LITE_MODEL,
+    model: modelId,
     usage,
     providerMetadata,
   });
 
   return {
     suggestion: object as RawPhotoSuggestion,
-    modelKey: String(modelKeyFor(FLASH_LITE_MODEL)),
+    modelKey: String(modelKeyFor(modelId)),
   };
 }
