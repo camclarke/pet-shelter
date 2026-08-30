@@ -1176,6 +1176,132 @@ textarea {
   min-height: 46px;
 }
 
+/* ── guided photo capture (GuidedPhotoCapture.tsx) ───────────────────────── */
+.capture {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+  align-self: stretch;
+}
+
+.capture__slot {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+/* The slot the guided sequence is pointing at. A border rather than a colour
+   fill, so it still reads in dark mode and for anyone who cannot see the hue. */
+.capture__slot--next {
+  border-color: var(--jade);
+  border-width: 2px;
+}
+
+.capture__slot--done {
+  border-color: var(--line);
+  opacity: 0.85;
+}
+
+.capture__preview {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--cream-2);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.capture__preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.capture__placeholder {
+  font-family: var(--display);
+  font-size: 24px;
+  font-weight: 900;
+  opacity: 0.35;
+}
+
+.capture__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Lets long hint text wrap instead of widening the row — the same flex rule
+     the header account button needed. */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.capture__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* Tapped one-handed while holding an animal. */
+.capture__actions .btn {
+  min-height: 44px;
+  padding: 10px 16px;
+  font-size: 11.5px;
+}
+
+.capture__submit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: stretch;
+  margin-top: var(--space-1);
+}
+
+.capture__submit .btn {
+  min-height: 52px;
+}
+
+@media (max-width: 760px) {
+  /* SHARE the row rather than each taking a full one. Measured at 360px:
+     stacking them made every slot ~253px tall and the four-slot list 1057px,
+     so the Analizar button sat a long scroll below the fold. flex-basis 0 with
+     a floor keeps both labels on one line. */
+  /* Measured at 360px: the body has ~186px once the preview and gaps are
+     taken, so two buttons must fit inside that or they wrap and every slot
+     grows by ~45px. min-width:0 lets them share it; the smaller type is what
+     makes both labels fit on one line. */
+  .capture__actions .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 13px 6px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    /* One line. Without this "TOMAR FOTO" wraps inside a 91px button and every
+       slot grows by ~18px for no benefit. */
+    white-space: nowrap;
+  }
+
+  .capture__preview {
+    width: 48px;
+    height: 48px;
+  }
+
+  /* The hint is guidance for the shot you are about to take. Once a slot is
+     filled it is just height between you and the next one. */
+  .capture__slot--done .auth__hint {
+    display: none;
+  }
+}
+
 .admin-suggest__result {
   display: flex;
   flex-direction: column;
