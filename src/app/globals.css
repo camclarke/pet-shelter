@@ -1148,6 +1148,20 @@ textarea {
   gap: var(--space-1);
 }
 
+/* Camera and gallery sit side by side, and wrap on a narrow phone rather
+   than squeezing. Both are real tap targets — this is used one-handed. */
+.admin-suggest__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-self: stretch;
+}
+
+.admin-suggest__actions .btn {
+  flex: 1 1 auto;
+  min-height: 46px;
+}
+
 .admin-suggest__result {
   display: flex;
   flex-direction: column;
