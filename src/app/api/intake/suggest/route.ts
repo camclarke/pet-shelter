@@ -2,7 +2,15 @@ import { NextResponse } from 'next/server';
 
 import { getAdminAuth } from '@/lib/firebase-admin';
 import { aiIsConfigured } from '@/lib/ai/google';
-import { suggestFromPhoto } from '@/lib/ai/intake-suggest';
+import { suggestFromPhoto, type SlottedPhoto } from '@/lib/ai/intake-suggest';
+
+/**
+ * The slots the route will read, in the order they are sent to the model.
+ * Front first because it is the cover photo and the breed evidence; teeth and
+ * genitals last because they are the ones a frightened animal is least likely
+ * to allow.
+ */
+const ACCEPTED_SLOTS = ['front', 'side', 'teeth', 'genitals'] as const;
 import { reviewSuggestion } from '@/lib/intake-suggestion';
 
 /**
@@ -68,26 +76,64 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'ai-not-configured' }, { status: 503 });
   }
 
-  // ── 3. read the photo ─────────────────────────────────────────────────────
-  let bytes: Uint8Array;
-  let mediaType: string;
+  // ── 3. read the photo SET ─────────────────────────────────────────────────
+  //
+  // One form field per slot: photo_front, photo_side, photo_teeth,
+  // photo_genitals. All present slots travel in ONE request, because free-tier
+  // quota is counted in requests and the Flash tier gets 20 a day — one call
+  // per photo would cut the shelter from 20 animals a day to five.
+  //
+  // Any subset is valid. A rescuer on a street with a frightened animal often
+  // manages exactly one photograph, and that must still work.
+  let photos: SlottedPhoto[] = [];
   try {
     const form = await request.formData();
-    const file = form.get('photo');
-    if (!(file instanceof File)) {
+
+    for (const slot of ACCEPTED_SLOTS) {
+      const file = form.get(`photo_${slot}`);
+      if (file == null) continue;
+      if (!(file instanceof File)) {
+        return NextResponse.json({ error: 'photo-required' }, { status: 400 });
+      }
+      if (file.size > MAX_BYTES) {
+        return NextResponse.json({ error: 'photo-too-large' }, { status: 413 });
+      }
+      if (!ALLOWED_TYPES.has(file.type)) {
+        // A phone will happily offer HEIC. Naming the real cause matters: the
+        // wizard already learned this lesson once, when an unreadable image
+        // reported "revisa tu conexión".
+        return NextResponse.json({ error: 'photo-unsupported' }, { status: 415 });
+      }
+      photos.push({
+        slot,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        mediaType: file.type,
+      });
+    }
+
+    // Back-compat: the single-photo field the wizard used before guided
+    // capture. Kept so an older client mid-deploy still works rather than
+    // getting a 400 it cannot explain.
+    if (photos.length === 0) {
+      const legacy = form.get('photo');
+      if (legacy instanceof File) {
+        if (legacy.size > MAX_BYTES) {
+          return NextResponse.json({ error: 'photo-too-large' }, { status: 413 });
+        }
+        if (!ALLOWED_TYPES.has(legacy.type)) {
+          return NextResponse.json({ error: 'photo-unsupported' }, { status: 415 });
+        }
+        photos.push({
+          slot: 'front',
+          bytes: new Uint8Array(await legacy.arrayBuffer()),
+          mediaType: legacy.type,
+        });
+      }
+    }
+
+    if (photos.length === 0) {
       return NextResponse.json({ error: 'photo-required' }, { status: 400 });
     }
-    if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: 'photo-too-large' }, { status: 413 });
-    }
-    if (!ALLOWED_TYPES.has(file.type)) {
-      // A phone will happily offer HEIC. Naming the real cause matters: the
-      // wizard already learned this lesson once, when an unreadable image
-      // reported "revisa tu conexión".
-      return NextResponse.json({ error: 'photo-unsupported' }, { status: 415 });
-    }
-    bytes = new Uint8Array(await file.arrayBuffer());
-    mediaType = file.type;
   } catch {
     return NextResponse.json({ error: 'photo-unreadable' }, { status: 400 });
   }
@@ -99,12 +145,15 @@ export async function POST(request: Request): Promise<Response> {
   // The same call takes ~3s from a laptop with a 1.2 MB photo, so the gap is
   // environmental and the numbers are the only way to find it.
   const started = Date.now();
-  const photoKb = Math.round(bytes.byteLength / 1024);
+  const photoKb = Math.round(
+    photos.reduce((n, p) => n + p.bytes.byteLength, 0) / 1024
+  );
+  const slots = photos.map((p) => p.slot).join('+');
 
   try {
-    const { suggestion, modelKey } = await suggestFromPhoto(bytes, mediaType);
+    const { suggestion, modelKey } = await suggestFromPhoto(photos);
     console.info(
-      `[intake-suggest] ok in ${Date.now() - started}ms photo=${photoKb}KB type=${mediaType}`
+      `[intake-suggest] ok in ${Date.now() - started}ms photo=${photoKb}KB slots=${slots}`
     );
 
     // The policy is applied HERE, server-side, so there is exactly one place
@@ -117,7 +166,7 @@ export async function POST(request: Request): Promise<Response> {
     // Structured first, so a grep finds it without wading through a minified
     // stack. The stack still follows, because the cause is usually in it.
     console.warn(
-      `[intake-suggest] failed after ${elapsed}ms photo=${photoKb}KB type=${mediaType} error=${name}`
+      `[intake-suggest] failed after ${elapsed}ms photo=${photoKb}KB slots=${slots} error=${name}`
     );
     console.warn('[intake-suggest] failed', err);
     // 502 rather than 500: the failure is upstream, and the wizard's handling

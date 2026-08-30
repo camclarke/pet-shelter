@@ -65,6 +65,13 @@ export interface RawPhotoSuggestion {
   species: Species | null;
   speciesConfidence: Confidence;
 
+  /** See the schema comment in ai/intake-suggest.ts — this was a reversal. */
+  sex: PetSex | null;
+  sexConfidence: Confidence;
+  /** True only if the model saw genitalia, not inferred from build. */
+  sexFromGenitalPhoto: boolean;
+  apparentlySterilized: 'yes' | 'no' | 'unknown';
+
   /** Free text, e.g. "mestizo de tamaño mediano con rasgos de pastor". */
   visibleType: string | null;
   /** The model's own claim that this animal is a recognisable purebred. */
@@ -127,6 +134,15 @@ export type SuggestionUse = 'prefill' | 'offer' | 'display';
 
 export const SUGGESTION_POLICY = {
   species: 'prefill',
+  /**
+   * OFFERED, never prefilled — and this is the one entry worth defending.
+   *
+   * Sex inflects every Spanish sentence about the animal, so a wrong value
+   * is not a wrong field, it is a page that reads as broken. One tap to
+   * confirm costs the person nothing and they are standing next to the
+   * animal. The model still does the determining; the human still assents.
+   */
+  sex: 'offer',
   /** Offered, never prefilled — see the breed reasoning in the header. */
   breed: 'offer',
   age: 'prefill',
@@ -305,6 +321,41 @@ export function decideSize(s: RawPhotoSuggestion): PetSize | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Sex
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SexDecision {
+  sex: PetSex | null;
+  /** Why it was refused, so the UI can ask for the photo that would fix it. */
+  refusedBecause: 'no-genital-photo' | 'low-confidence' | null;
+}
+
+/**
+ * ⚠️ Refuses unless the model actually SAW genitalia.
+ *
+ * A model asked for a sex will produce one, and from a body shot it is
+ * guessing from size and build — which is not evidence. The guided capture
+ * exists precisely so this can be read rather than guessed, so the check is
+ * that the reading happened, not merely that an answer came back.
+ *
+ * The bar is HIGH rather than the usual medium. Everything else on the page
+ * agrees with this value grammatically, so a coin-flip here is more
+ * expensive than a coin-flip anywhere else in the schema.
+ */
+export function decideSex(s: RawPhotoSuggestion): SexDecision {
+  if (!s.sexFromGenitalPhoto) {
+    return { sex: null, refusedBecause: 'no-genital-photo' };
+  }
+  if (!meetsBar(s.sexConfidence, 'high')) {
+    return { sex: null, refusedBecause: 'low-confidence' };
+  }
+  if (s.sex == null) {
+    return { sex: null, refusedBecause: 'low-confidence' };
+  }
+  return { sex: s.sex, refusedBecause: null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Weight
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -396,6 +447,8 @@ export function cleanNameSuggestions(names: string[]): string[] {
 
 export interface ReviewedSuggestion {
   species: Species | null;
+  sex: SexDecision;
+  apparentlySterilized: 'yes' | 'no' | 'unknown';
   breed: BreedDecision;
   age: AgeDecision;
   size: PetSize | null;
@@ -430,8 +483,13 @@ export function reviewSuggestion(s: RawPhotoSuggestion): ReviewedSuggestion {
   const weight = decideWeight(s);
   if (weight.refused) withheld.push('weight');
 
+  const sex = decideSex(s);
+  if (sex.sex == null) withheld.push('sex');
+
   return {
     species,
+    sex,
+    apparentlySterilized: s.apparentlySterilized,
     breed: decideBreed(s),
     age,
     size,
@@ -460,7 +518,8 @@ export type SuggestedField =
   | 'name'
   | 'colorPattern'
   | 'coatType'
-  | 'weightKg';
+  | 'weightKg'
+  | 'sex';
 
 export const SUGGESTIBLE_FIELDS: readonly SuggestedField[] = [
   'species',
@@ -471,7 +530,15 @@ export const SUGGESTIBLE_FIELDS: readonly SuggestedField[] = [
   'colorPattern',
   'coatType',
   'weightKg',
+  'sex',
 ] as const;
 
-/** Unused type-level guard: every PetSex is still handled by i18n, not here. */
-export type _SexIsNeverSuggested = PetSex;
+/**
+ * ⚠️ Was `_SexIsNeverSuggested`, a guard asserting sex could never be
+ * suggested. The owner reversed that on 2026-08-30 once guided capture made
+ * a genital photograph available, so the guarantee is gone and pretending
+ * otherwise would be worse than removing it. What replaced it is narrower
+ * and still real: decideSex refuses unless the model saw genitalia, and the
+ * value is offered rather than prefilled. Both are tested.
+ */
+export type _SexNeedsGenitalEvidence = PetSex;
