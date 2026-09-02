@@ -12,6 +12,7 @@ import { suggestFromPhoto, type SlottedPhoto } from '@/lib/ai/intake-suggest';
  */
 const ACCEPTED_SLOTS = ['front', 'side', 'teeth', 'genitals'] as const;
 import { reviewSuggestion } from '@/lib/intake-suggestion';
+import { SUGGEST_FAILURE_HEADER } from '@/lib/intake-suggest-client';
 
 /**
  * POST /api/intake/suggest — one photo in, reviewed suggestions out.
@@ -57,12 +58,40 @@ const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 /** What Gemini accepts and a phone camera actually produces. */
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
+/**
+ * Every failure this route generates carries `X-Suggest-Failure`.
+ *
+ * ⚠️ The header's ABSENCE is the signal, and that is the whole point.
+ *
+ * `wawitas.org` reaches this route through a Firebase Hosting rewrite, and
+ * Hosting terminates a proxied request at 60 seconds with a 5xx of its OWN.
+ * On 2026-09-02 that was a **503** — the exact status this route uses for "no
+ * API key". So the wizard told an admin the feature was "todavía no
+ * configurada" while the key was present, working, and had just spent $0.03
+ * producing a complete answer that was discarded at the edge. A wrong
+ * diagnosis is worse than none: it sends someone hunting for a missing secret
+ * that is not missing.
+ *
+ * A status code is only ours to interpret if we are the ones who generated it.
+ * This header is how the browser tells the difference. The name is imported
+ * from the module that READS it rather than redeclared here, so the two halves
+ * cannot drift apart in a rename — which would reopen the bug with every test
+ * still passing. (Type-only imports aside, that module pulls in nothing: it is
+ * plain fetch code with no `use client` directive.)
+ */
+function fail(error: string, status: number): NextResponse {
+  return NextResponse.json(
+    { error },
+    { status, headers: { [SUGGEST_FAILURE_HEADER]: error } }
+  );
+}
+
 export async function POST(request: Request): Promise<Response> {
   // ── 1. authenticate ────────────────────────────────────────────────────────
   const header = request.headers.get('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) {
-    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+    return fail('unauthenticated', 401);
   }
 
   let isAdmin = false;
@@ -73,18 +102,22 @@ export async function POST(request: Request): Promise<Response> {
     const decoded = await getAdminAuth().verifyIdToken(token, true);
     isAdmin = decoded.admin === true;
   } catch {
-    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+    return fail('unauthenticated', 401);
   }
 
   if (!isAdmin) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    return fail('forbidden', 403);
   }
 
   // ── 2. is the feature even available ──────────────────────────────────────
   if (!aiIsConfigured()) {
     // 503, not 500: nothing is broken, the key is simply absent. The wizard
     // shows the manual form and says suggestions are unavailable.
-    return NextResponse.json({ error: 'ai-not-configured' }, { status: 503 });
+    //
+    // The header is what makes this 503 distinguishable from Firebase
+    // Hosting's own 60s-timeout 503. Without it the two are the same response
+    // to a browser, and only one of them means "go find the API key".
+    return fail('ai-not-configured', 503);
   }
 
   // ── 3. read the photo SET ─────────────────────────────────────────────────
@@ -104,16 +137,16 @@ export async function POST(request: Request): Promise<Response> {
       const file = form.get(`photo_${slot}`);
       if (file == null) continue;
       if (!(file instanceof File)) {
-        return NextResponse.json({ error: 'photo-required' }, { status: 400 });
+        return fail('photo-required', 400);
       }
       if (file.size > MAX_BYTES) {
-        return NextResponse.json({ error: 'photo-too-large' }, { status: 413 });
+        return fail('photo-too-large', 413);
       }
       if (!ALLOWED_TYPES.has(file.type)) {
         // A phone will happily offer HEIC. Naming the real cause matters: the
         // wizard already learned this lesson once, when an unreadable image
         // reported "revisa tu conexión".
-        return NextResponse.json({ error: 'photo-unsupported' }, { status: 415 });
+        return fail('photo-unsupported', 415);
       }
       photos.push({
         slot,
@@ -129,10 +162,10 @@ export async function POST(request: Request): Promise<Response> {
       const legacy = form.get('photo');
       if (legacy instanceof File) {
         if (legacy.size > MAX_BYTES) {
-          return NextResponse.json({ error: 'photo-too-large' }, { status: 413 });
+          return fail('photo-too-large', 413);
         }
         if (!ALLOWED_TYPES.has(legacy.type)) {
-          return NextResponse.json({ error: 'photo-unsupported' }, { status: 415 });
+          return fail('photo-unsupported', 415);
         }
         photos.push({
           slot: 'front',
@@ -143,15 +176,15 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     if (photos.length === 0) {
-      return NextResponse.json({ error: 'photo-required' }, { status: 400 });
+      return fail('photo-required', 400);
     }
 
     const totalBytes = photos.reduce((n, p) => n + p.bytes.byteLength, 0);
     if (totalBytes > MAX_TOTAL_BYTES) {
-      return NextResponse.json({ error: 'photos-too-large' }, { status: 413 });
+      return fail('photos-too-large', 413);
     }
   } catch {
-    return NextResponse.json({ error: 'photo-unreadable' }, { status: 400 });
+    return fail('photo-unreadable', 400);
   }
 
   // ── 4. ask the model ──────────────────────────────────────────────────────
@@ -195,8 +228,8 @@ export async function POST(request: Request): Promise<Response> {
       err instanceof Error &&
       (err.name === 'TimeoutError' || err.name === 'AbortError');
     if (timedOut) {
-      return NextResponse.json({ error: 'suggest-timeout' }, { status: 504 });
+      return fail('suggest-timeout', 504);
     }
-    return NextResponse.json({ error: 'suggest-failed' }, { status: 502 });
+    return fail('suggest-failed', 502);
   }
 }
