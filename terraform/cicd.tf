@@ -37,7 +37,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   # Only the claims actually used are mapped. `repository` is the one the
   # condition and the principalSet binding both key off; `repository_owner`
   # and `ref` are mapped so a future condition can narrow further (e.g. to
-  # refs/heads/main only) without recreating the provider.
+  # refs/heads/master only) without recreating the provider.
   attribute_mapping = {
     "google.subject"             = "assertion.sub"
     "attribute.repository"       = "assertion.repository"

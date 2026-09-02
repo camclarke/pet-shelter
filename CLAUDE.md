@@ -744,6 +744,14 @@ scanned chip resolves to a name and a phone call.
 
 ## Next session — start here
 
+> ⚠️ **The default branch is `master`, not `main`.** Renamed on GitHub and
+> locally on 2026-09-02. `.github/workflows/deploy.yml` had to be edited in the
+> same change: GitHub redirects a renamed branch for clones and pushes, but it
+> does NOT rewrite a workflow trigger, so `branches: [main]` would have gone on
+> matching nothing and **every push would have stopped deploying, silently**.
+> Log entries below that say `main` were accurate when they were written.
+
+
 **Last session: 2026-08-27. PR #16 is MERGED, DEPLOYED, and VERIFIED SERVING
 IN PRODUCTION** — merged at `365cbd0`, deployed Cloud Run tag equals
 `git rev-parse HEAD`, all 20 route/host combinations 200, and the served
