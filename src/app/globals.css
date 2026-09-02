@@ -1176,6 +1176,25 @@ textarea {
   min-height: 46px;
 }
 
+/* Off-screen but still RENDERED and focusable-by-script.
+   ⚠️ Not `display: none` and not the `hidden` attribute: Chrome 130+ refuses to
+   deliver trusted change events to a programmatic .click() on a hidden input, so
+   the picker opens and the chosen file never arrives — silently, with no error
+   and no log line. Carried from trustcert.ai, where it cost a debugging session.
+   See docs/gemini-file-uploads-knowledge-export.md §8. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+}
+
 /* ── guided photo capture (GuidedPhotoCapture.tsx) ───────────────────────── */
 .capture {
   list-style: none;
