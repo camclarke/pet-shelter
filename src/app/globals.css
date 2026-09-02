@@ -1783,3 +1783,122 @@ textarea {
     height: 180px;
   }
 }
+
+/* ── the intake field list ───────────────────────────────────────────────────
+   One row per field, showing what the record HOLDS, opening its editor when
+   clicked. Added 2026-09-02, replacing a layout that printed every value in
+   the suggestions panel and then asked for it again as an empty control — the
+   screen said "Sexo: Hembra" and then "Sexo: [Elegir…]", which reads as two
+   questions about one animal. See EditableField.tsx.
+
+   Sized for a phone first: intake happens one-handed, often with an animal in
+   the other arm. */
+.field-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.field-row + .field-row {
+  border-top: 1px solid var(--line);
+}
+
+.field-row[data-editing='true'] {
+  background: var(--cream-2);
+}
+
+/* A button, not a div with a handler: this has to be reachable by keyboard and
+   announce its expanded state. The whole row is the target — a small pencil
+   icon is a miss on a phone. */
+.field-row__summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  width: 100%;
+  /* 44px is the floor for a tap target; the padding gets there on one line. */
+  padding: var(--space-2);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s var(--ease);
+}
+
+.field-row__summary:hover:not(:disabled),
+.field-row__summary:focus-visible {
+  background: var(--cream-2);
+}
+
+.field-row__summary:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.field-row__label {
+  flex: 0 0 auto;
+  min-width: 8.5rem;
+}
+
+/* min-width:0 so a long value ellipsises instead of pushing the action off the
+   row. Learned on 2026-08-30: text-overflow does not apply to a flex
+   container's own text, it needs an inner block box. */
+.field-row__value,
+.field-row__empty {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-row__empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.field-row__action {
+  flex: 0 0 auto;
+  color: var(--jade);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.field-row__note {
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.field-row__offers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+.field-row__editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+/* The label column collapses on a narrow phone: 8.5rem of label plus a value
+   plus "Cambiar" does not fit at 360px, which is the width a real device
+   reported (not 375 — measured 2026-08-30). */
+@media (max-width: 30rem) {
+  .field-row__summary {
+    flex-wrap: wrap;
+  }
+
+  .field-row__label {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}
