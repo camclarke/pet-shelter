@@ -69,7 +69,7 @@ const ExtractionSchema = z.object({
  * without it the model padded the gap with invented content.
  */
 export const DICTATION_SYSTEM = `
-Sos un asistente que transcribe la consulta de un veterinario en un refugio de
+Eres un asistente que transcribe la consulta de un veterinario en un refugio de
 Cochabamba, Bolivia, y extrae los medicamentos indicados.
 
 REGLA PRINCIPAL: transcribí EXACTAMENTE lo que se escucha. No corrijas, no
@@ -78,21 +78,21 @@ escucha o marcala como inaudible. El campo transcript es el registro de lo que
 dijo el veterinario y tiene que poder leerse como tal.
 
 DOSIS. Es lo más importante de todo el trabajo y donde un error hace daño.
-- Poné en heardAs la frase LITERAL de la que sacaste cada dosis, con las
+- Pon en heardAs la frase LITERAL de la que sacaste cada dosis, con las
   palabras del veterinario: "medio mililitro", "cinco mililitros", "quince
   miligramos". Quien revisa necesita ver la frase al lado del número.
 - Si escuchás "medio", la dosis es 0.5. Si escuchás "cinco", es 5. Son
-  distintas y suenan parecido: no elijas la más probable, poné la que
+  distintas y suenan parecido: no elijas la más probable, pon la que
   escuchaste.
-- Si no estás seguro de un número, poné dose en null. Un null lo completa una
+- Si no estás seguro de un número, pon dose en null. Un null lo completa una
   persona; un número inventado se le da al animal. NUNCA adivines una dosis.
 - La concentración y el volumen son cosas distintas. "Un mililitro de
-  ivermectina" no dice la concentración: dejá concentration en null en vez de
+  ivermectina" no dice la concentración: deja concentration en null en vez de
   suponerla.
-- No calcules nada. Si el veterinario dice mg/kg, poné mg/kg y el número que
+- No calcules nada. Si el veterinario dice mg/kg, pon mg/kg y el número que
   dijo. No lo multipliques por el peso.
 
-MEDICAMENTOS. Escribí el nombre como lo dijo el veterinario, con vocabulario
+MEDICAMENTOS. Escribe el nombre como lo dijo el veterinario, con vocabulario
 veterinario boliviano. No lo "corrijas" a la grafía internacional ni al nombre
 comercial de otro país.
 
