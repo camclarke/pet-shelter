@@ -95,6 +95,12 @@ export default function GuidedPhotoCapture({
   // Two inputs per slot rather than one whose `capture` is toggled before
   // .click(): toggling the attribute on a shared input is flaky across mobile
   // browsers, and inputs cost nothing.
+  //
+  // ⚠️ VISUALLY hidden, never `hidden` / display:none. Chrome 130+ does not
+  // deliver trusted change events to a programmatic .click() on a hidden input,
+  // so the picker opens and the file never arrives — no error, no log, nothing.
+  // Carried from trustcert.ai, where it cost a debugging session.
+  // See docs/gemini-file-uploads-knowledge-export.md §8.
   const cameraRefs = useRef<Partial<Record<PetPhotoSlot, HTMLInputElement | null>>>({});
   const galleryRefs = useRef<Partial<Record<PetPhotoSlot, HTMLInputElement | null>>>({});
 
@@ -144,7 +150,9 @@ export default function GuidedPhotoCapture({
                 type="file"
                 accept="image/*"
                 capture="environment"
-                hidden
+                className="visually-hidden"
+                aria-hidden="true"
+                tabIndex={-1}
                 disabled={disabled || busy}
                 onChange={(e) => handleChange(spec.slot, e)}
               />
@@ -154,7 +162,9 @@ export default function GuidedPhotoCapture({
                 }}
                 type="file"
                 accept="image/*"
-                hidden
+                className="visually-hidden"
+                aria-hidden="true"
+                tabIndex={-1}
                 disabled={disabled || busy}
                 onChange={(e) => handleChange(spec.slot, e)}
               />
