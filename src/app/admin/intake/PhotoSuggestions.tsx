@@ -88,7 +88,7 @@ const FAILURE_TEXT: Record<string, string> = {
   'photo-rejected':
     'No pudimos leer esa imagen. Probá sacando la foto de nuevo, o elegí una JPG o PNG de menos de 6 MB.',
   timeout:
-    'La foto se guardó y queda como portada. El análisis tardó demasiado y lo cortamos — puede ser la señal. Podés tocar «Tomar foto» otra vez para reintentar, o cargar los datos a mano y seguir.',
+    'La foto se guardó y queda como portada. El análisis tardó demasiado y lo cortamos — puede ser la señal. Podés tocar «Analizar» otra vez para reintentar, o cargar los datos a mano y seguir.',
   failed:
     'La foto se guardó y queda como portada. Solo falló el análisis automático: cargá los datos a mano y seguí, no se pierde nada.',
 };
