@@ -43,6 +43,17 @@ export const dynamic = 'force-dynamic';
 /** The wizard resizes to a 1600px long edge, which lands far under this. */
 const MAX_BYTES = 6 * 1024 * 1024;
 
+/**
+ * Cap across the WHOLE set, not just each file.
+ *
+ * A per-file limit alone is unsound: four slots at 6 MB each pass every
+ * individual check and together reach 24 MB, past the provider's ~20 MB
+ * inline request cap — which fails as a bare 400 with nothing naming the
+ * real cause. 16 MB leaves headroom for base64 inflation on the wire.
+ * Carried from trustcert.ai; see docs/gemini-file-uploads-knowledge-export.md §2.
+ */
+const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+
 /** What Gemini accepts and a phone camera actually produces. */
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -133,6 +144,11 @@ export async function POST(request: Request): Promise<Response> {
 
     if (photos.length === 0) {
       return NextResponse.json({ error: 'photo-required' }, { status: 400 });
+    }
+
+    const totalBytes = photos.reduce((n, p) => n + p.bytes.byteLength, 0);
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      return NextResponse.json({ error: 'photos-too-large' }, { status: 413 });
     }
   } catch {
     return NextResponse.json({ error: 'photo-unreadable' }, { status: 400 });
