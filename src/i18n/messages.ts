@@ -70,12 +70,14 @@ export interface Messages {
   /**
    * "mestizo" / "mestiza" — the honest breed for most street rescues.
    *
-   * Takes `sex` and NOT an optional sex, deliberately. A vision model is
-   * never asked for sex (it cannot see it, and a wrong guess breaks gender
-   * agreement across the whole site), so the word cannot even be SPELLED
-   * until a human supplies it. Making that a required argument turns the
-   * constraint into a compile error rather than a "mestizo/a" fudge
-   * reaching a public listing.
+   * Takes `sex` and NOT an optional sex, deliberately — and the reason
+   * OUTLIVED the fact it was first written from. It used to say a vision
+   * model is never asked for sex; since 2026-08-30 it is, from a genital
+   * photograph. What has not changed is that this word must agree with the
+   * sex an admin has CONFIRMED on the draft, never with a suggestion nobody
+   * has accepted, because the breed string reaches a public listing. Making
+   * it required turns that into a compile error rather than a "mestizo/a"
+   * fudge going out to adopters.
    */
   mixedBreed(sex: PetSex): string;
 

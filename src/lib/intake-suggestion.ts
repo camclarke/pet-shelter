@@ -519,7 +519,8 @@ export type SuggestedField =
   | 'colorPattern'
   | 'coatType'
   | 'weightKg'
-  | 'sex';
+  | 'sex'
+  | 'sterilized';
 
 export const SUGGESTIBLE_FIELDS: readonly SuggestedField[] = [
   'species',
@@ -531,6 +532,7 @@ export const SUGGESTIBLE_FIELDS: readonly SuggestedField[] = [
   'coatType',
   'weightKg',
   'sex',
+  'sterilized',
 ] as const;
 
 /**

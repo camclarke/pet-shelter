@@ -30,13 +30,22 @@ export interface PhotoSuggestionsProps {
   outcome: SuggestOutcome | null;
   busy: boolean;
   disabled: boolean;
-  /** Needed to spell "mestizo"/"mestiza" — the model is never asked for it. */
+  /**
+   * The sex ALREADY ON THE DRAFT — what an admin has confirmed, never what the
+   * model read. Breed wording ("mestizo"/"mestiza") agrees with this value, so
+   * it must not be the raw suggestion: the breed string would then be spelled
+   * from a reading nobody has accepted yet.
+   */
   sex: PetSex | null;
   onApplyBreed: (breed: string) => void;
   onApplySize: (size: PetSize) => void;
   /** A RANGE, never a single number — see decideWeight. */
   onApplyWeight: (minKg: number, maxKg: number) => void;
   onApplyName: (name: string) => void;
+  /** Offered for one tap, NEVER pre-filled — see the sex block below. */
+  onApplySex: (sex: PetSex) => void;
+  /** Only ever offered on a positive reading — see the sterilisation block. */
+  onApplySterilized: () => void;
 }
 
 const SIZE_LABEL: Record<PetSize, string> = {
@@ -51,6 +60,19 @@ const WITHHELD_REASON: Record<string, string> = {
   size: 'No se puede estimar el tamaño sin algo que dé escala: una mano, una puerta, un plato.',
   weight:
     'No se puede estimar el peso sin algo que dé escala en la foto. Sacá otra con una mano, una puerta o un plato al lado.',
+};
+
+/**
+ * Sex is withheld for two very different reasons and they need different
+ * copy: one is a missing photograph the admin can go and take, the other is a
+ * photograph that was taken and could not be read. A single message would send
+ * someone to re-shoot a photo they already have.
+ */
+const SEX_WITHHELD_REASON: Record<string, string> = {
+  'no-genital-photo':
+    'El sexo no se estima sin la foto de genitales: es la única forma de leerlo, y nunca se deduce del tamaño ni del porte. Elegilo a mano, o sacá esa foto.',
+  'low-confidence':
+    'Se vio la foto de genitales pero no alcanzó para estar seguros. Elegí el sexo a mano — de él dependen todos los textos del sitio.',
 };
 
 // ⚠️ Every one of these must say what happened to the PHOTO, because the photo
@@ -92,6 +114,8 @@ export default function PhotoSuggestions({
   onApplySize,
   onApplyWeight,
   onApplyName,
+  onApplySex,
+  onApplySterilized,
 }: PhotoSuggestionsProps) {
   const s = outcome?.suggestion ?? null;
 
@@ -143,6 +167,59 @@ export default function PhotoSuggestions({
           )}
 
           {/* ── offered, never applied ────────────────────────────────────── */}
+
+          {/* Sex comes FIRST among the offers, and that ordering is load-bearing:
+              the breed wording below cannot be spelled until a sex exists, so
+              the block that says "elegí primero el sexo" has to sit under the
+              control that supplies one. It is a button, never a pre-filled
+              value — decideSex already refuses unless the model actually read
+              the genital photograph, and this is the second gate: a human taps
+              it. Everything on the site agrees with this word grammatically. */}
+          {s.sex.sex && (
+            <div className="admin-suggest__offers">
+              <span className="t-label">Sexo</span>
+              <button
+                type="button"
+                className="btn btn--muted"
+                disabled={disabled || busy}
+                onClick={() => onApplySex(s.sex.sex!)}
+              >
+                {t.sexLabel(s.sex.sex)}
+              </button>
+              <span className="admin__sub">Leído en la foto de genitales. Confirmá vos.</span>
+            </div>
+          )}
+
+          {/* Sterilisation is offered ONLY on a positive reading. "no" from a
+              photograph is not evidence of anything — a spay scar hides under
+              coat and a recent neuter can look unremarkable — and the draft
+              already defaults to not sterilised, so offering "no" would dress
+              the default up as a finding.
+
+              ⚠️ The wording is a NOUN on purpose. This button can appear before
+              a sex has been chosen, and "castrado"/"esterilizada" would have to
+              agree with one. The site's answer to that is to spell both forms
+              ("Ya está esterilizado o esterilizada" on the form below), never
+              a "-o/a" fudge — but that is too long for a button, so this one
+              sidesteps agreement entirely. Vocabulary follows the form field:
+              esterilización, not castración. */}
+          {s.apparentlySterilized === 'yes' && (
+            <div className="admin-suggest__offers">
+              <span className="t-label">Esterilización</span>
+              <button
+                type="button"
+                className="btn btn--muted"
+                disabled={disabled || busy}
+                onClick={onApplySterilized}
+              >
+                Marcar esterilización
+              </button>
+              <span className="admin__sub">
+                Se ve evidencia en la foto. Que lo confirme el veterinario.
+              </span>
+            </div>
+          )}
+
           <div className="admin-suggest__offers">
             <span className="t-label">Raza</span>
             {s.breed.kind !== 'mixed' ? (
@@ -268,15 +345,24 @@ export default function PhotoSuggestions({
             <ul className="admin-suggest__withheld">
               {s.withheld.map((field) => (
                 <li key={field} className="admin__sub">
-                  {WITHHELD_REASON[field] ?? `No se pudo estimar: ${field}.`}
+                  {field === 'sex'
+                    ? SEX_WITHHELD_REASON[s.sex.refusedBecause ?? 'low-confidence']
+                    : (WITHHELD_REASON[field] ?? `No se pudo estimar: ${field}.`)}
                 </li>
               ))}
             </ul>
           )}
 
+          {/* ⚠️ This paragraph used to read "el sexo nunca se sugiere". That was
+              true until the genital slot existed, and it survived the change —
+              the model layer began reading sex from that photograph while this
+              line went on telling the admin it never would. Sex is still never
+              GUESSED: decideSex refuses outright without the photograph, and
+              demands high confidence with it. */}
           <p className="admin__sub">
-            El sexo nunca se sugiere: no se ve en una foto y de él dependen todos los
-            textos del sitio.
+            El sexo sólo se sugiere si se llega a ver en la foto de genitales — nunca se
+            deduce del tamaño ni del porte. Siempre lo confirmás vos: de él dependen todos
+            los textos del sitio.
           </p>
         </div>
       )}

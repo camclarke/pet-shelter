@@ -952,6 +952,8 @@ export function IntakeWizard() {
                 'name',
               )
             }
+            onApplySex={(sex) => acceptSuggested({ sex }, 'sex')}
+            onApplySterilized={() => acceptSuggested({ sterilized: true }, 'sterilized')}
           />
 
           <label className="auth__field">
