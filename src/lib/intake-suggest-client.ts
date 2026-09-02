@@ -33,6 +33,22 @@ export interface SuggestOutcome {
 const NOTHING: SuggestOutcome = { suggestion: null, modelKey: null, failure: 'failed' };
 
 /**
+ * The header `/api/intake/suggest` stamps on every failure IT generates.
+ *
+ * Defined HERE, next to the code that reads it, and imported by the route —
+ * so a rename cannot leave the two halves disagreeing. That drift is not
+ * theoretical: the whole reason this header exists is that a status code alone
+ * could not tell our 503 from Firebase Hosting's, and a silently renamed
+ * header would put us straight back there with every test still green.
+ *
+ * ⚠️ It is a wire contract. During a rollout an old bundle talks to the new
+ * route and vice versa, so renaming it degrades in-flight clients (they would
+ * read a stamped 503 as unstamped, i.e. "timeout" instead of "not
+ * configured"). Benign in that direction, but do it deliberately.
+ */
+export const SUGGEST_FAILURE_HEADER = 'X-Suggest-Failure';
+
+/**
  * ⚠️ `processed` MUST be the output of stripAndResize(), never a raw File.
  *
  * This call sends the photograph to a third party. A phone photo carries
@@ -89,7 +105,33 @@ export async function requestSuggestion(
       return { suggestion: json.suggestion, modelKey: json.modelKey, failure: null };
     }
 
-    if (res.status === 503) return { ...NOTHING, failure: 'not-configured' };
+    // ── Whose response is this? ────────────────────────────────────────────
+    // The route stamps X-Suggest-Failure on every failure IT generates, so the
+    // absence of that header on an error means the response was manufactured
+    // somewhere between here and the route.
+    //
+    // That is not hypothetical. `wawitas.org` reaches the app through a
+    // Firebase Hosting rewrite; Hosting cuts a proxied request at 60 seconds,
+    // and on 2026-09-02 it answered **503** — the same status the route uses
+    // for "no API key". The model had answered correctly in 67.7s and Cloud
+    // Run logged the request 200 with a complete body. The browser got
+    // Hosting's 503, and the wizard told the admin the feature was "todavía no
+    // configurada" — while the key was present and had just spent $0.03 on an
+    // answer that was discarded at the edge.
+    //
+    // So: a status code is only worth interpreting when we know we wrote it.
+    const stamped = res.headers.get(SUGGEST_FAILURE_HEADER);
+
+    if (stamped === null && res.status >= 500) {
+      // Nothing of ours reaches here unstamped. An unstamped 5xx is the edge
+      // giving up — nearly always that 60s ceiling — which is a timeout in
+      // every sense that matters to the person waiting, and is retryable.
+      return { ...NOTHING, failure: 'timeout' };
+    }
+
+    if (stamped === 'ai-not-configured') {
+      return { ...NOTHING, failure: 'not-configured' };
+    }
     if (res.status === 401 || res.status === 403) {
       return { ...NOTHING, failure: 'unauthorized' };
     }

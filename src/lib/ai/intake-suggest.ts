@@ -8,6 +8,12 @@ import { FLASH_LITE_MODEL, FLASH_MODEL, modelKeyFor } from './model-ids';
 import type { PetPhotoSlot } from '../types';
 import { recordAiUsage } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
+import {
+  SUGGEST_MAX_ATTEMPTS,
+  SUGGEST_MIN_RETRY_MS,
+  SUGGEST_TOTAL_BUDGET_MS,
+  attemptTimeoutMsFor,
+} from './suggest-budget';
 
 /**
  * Photo-assisted intake: the model call.
@@ -223,111 +229,6 @@ const USER_INSTRUCTION =
   'Observá esta fotografía del animal recién ingresado y completá los campos.';
 
 /**
- * A photo suggestion should never hold up an intake.
- *
- * ⚠️ PER ATTEMPT, not for the whole operation — and that distinction is the
- * whole point of this constant.
- *
- * Measured in production 2026-08-30, four real calls from a phone:
- *
- *   ok      4683ms  photo=323KB
- *   FAILED 25009ms  photo=393KB
- *   ok      6795ms  photo=435KB
- *   FAILED 25001ms  photo=229KB
- *
- * Read those numbers carefully. Photo size is NOT the variable — the largest
- * succeeded and the smallest failed. The failures sit on the abort to the
- * millisecond, which means the request never came back at all rather than
- * being slow: a hung connection, not a slow model. Successes are 4.7-6.8s.
- *
- * The earlier design passed ONE `AbortSignal.timeout(25_000)` to
- * generateObject alongside `maxRetries: 1`. That retry was unreachable: the
- * signal spans every attempt, so a hang on the first consumed the entire
- * budget and the second never started. A retry that cannot run is worse than
- * no retry, because it reads like resilience that is not there.
- *
- * So the budget is per attempt now, and the retry is ours. 12s is roughly
- * double the slowest success, so a healthy call is never cut off, and a hung
- * one is abandoned early enough to try again on a fresh connection inside a
- * total budget an admin will still wait through.
- */
-export const SUGGEST_ATTEMPT_TIMEOUT_MS = 12_000;
-
-/**
- * The Flash tier needs its own, larger budget. Measured on the same real
- * photograph 2026-08-30:
- *
- *   gemini-3.6-flash       10060 ms
- *   gemini-3.1-flash-lite   3991 ms
- *
- * Flash reasons before answering, which is exactly what buys the correct
- * age — so the latency is the feature, not overhead to squeeze out. 12s was
- * calibrated for Lite and left Flash no headroom once the structured schema
- * was added: the first real run aborted twice and returned nothing.
- *
- * 25s is roughly 2.5x the measured time, matching the margin Lite has.
- */
-export const SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH = 25_000;
-
-/**
- * Extra budget per photo beyond the first.
- *
- * The budget has to scale with the photo count, not just the tier. Measured
- * 2026-08-30 on Flash-Lite: one image 4978ms, two images 7240ms, so roughly
- * +2.2s per image. Flash runs about 2.5x slower, hence ~6s.
- *
- * ✅ MEASURED AT FOUR on 2026-09-02, and the extrapolation above was wrong —
- * generously, which is why nothing broke. A real four-photo Flash run through
- * the deployed wizard took 16719ms against a 43000ms budget:
- *
- *     [intake-suggest] ok in 16719ms photo=749KB slots=front+side+teeth+genitals
- *
- * That is ~2220ms per extra image (10060ms at one, 16719ms at four), i.e. much
- * closer to the LITE constant than to this one. The guess assumed the "Flash is
- * ~2.5x slower" multiplier applied to the per-image increment too; it does not.
- * The multiplier is on the BASE — reasoning is paid once per call — while each
- * extra image is mostly vision encoding, which is near enough tier-independent.
- *
- * Left at 6000 deliberately: it is now known headroom rather than an unknown,
- * n=1, and the failure it guards against (a hung socket) is not the same thing
- * as the latency it is sized from. Lower it toward ~3000 only with more samples.
- */
-export const SUGGEST_PER_EXTRA_PHOTO_MS_FLASH = 6_000;
-export const SUGGEST_PER_EXTRA_PHOTO_MS_LITE = 2_500;
-
-/**
- * Per-attempt budget for the tier being called AND the number of photos.
- *
- * A single shared budget across attempts was the bug fixed earlier today; a
- * budget that ignores photo count is the same mistake one axis over.
- */
-export function attemptTimeoutMsFor(modelId: string, photoCount = 1): number {
-  const lite = modelId.includes('lite');
-  const base = lite ? SUGGEST_ATTEMPT_TIMEOUT_MS : SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH;
-  const perExtra = lite
-    ? SUGGEST_PER_EXTRA_PHOTO_MS_LITE
-    : SUGGEST_PER_EXTRA_PHOTO_MS_FLASH;
-  return base + perExtra * Math.max(0, photoCount - 1);
-}
-
-/** Attempts in total, not retries after the first. */
-export const SUGGEST_MAX_ATTEMPTS = 2;
-
-/**
- * ⚠️ NOTHING ENFORCES THIS. It is exported and never read — verified across
- * src/ on 2026-09-02. It previously claimed to be "what the route's 504
- * means"; the route has no such branch, and the real ceiling on a request is
- * Cloud Run's own timeout (300s), which no photo count can approach.
- *
- * Kept only as documentation of the intended shape, and deliberately NOT
- * turned into a real ceiling: it is blind to photo count, so wiring it up
- * would cap a four-photo call below its own per-attempt budget and kill the
- * retry — the exact bug fixed on 2026-08-30, one axis over.
- */
-export const SUGGEST_TIMEOUT_MS =
-  SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH * SUGGEST_MAX_ATTEMPTS + 1_000;
-
-/**
  * The Flash tier, not Flash-Lite — and the reason is an error, not a preference.
  *
  * Measured 2026-08-30 in AI Studio, same prompt and same photographs, on a
@@ -408,7 +309,8 @@ function isTimeout(err: unknown): boolean {
 }
 
 /**
- * Retry ONLY on a timeout, and only within SUGGEST_MAX_ATTEMPTS.
+ * Retry ONLY on a timeout, and only within BOTH budgets — the per-attempt
+ * one and the total.
  *
  * Deliberately narrow. A 400 for a malformed image, a 401 for a bad key or a
  * 429 for a spent quota will all fail the same way twice, and retrying them
@@ -416,20 +318,38 @@ function isTimeout(err: unknown): boolean {
  * immediately. A hang is the one failure a second attempt genuinely fixes,
  * because it gets a new connection.
  */
-async function withRetry<T>(call: () => Promise<T>): Promise<T> {
+async function withRetry<T>(
+  perAttemptMs: number,
+  call: (budgetMs: number) => Promise<T>
+): Promise<T> {
+  const deadline = Date.now() + SUGGEST_TOTAL_BUDGET_MS;
   let lastErr: unknown;
+
   for (let attempt = 1; attempt <= SUGGEST_MAX_ATTEMPTS; attempt++) {
     const started = Date.now();
     try {
-      return await call();
+      return await call(Math.min(perAttemptMs, deadline - started));
     } catch (err) {
       lastErr = err;
       if (!isTimeout(err) || attempt === SUGGEST_MAX_ATTEMPTS) throw err;
+
+      const elapsed = Date.now() - started;
+      const left = deadline - Date.now();
+      if (left < SUGGEST_MIN_RETRY_MS) {
+        // Say so rather than retrying into a wall. The admin gets the timeout
+        // message now instead of after another attempt that cannot be
+        // delivered, and a free-tier request — 20 a day on Flash — is not
+        // spent on an answer the edge will discard.
+        console.warn(
+          `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} timed out after ${elapsed}ms; only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms, not retrying`
+        );
+        throw err;
+      }
       // Logged per attempt, so a future failure still says which attempt died
       // and how long it took — the thing that was missing when this was one
       // opaque 25s abort.
       console.warn(
-        `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} timed out after ${Date.now() - started}ms; retrying`
+        `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} timed out after ${elapsed}ms; retrying with ${left}ms left`
       );
     }
   }
@@ -467,7 +387,8 @@ async function extractWith(
   modelId: string,
   photos: readonly SlottedPhoto[]
 ): Promise<SuggestResult> {
-  const { object, usage, providerMetadata } = await withRetry(() =>
+  const perAttemptMs = attemptTimeoutMsFor(modelId, photos.length);
+  const { object, usage, providerMetadata } = await withRetry(perAttemptMs, (budgetMs) =>
     generateObject({
       // ⚠️ Flash-LITE, and this is a measured choice rather than thrift.
       //
@@ -506,10 +427,14 @@ async function extractWith(
           ],
         },
       ],
-      // A FRESH signal per attempt — see SUGGEST_ATTEMPT_TIMEOUT_MS. Creating
-      // it inside the callback is load-bearing: hoisting it out would restore
-      // the single shared budget this replaced.
-      abortSignal: AbortSignal.timeout(attemptTimeoutMsFor(modelId, photos.length)),
+      // A FRESH signal per attempt — see suggest-budget.ts. Creating it
+      // inside the callback is load-bearing: hoisting it out would restore the
+      // single shared budget this replaced.
+      //
+      // `budgetMs` is withRetry's, not ours: the per-attempt budget already
+      // trimmed to whatever is left of SUGGEST_TOTAL_BUDGET_MS, so no attempt
+      // can push the request past Firebase Hosting's 60s ceiling.
+      abortSignal: AbortSignal.timeout(budgetMs),
       // 0, because withRetry owns retrying. Leaving the SDK's own retries on
       // would nest two policies and make the timing impossible to reason about.
       maxRetries: 0,
