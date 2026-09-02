@@ -21,9 +21,11 @@ import type { RawPhotoSuggestion } from '../intake-suggestion';
  * the number before it is acted on and "medio mililitro" against "cinco
  * mililitros" is a factor of ten in the animal. Nothing here is that. Every
  * field below is reviewed by an admin standing next to the animal before it is
- * stored, and that admin can see the things the model is worst at — size and
- * sex — better than any photograph can. A second extractor would add cost and
- * latency to a gate a human already staffs.
+ * stored, and that admin can see the things the model is worst at — size above
+ * all — better than any photograph can. (Sex was on that list until guided
+ * capture supplied a genital photograph; it is now READ rather than guessed,
+ * and still only ever offered for a human to accept.) A second extractor would
+ * add cost and latency to a gate a human already staffs.
  *
  * ── Grounded search is OFF, and that is structural ───────────────────────────
  * No tools are passed. Grounding is billed per search query, carries zero
@@ -31,15 +33,14 @@ import type { RawPhotoSuggestion } from '../intake-suggestion';
  */
 
 /**
- * ⚠️ There is NO `sex` field, deliberately, and this is the single most
- * important line in the file.
+ * ⚠️ This block used to say "there is NO `sex` field, deliberately, and this
+ * is the single most important line in the file". It was the most important
+ * line — until the owner reversed it on 2026-08-30 and added the field twenty
+ * lines below, at which point the file asserted the opposite of itself.
  *
- * `sex` drives Spanish gender agreement across the whole site — the species
- * noun, the size adjective, every past participle. One wrong guess makes every
- * sentence about that animal ungrammatical in the only language its readers
- * use. A nullable field would invite the model to guess; an absent field
- * cannot be filled. Structural guarantees do not erode the way prompt
- * instructions do.
+ * The reasoning it carried is NOT obsolete and now lives on the `sex` field's
+ * own comment, next to the guards that replaced the structural guarantee.
+ * Read it there before touching sex anywhere in this pipeline.
  */
 const SuggestionSchema = z.object({
   species: z.enum(['dog', 'cat', 'rabbit', 'other']).nullable(),
@@ -275,11 +276,21 @@ export const SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH = 25_000;
  * 2026-08-30 on Flash-Lite: one image 4978ms, two images 7240ms, so roughly
  * +2.2s per image. Flash runs about 2.5x slower, hence ~6s.
  *
- * ⚠️ Extrapolated from TWO images, not measured at four. A two-photo Flash
- * run took ~13s on the attempt that succeeded. Re-measure when guided capture
- * actually sends four, and do not trust this constant until then — the last
- * two times a timeout was set from a guess rather than a measurement it was
- * wrong in production.
+ * ✅ MEASURED AT FOUR on 2026-09-02, and the extrapolation above was wrong —
+ * generously, which is why nothing broke. A real four-photo Flash run through
+ * the deployed wizard took 16719ms against a 43000ms budget:
+ *
+ *     [intake-suggest] ok in 16719ms photo=749KB slots=front+side+teeth+genitals
+ *
+ * That is ~2220ms per extra image (10060ms at one, 16719ms at four), i.e. much
+ * closer to the LITE constant than to this one. The guess assumed the "Flash is
+ * ~2.5x slower" multiplier applied to the per-image increment too; it does not.
+ * The multiplier is on the BASE — reasoning is paid once per call — while each
+ * extra image is mostly vision encoding, which is near enough tier-independent.
+ *
+ * Left at 6000 deliberately: it is now known headroom rather than an unknown,
+ * n=1, and the failure it guards against (a hung socket) is not the same thing
+ * as the latency it is sized from. Lower it toward ~3000 only with more samples.
  */
 export const SUGGEST_PER_EXTRA_PHOTO_MS_FLASH = 6_000;
 export const SUGGEST_PER_EXTRA_PHOTO_MS_LITE = 2_500;
@@ -303,9 +314,15 @@ export function attemptTimeoutMsFor(modelId: string, photoCount = 1): number {
 export const SUGGEST_MAX_ATTEMPTS = 2;
 
 /**
- * Kept as the OVERALL ceiling the caller can reason about, and it is what the
- * route's 504 means. Deliberately a little over attempts x per-attempt, since
- * each attempt carries its own setup.
+ * ⚠️ NOTHING ENFORCES THIS. It is exported and never read — verified across
+ * src/ on 2026-09-02. It previously claimed to be "what the route's 504
+ * means"; the route has no such branch, and the real ceiling on a request is
+ * Cloud Run's own timeout (300s), which no photo count can approach.
+ *
+ * Kept only as documentation of the intended shape, and deliberately NOT
+ * turned into a real ceiling: it is blind to photo count, so wiring it up
+ * would cap a four-photo call below its own per-attempt budget and kill the
+ * retry — the exact bug fixed on 2026-08-30, one axis over.
  */
 export const SUGGEST_TIMEOUT_MS =
   SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH * SUGGEST_MAX_ATTEMPTS + 1_000;

@@ -44,3 +44,6 @@ Thumbs.db
 # Only the filled-in-by-you template is tracked.
 seed/*
 !seed/EXAMPLE-pet.json
+
+# Local-only E2E photo drop (real animal photos, never committed)
+_e2e/
