@@ -241,8 +241,11 @@ scanned chip resolves to a name and a phone call.
   **Size fails toward not answering** unless the photo held a scale reference,
   since a lone chihuahua and a lone mastiff frame identically.
 
-  **`sex` is ABSENT from the extraction schema rather than nullable, and that
-  is the single most transferable idea here.** It drives Spanish gender
+  **`sex` was ABSENT from the extraction schema rather than nullable, and that
+  was called the single most transferable idea here — REVERSED on 2026-09-02
+  by PR #23, once a guided genital photograph made it readable rather than
+  guessable. The reasoning below is why the bar stayed high, not why the field
+  is missing; it is no longer missing.** It drives Spanish gender
   agreement across the whole site — species noun, size adjective, every past
   participle — so one wrong guess makes every sentence about that animal
   ungrammatical in the only language its readers use. A nullable field invites
@@ -740,6 +743,216 @@ scanned chip resolves to a name and a phone call.
   `generativelanguage` and `createGoogleGenerativeAI` absent from every client
   chunk. `pets` still holds **0 documents** — the drafts are real animals and
   publishing is deliberately a decision.
+
+- **2026-09-02** — **Guided capture shipped (#23–#26), the default branch became
+  `master` (#27), and a four-photo call was caught producing a correct answer
+  that nobody could ever receive (#28).** Six merges. Read the #28 half first:
+  it is the one with a lesson that generalises past this project.
+
+  **#23 — four labelled slots, one request.** Front, perfil, dientes and
+  genitales became named slots; every filled slot travels in ONE call, each
+  image announced to the model with its own label. **Batching is the whole
+  economics** — free-tier quota counts REQUESTS and the Flash tier gets 20 a
+  day, so batched that is 20 animals a day where one call per photo would be
+  five. Labels cost ~14 tokens for two and buy the thing that matters: the
+  prompt can bind each inference to one slot, so **age comes from the teeth
+  photo and nowhere else**, and the prompt says outright that pale fur around
+  the muzzle is a facial mask rather than greying — the exact mistake a Lite
+  model made when it aged a young adult at 6–8 years from an unlabelled set.
+
+  **`sex` came back, and that reverses what this file called "the single most
+  transferable idea here".** It had been ABSENT from the extraction schema by
+  construction, with a test asserting it could never be added, because it
+  inflects every Spanish sentence about the animal. What changed is the
+  evidence, not the appetite for risk: **a genital photograph makes sex
+  READABLE rather than guessable.** Two guards, both tested — `decideSex`
+  refuses unless the model actually SAW genitalia, so a body shot cannot
+  produce a sex however confident it sounds, and the value is offered for one
+  tap rather than prefilled. The stale guarantee was replaced honestly rather
+  than left asserting something no longer true. **Teeth and genital photos can
+  never be public, and the tier is decided by the SLOT rather than by
+  position**, because slots fill in whatever order the animal tolerates being
+  handled and an intimate shot can legitimately be first.
+
+  **#24 — the capture UI, and one load-bearing change inside it.** Analysis
+  became an explicit **Analizar** button. It used to run on every photo pick;
+  with four slots that is four requests per animal against 20 a day, quietly
+  taking the shelter from 20 animals to five. Nothing is required — a rescuer
+  on a street with a frightened animal often manages one photograph, so each
+  slot says what it UNLOCKS rather than demanding to be filled. Layout was
+  measured at 360px rather than assumed, and the first attempt was bad: four
+  slots came to 1057px with the buttons stacking, putting Analizar a long
+  scroll below the fold; hiding the hint on completed slots brought it to 715px
+  with 46px tap targets.
+
+  **#25 — two defects found by READING, from the trustcert file-uploads
+  export.** The file inputs used the `hidden` attribute and were opened with a
+  programmatic `.click()`; **Chrome 130+ does not deliver trusted change events
+  to that combination**, so the picker opens, a photo is chosen, and nothing
+  arrives — no error, no log line. And there was no aggregate size check: four
+  slots at a 6 MB per-file cap reach 24 MB against a ~20 MB provider inline
+  cap, failing as a bare 400 naming nothing. **A per-file threshold alone is
+  unsound whenever more than one file travels in a request.**
+
+  **#26 — retrieving a value is not delivering it.** The 2026-08-30 reversal
+  shipped to the model and to the pure decision layers and stopped there.
+  `reviewSuggestion` computed `sex`, and the UI threw it away: `IntakeWizard`
+  passed `sex={draft.sex}` — what the human had already picked — and
+  `PhotoSuggestions` still rendered "el sexo nunca se sugiere".
+  `apparentlySterilized` was dropped the same way. Found by driving four real
+  photos through the deployed wizard and noticing age came back and sex did
+  not. Three comments were corrected in the same pass, all of them asserting
+  the opposite of the code they sat on.
+
+  ── **#28, and the finding worth keeping** ──────────────────────────────────
+
+  **A four-photo intake produced a correct answer and threw it away, and every
+  log said it had succeeded.**
+
+  ```
+  18:02:10  POST /api/intake/suggest          750KB, 4 slots
+  18:02:54  attempt 1/2 timed out after 43009ms; retrying
+  18:03:18  ok in 67702ms slots=front+side+teeth+genitals
+  18:03:18  [ai-usage] gemini-3.6-flash  $0.0316
+  ```
+
+  Cloud Run logged it **200, latency 68.217s, response 1248 bytes**. The model
+  answered, the retry did its job, the answer was complete and billed — and the
+  browser never saw one byte of it.
+
+  **`wawitas.org` reaches the app through a Firebase Hosting rewrite, and
+  Hosting terminates a proxied request at 60 SECONDS** whatever the Cloud Run
+  timeout behind it says (300s here). Firebase's own words: *"Even though Cloud
+  Functions and Cloud Run have longer request timeouts, Firebase Hosting is
+  subject to a 60-second request timeout."* Nothing in the application can see
+  that ceiling or extend it.
+
+  **The budget was calibrated against the MODEL and never against the path the
+  answer travels back along.** Two Flash attempts at four photos came to ~86s
+  against a ceiling of 60, so **any four-photo call that needed its retry was
+  undeliverable by construction** — and with a hang rate near half on this
+  path, that was roughly a coin flip on every intake. Note what this is NOT: it
+  is not a slow model, not a bad photo, and not the retry bug fixed on
+  2026-08-30. That fix made the retry able to run; this one makes its result
+  able to arrive.
+
+  Fixed by moving the arithmetic to `src/lib/ai/suggest-budget.ts` — no
+  `server-only` import, so it is testable, the same split as
+  `areas.ts`/`areas-admin.ts`. **It had no tests and no callers outside its own
+  module before this.** Two things hold it now: `attemptTimeoutMsFor()` clamps
+  the per-attempt budget so `SUGGEST_MAX_ATTEMPTS` of them fit the total, and
+  `withRetry()` owns a real **deadline**. The clamp makes the arithmetic true
+  today; the deadline keeps it true when someone edits one constant without
+  redoing the multiplication.
+
+  **The second defect was worse than the first.** The page said *"las
+  sugerencias automáticas todavía no están configuradas"*. That is false — the
+  key was present and had just spent $0.03. **Hosting returns 503 on its
+  timeout, and 503 is also what the route returns for a missing API key**: two
+  unrelated conditions on one status code, and the operator is pointed at
+  exactly the wrong fix. Someone goes hunting for a secret that is not missing.
+  The `timeout` branch, which says the right thing and invites a retry, was
+  unreachable through Hosting. **A wrong diagnosis is worse than no
+  diagnosis.**
+
+  Every failure the route generates is now stamped `X-Suggest-Failure`, and
+  **the header's ABSENCE on a 5xx is the signal** — a status code is only ours
+  to interpret when we are the ones who wrote it. The name is defined next to
+  the code that READS it and imported by the route, so a rename cannot leave
+  the two halves disagreeing with every test still green.
+
+  **Verified in production, and the header check was the one that mattered.** A
+  401 through `wawitas.org` came back carrying `X-Suggest-Failure:
+  unauthenticated` — which proves **Hosting forwards custom response headers
+  through a rewrite**, an assumption the whole fix rests on. Had Hosting
+  stripped it, every response would have looked unstamped and the code would
+  have been silently useless.
+
+  **Then the same four photos were driven through the deployed wizard again,
+  and the result settles a question the PR had left open.** First click: both
+  attempts hung, cut at **25009ms** instead of 43s, the retry ran *with 24991ms
+  left*, and the route returned **its own 504 at 50.26s — inside the ceiling**,
+  so the browser got a real answer and the honest timeout message. Second
+  click: **ok in 10857ms on the first attempt.** Same photos, same 749KB.
+
+  **That 10.9s is the important number.** It proves the two 25s failures were
+  genuine HANGS rather than healthy-but-slow calls, so the clamp is not too
+  tight. Four-photo latency is **bimodal** — healthy runs measure 10.9s, 16.7s
+  and ~24.7s, while a hang consumes whatever budget it is given — and a second
+  attempt is the only thing that rescues the common failure. The trade-off the
+  PR documented (a healthy call slower than the clamp is now cut) is on the
+  right side of that coin, but ~24.7s sits close to the 25s clamp and remains
+  **the number to watch**. If healthy calls start landing above it, the answer
+  is to stop going through Hosting — call Cloud Run directly, or return a job
+  id and poll — **not** to raise the budget, because past 60s the answer cannot
+  be delivered at all.
+
+  **AND THE FEATURE FINALLY DID THE THING IT WAS BUILT FOR.** Sex was read from
+  a genital photograph and delivered to the person reading it, for the first
+  time ever. Age came back as *"entre 1 y 3 años"* from the teeth photo — on
+  the husky-type dog whose white facial mask a Lite model once misread as
+  muzzle greying and aged at 6–8 years. Flash with a labelled teeth slot
+  returned 1–3 years and listed the mask as a *marking*. Colour, coat, a weight
+  range, size, four name suggestions and a grooming note all came back too, and
+  **no sterilisation offer appeared** — correct, because a negative reading
+  from a photograph is not evidence. Firestore confirms the design held: `sex`
+  stayed `null`, because it is offered for one tap rather than prefilled, and
+  breed wording stays gated behind it.
+
+  ── **#27, the branch rename** ─────────────────────────────────────────────
+
+  `main` → `master` on GitHub and locally. **The rename silently broke the
+  deploy pipeline**: GitHub redirects clones, fetches and pushes for a renamed
+  branch and retargets open PRs, but it does **not** rewrite a workflow
+  trigger. `deploy.yml` still said `branches: [main]`, which after the rename
+  matches nothing — every push would have built nothing, deployed nothing and
+  reported nothing. **A trigger that matches no branch is not an error.**
+  Nothing else in the repo referenced the branch by name; the WIF
+  `attribute_condition` keys on `repository`, not `ref`, so the credential path
+  was untouched.
+
+  ── **Four smaller findings, all recurrences or new traps** ────────────────
+
+  1. **Deleting a draft does NOT delete its photos.** Two JPEGs from a deleted
+     draft were still in `wawitas-app` — and still **publicly readable**, 200
+     to an unauthenticated fetch — because the photo cleanup is best-effort and
+     deliberately non-throwing. Same family as the 2026-08-24 finding that
+     deleting an auth account does not delete `users/{uid}`: **Firestore and
+     Storage have no cascade, and a "verified at zero" is only as good as the
+     surfaces it counted.** The sweep that found them enumerated root
+     collections with `listCollections()` rather than checking a list, and
+     checked phantom parents and every collection group.
+  2. **⚠️ OPEN: "esta foto nunca se publica" is enforced only in Firestore.**
+     `pets-admin.ts` builds one path for every slot — `pets/{petId}/{id}.jpg` —
+     and `storage.rules` grants `allow read: if true` on that prefix. The
+     `media` document's `tier` governs what the app RENDERS, not what the
+     bucket SERVES, so a genital photograph is fetchable by URL for as long as
+     it exists. Not exploited, not urgent while `pets` is empty, and **must be
+     fixed before a real animal goes through**.
+  3. **ADC flipped to the work account MID-SESSION**, between two runs of the
+     same script, while `gcloud config` still read `wawitas`. Symptom was a
+     bare `7 PERMISSION_DENIED` from Firestore, which reads like a rules bug
+     and is not. Identity was checked at `oauth2/v3/userinfo`, never at the
+     `quota_project_id` label. **`gcloud storage` and `gcloud auth
+     print-access-token` use the CLI's OWN credentials, not ADC** — which is
+     why deletes kept working while Admin SDK reads failed, and is a usable
+     workaround for read-only verification when ADC is broken.
+  4. **`grep -i` cannot fold case on accented characters under this machine's
+     `C.UTF-8` locale**, so a case-insensitive search for Spanish copy silently
+     returns nothing — indistinguishable from "that text is not there". Count
+     with Node and `\p{L}` boundaries instead. Same family as `cat -A` not
+     showing `^M` here. And a shell heredoc mangled a patch script for the
+     **sixth** recorded time: escaping-sensitive content goes in a file written
+     by the editor, not through the shell.
+
+  Verified at the end: **279 tests** (251 before), typecheck clean, build
+  clean, 0 vulnerabilities in both trees, deployed tag equals
+  `git rev-parse HEAD` on every merge, all routes 200 on both hosts, the auth
+  boundary still 401/401/405, and `GEMINI_API_KEY`, `generativelanguage` and
+  `createGoogleGenerativeAI` absent from every client chunk. **All six
+  deliberate breaks in #28 were caught by name**, and the break probe validated
+  its own parser against a known-failing run first, so a zero could not be a
+  false negative. `pets` still holds **0 documents**.
 ---
 
 ## Next session — start here
@@ -831,7 +1044,7 @@ Read the three AI features as follows, and say which claim you have:
 
 | Feature | Claim earned |
 |---|---|
-| **Photo intake** | ✅ **PROVEN END TO END 2026-08-30** — driven from a real phone with a real animal, metered, `api_usage_daily` non-zero. Now on the **Flash tier**; age still refuses without a teeth photo |
+| **Photo intake** | ✅ **PROVEN END TO END, GUIDED CAPTURE INCLUDED 2026-09-02** — four labelled slots in ONE request, driven from a real phone and then from the deployed wizard. Age comes from the **teeth** slot and **sex is read from the genitals slot** and offered for one tap (first delivered 2026-09-02). On the **Flash tier**, ~11s for four photos when healthy |
 | **Voice dictation** | Model + pure decision layers, 29 tests, deployed. **No model has heard one second of audio, and there is no review UI** |
 | **Medical records** | Deployed, renders, 27 tests. **No human has ever saved a record** — it is behind `AdminGate`, which needs a password |
 
