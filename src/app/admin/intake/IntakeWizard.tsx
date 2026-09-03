@@ -83,7 +83,11 @@ import {
 import { formatMicrochipCode, validateMicrochip, type MicrochipError } from '@/lib/microchip';
 import type { PetPhotoSlot, PetSex, PetSize, PetStatus, Species } from '@/lib/types';
 import { requestSuggestion, type SuggestOutcome } from '@/lib/intake-suggest-client';
-import PhotoSuggestions from './PhotoSuggestions';
+import PhotoSuggestions, {
+  SEX_WITHHELD_REASON,
+  WITHHELD_REASON,
+} from './PhotoSuggestions';
+import EditableField from './EditableField';
 import GuidedPhotoCapture from './GuidedPhotoCapture';
 import { t } from '@/i18n';
 
@@ -126,6 +130,39 @@ const TRISTATE: { value: string; label: string }[] = [
   { value: 'yes', label: 'Sí' },
   { value: 'no', label: 'No' },
 ];
+
+/**
+ * The label a select would show for a stored value, so a collapsed row and its
+ * open editor never disagree about the same value's name.
+ */
+function optionLabel<T extends string>(
+  options: readonly { value: T; label: string }[],
+  value: T | null,
+): string | null {
+  if (value === null) return null;
+  return options.find((o) => o.value === value)?.label ?? null;
+}
+
+/**
+ * Age as a person would say it.
+ *
+ * "Sin definir" and "no lo sabemos" are different facts and must not collapse
+ * into one another: the first is work still to do, the second is a decision
+ * already taken about a street rescue with no history. Zero years and zero
+ * months is a real answer for a neonate, so it cannot fall through to null.
+ */
+function describeAge(
+  years: number | null,
+  months: number | null,
+  unknown: boolean,
+): string | null {
+  if (unknown) return 'No sabemos la edad';
+  if (years === null && months === null) return null;
+  const parts: string[] = [];
+  if (years) parts.push(`${years} ${years === 1 ? 'año' : 'años'}`);
+  if (months) parts.push(`${months} ${months === 1 ? 'mes' : 'meses'}`);
+  return parts.length > 0 ? parts.join(' y ') : 'Menos de un mes';
+}
 
 function toTristate(value: boolean | null): string {
   if (value === null) return 'unknown';
@@ -173,6 +210,15 @@ export function IntakeWizard() {
   } | null>(null);
   /** True once the admin edits the slug by hand, so we stop deriving it. */
   const [slugTouched, setSlugTouched] = useState(false);
+
+  /**
+   * Which field is open for editing, or null.
+   *
+   * One at a time, deliberately. Intake runs on a phone: several open editors
+   * push the rest of the animal off-screen, and the summary of what is known
+   * so far is the thing an admin needs before publishing.
+   */
+  const [openField, setOpenField] = useState<string | null>(null);
 
   /**
    * The photo accelerator. `suggesting` is separate from `busy` on purpose:
@@ -528,6 +574,24 @@ export function IntakeWizard() {
       suggestedFields: [...new Set([...draft.suggestedFields, field])],
       suggestedByModel: suggestOutcome?.modelKey ?? draft.suggestedByModel,
     });
+  }
+
+  /** What the photographs read, if a call has come back. */
+  const suggestion = suggestOutcome?.suggestion ?? null;
+
+  // Hoisted rather than read as suggestion.breed.resembles at each call site:
+  // TypeScript drops narrowing on a property access inside a closure, and these
+  // are read from onClick handlers. A plain const needs no narrowing.
+  const resembles: string[] =
+    suggestion && suggestion.breed.kind === 'mixed' ? suggestion.breed.resembles : [];
+
+  /** Wiring shared by every row, so a new field cannot forget half of it. */
+  function fieldProps(key: string) {
+    return {
+      editing: openField === key,
+      onToggle: () => setOpenField((cur) => (cur === key ? null : key)),
+      disabled: busy,
+    };
   }
 
   function setAlt(id: string, alt: string) {
@@ -936,45 +1000,76 @@ export function IntakeWizard() {
             onAnalyze={() => void handleAnalyzePhotos()}
           />
 
+          {/* Narrative only. Every per-field reading now lands in the row for
+              that field below, so this panel says what the photographs SHOW
+              and the rows say what the record HOLDS. */}
           <PhotoSuggestions
             outcome={suggestOutcome}
             busy={suggesting}
             disabled={busy}
-            sex={draft.sex}
-            onApplyBreed={(breed) => acceptSuggested({ breed }, 'breed')}
-            onApplySize={(size) => acceptSuggested({ size }, 'size')}
-            onApplyWeight={(minKg, maxKg) =>
-              acceptSuggested({ weightKgMin: minKg, weightKgMax: maxKg }, 'weightKg')
-            }
-            onApplyName={(name) =>
-              acceptSuggested(
-                slugTouched ? { name } : { name, slug: slugify(name) },
-                'name',
-              )
-            }
-            onApplySex={(sex) => acceptSuggested({ sex }, 'sex')}
             onApplySterilized={() => acceptSuggested({ sterilized: true }, 'sterilized')}
           />
 
-          <label className="auth__field">
-            <span className="t-label">Nombre</span>
-            <input
-              type="text"
-              value={draft.name}
-              disabled={busy}
-              onChange={(e) => {
-                const name = e.target.value;
-                // The slug follows the name until someone edits it by hand.
-                // After that it is theirs — silently overwriting a chosen URL
-                // would change a link they may already have shared.
-                update(slugTouched ? { name } : { name, slug: slugify(name) });
-              }}
-            />
-          </label>
+          {/* ── one row per field, and exactly one ────────────────────────
+              Each row shows what the field HOLDS and opens its editor when
+              clicked. Until 2026-09-02 these values were printed once in the
+              suggestions panel above and then asked for again here as empty
+              controls, so the screen posed the same question twice — `Sexo:
+              Hembra` followed by `Sexo: [Elegir…]` — and the second one
+              implied the first had not been recorded. Reported by the
+              shelter. See EditableField.tsx for the reasoning.
 
-          <div className="admin-form__row">
-            <label className="auth__field">
-              <span className="t-label">Especie</span>
+              ⚠️ Do not re-add a plain control alongside a row. The duplication
+              was not a layout accident; it was two components each believing
+              they owned the field. */}
+          <div className="field-list">
+            <EditableField
+              label="Nombre"
+              value={draft.name || null}
+              note={
+                !draft.name && suggestion && suggestion.names.length > 0
+                  ? 'Nombres que van con lo que se ve. También puedes escribir el que ya usa el refugio.'
+                  : undefined
+              }
+              offers={
+                draft.name
+                  ? undefined
+                  : suggestion?.names.map((name) => ({
+                      label: name,
+                      onAccept: () =>
+                        acceptSuggested(
+                          slugTouched ? { name } : { name, slug: slugify(name) },
+                          'name',
+                        ),
+                    }))
+              }
+              {...fieldProps('name')}
+            >
+              <input
+                type="text"
+                value={draft.name}
+                disabled={busy}
+                autoFocus
+                onChange={(e) => {
+                  const name = e.target.value;
+                  // The slug follows the name until someone edits it by hand.
+                  // After that it is theirs — silently overwriting a chosen URL
+                  // would change a link they may already have shared.
+                  update(slugTouched ? { name } : { name, slug: slugify(name) });
+                }}
+              />
+            </EditableField>
+
+            <EditableField
+              label="Especie"
+              value={optionLabel(SPECIES_OPTIONS, draft.species)}
+              note={
+                draft.suggestedFields.includes('species')
+                  ? 'Leída en las fotos.'
+                  : undefined
+              }
+              {...fieldProps('species')}
+            >
               <select
                 value={draft.species ?? ''}
                 disabled={busy}
@@ -987,10 +1082,36 @@ export function IntakeWizard() {
                   </option>
                 ))}
               </select>
-            </label>
+            </EditableField>
 
-            <label className="auth__field">
-              <span className="t-label">Sexo</span>
+            {/* Sex sits above Raza because the breed wording cannot be spelled
+                until a sex exists — "mestizo" against "mestiza" — so the field
+                that supplies one has to come first. */}
+            <EditableField
+              label="Sexo"
+              value={optionLabel(SEX_OPTIONS, draft.sex)}
+              note={
+                draft.sex
+                  ? 'De él dependen todos los textos del sitio.'
+                  : suggestion
+                    ? (SEX_WITHHELD_REASON[suggestion.sex.refusedBecause ?? ''] ??
+                      (suggestion.sex.sex
+                        ? 'Leído en la foto de genitales. Confírmalo tú.'
+                        : undefined))
+                    : undefined
+              }
+              offers={
+                !draft.sex && suggestion?.sex.sex
+                  ? [
+                      {
+                        label: t.sexLabel(suggestion.sex.sex),
+                        onAccept: () => acceptSuggested({ sex: suggestion.sex.sex }, 'sex'),
+                      },
+                    ]
+                  : undefined
+              }
+              {...fieldProps('sex')}
+            >
               <select
                 value={draft.sex ?? ''}
                 disabled={busy}
@@ -1003,13 +1124,28 @@ export function IntakeWizard() {
                   </option>
                 ))}
               </select>
-              <small className="auth__hint">
-                Define cómo se escribe todo lo demás: «la gata pequeña» o «el gato pequeño».
-              </small>
-            </label>
+            </EditableField>
 
-            <label className="auth__field">
-              <span className="t-label">Tamaño</span>
+            <EditableField
+              label="Tamaño"
+              value={optionLabel(SIZE_OPTIONS, draft.size)}
+              note={
+                !draft.size && suggestion && !suggestion.size
+                  ? (WITHHELD_REASON.size ?? undefined)
+                  : undefined
+              }
+              offers={
+                !draft.size && suggestion?.size
+                  ? [
+                      {
+                        label: optionLabel(SIZE_OPTIONS, suggestion.size) ?? '',
+                        onAccept: () => acceptSuggested({ size: suggestion.size }, 'size'),
+                      },
+                    ]
+                  : undefined
+              }
+              {...fieldProps('size')}
+            >
               <select
                 value={draft.size ?? ''}
                 disabled={busy}
@@ -1022,165 +1158,288 @@ export function IntakeWizard() {
                   </option>
                 ))}
               </select>
-            </label>
-          </div>
+            </EditableField>
 
-          <label className="auth__field">
-            <span className="t-label">Raza</span>
-            <input
-              type="text"
-              value={draft.breed}
-              placeholder="mestiza"
-              disabled={busy}
-              onChange={(e) => update({ breed: e.target.value })}
-            />
-          </label>
-
-          <label className="auth__field">
-            <span className="t-label">Color y manchas</span>
-            <input
-              type="text"
-              value={draft.colorPattern}
-              placeholder="negro, gris y blanco, con máscara facial"
-              disabled={busy}
-              onChange={(e) => update({ colorPattern: e.target.value })}
-            />
-            <small className="auth__hint">
-              Es lo que escribe alguien que busca a su perro perdido.
-            </small>
-          </label>
-
-          <label className="auth__field">
-            <span className="t-label">Pelaje</span>
-            <input
-              type="text"
-              value={draft.coatType}
-              placeholder="doble capa, largo y denso"
-              disabled={busy}
-              onChange={(e) => update({ coatType: e.target.value })}
-            />
-            <small className="auth__hint">
-              Largo, textura y densidad. Le dice a quien adopta cuánto cepillado le espera.
-            </small>
-          </label>
-
-          <fieldset className="admin-form__fieldset">
-            <legend className="t-label">Peso aproximado (opcional)</legend>
-            <div className="admin-form__row">
-              <label className="auth__field">
-                <span className="t-label">Desde (kg)</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.1"
-                  inputMode="decimal"
-                  value={draft.weightKgMin ?? ''}
-                  disabled={busy}
-                  onChange={(e) =>
-                    update({ weightKgMin: e.target.value === '' ? null : Number(e.target.value) })
-                  }
-                />
-              </label>
-              <label className="auth__field">
-                <span className="t-label">Hasta (kg)</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.1"
-                  inputMode="decimal"
-                  value={draft.weightKgMax ?? ''}
-                  disabled={busy}
-                  onChange={(e) =>
-                    update({ weightKgMax: e.target.value === '' ? null : Number(e.target.value) })
-                  }
-                />
-              </label>
-            </div>
-            <small className="auth__hint">
-              Un rango, no un número exacto — se guarda siempre como estimación.
-              Sirve para elegir el área y calcular raciones aproximadas, y
-              <strong> nunca para calcular una dosis</strong>: eso lo hace el
-              veterinario con una balanza.
-            </small>
-          </fieldset>
-
-          <fieldset className="admin-form__fieldset">
-            <legend className="t-label">Edad aproximada</legend>
-            <div className="admin-form__row">
-              <label className="auth__field">
-                <span className="t-label">Años</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={40}
-                  value={draft.ageYears ?? ''}
-                  disabled={busy || draft.ageUnknown}
-                  onChange={(e) =>
-                    update({ ageYears: e.target.value === '' ? null : Number(e.target.value) })
-                  }
-                />
-              </label>
-              <label className="auth__field">
-                <span className="t-label">Meses</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={11}
-                  value={draft.ageMonthsPart ?? ''}
-                  disabled={busy || draft.ageUnknown}
-                  onChange={(e) =>
-                    update({ ageMonthsPart: e.target.value === '' ? null : Number(e.target.value) })
-                  }
-                />
-              </label>
-            </div>
-            <label className="admin-form__check">
-              <input
-                type="checkbox"
-                checked={draft.ageUnknown}
-                disabled={busy}
-                onChange={(e) =>
-                  update({
-                    ageUnknown: e.target.checked,
-                    ...(e.target.checked ? { ageYears: null, ageMonthsPart: null } : {}),
-                  })
-                }
-              />
-              No sabemos la edad
-            </label>
-          </fieldset>
-
-          <label className="auth__field">
-            <span className="t-label">Estado</span>
-            <select
-              value={draft.status}
-              disabled={busy}
-              onChange={(e) => update({ status: e.target.value as PetStatus })}
+            <EditableField
+              label="Raza"
+              value={draft.breed || null}
+              note={
+                draft.breed
+                  ? undefined
+                  : suggestion && suggestion.breed.kind === 'mixed' && !draft.sex
+                    ? 'Elige primero el sexo: la palabra cambia entre «mestizo» y «mestiza», y eso no se ve en una foto.'
+                    : undefined
+              }
+              offers={
+                draft.breed || !suggestion
+                  ? undefined
+                  : suggestion.breed.kind !== 'mixed'
+                    ? [
+                        {
+                          label: suggestion.breed.breed,
+                          onAccept: () =>
+                            acceptSuggested(
+                              {
+                                breed:
+                                  suggestion.breed.kind === 'purebred'
+                                    ? suggestion.breed.breed
+                                    : '',
+                              },
+                              'breed',
+                            ),
+                        },
+                      ]
+                    : draft.sex
+                      ? [
+                          // The resemblance offer comes first: "mestizo" alone
+                          // is true and tells an adopter nothing. Plain
+                          // "mestizo" stays beside it, because the shelter may
+                          // know the likeness is wrong and taking the option
+                          // away would force them to retype it.
+                          {
+                            label: t.mixedBreedWithTraits(draft.sex, resembles),
+                            onAccept: () =>
+                              acceptSuggested(
+                                { breed: t.mixedBreedWithTraits(draft.sex!, resembles) },
+                                'breed',
+                              ),
+                          },
+                          ...(resembles.length > 0
+                            ? [
+                                {
+                                  label: t.mixedBreed(draft.sex),
+                                  onAccept: () =>
+                                    acceptSuggested({ breed: t.mixedBreed(draft.sex!) }, 'breed'),
+                                },
+                              ]
+                            : []),
+                        ]
+                      : undefined
+              }
+              {...fieldProps('breed')}
             >
-              {STATUS_OPTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {t.statusLabel(value)}
-                </option>
-              ))}
-            </select>
-            <small className="auth__hint">
-              Solo <strong>Disponible</strong> aparece en el muro público.
-            </small>
-          </label>
+              <input
+                type="text"
+                value={draft.breed}
+                placeholder={draft.sex ? t.mixedBreed(draft.sex) : 'mestizo / mestiza'}
+                disabled={busy}
+                autoFocus
+                onChange={(e) => update({ breed: e.target.value })}
+              />
+            </EditableField>
 
-          <label className="auth__field">
-            <span className="t-label">Dirección web</span>
-            <input
-              type="text"
-              value={draft.slug}
-              disabled={busy}
-              onChange={(e) => {
-                setSlugTouched(true);
-                update({ slug: e.target.value });
-              }}
-            />
-            <small className="auth__hint">wawitas.org/adopt/{draft.slug || '…'}</small>
-          </label>
+            <EditableField
+              label="Color y manchas"
+              value={draft.colorPattern || null}
+              note={
+                draft.suggestedFields.includes('colorPattern')
+                  ? 'Leído en las fotos. Es lo que escribe alguien que busca a su perro perdido.'
+                  : undefined
+              }
+              hint="Es lo que escribe alguien que busca a su perro perdido."
+              {...fieldProps('colorPattern')}
+            >
+              <input
+                type="text"
+                value={draft.colorPattern}
+                disabled={busy}
+                autoFocus
+                onChange={(e) => update({ colorPattern: e.target.value })}
+              />
+            </EditableField>
+
+            <EditableField
+              label="Pelaje"
+              value={draft.coatType || null}
+              note={
+                draft.suggestedFields.includes('coatType') ? 'Leído en las fotos.' : undefined
+              }
+              hint="Largo, textura y densidad. Le dice a quien adopta cuánto cepillado le espera."
+              {...fieldProps('coatType')}
+            >
+              <input
+                type="text"
+                value={draft.coatType}
+                disabled={busy}
+                autoFocus
+                onChange={(e) => update({ coatType: e.target.value })}
+              />
+            </EditableField>
+
+            <EditableField
+              label="Peso aproximado"
+              value={
+                draft.weightKgMin !== null && draft.weightKgMax !== null
+                  ? `${draft.weightKgMin}–${draft.weightKgMax} kg`
+                  : null
+              }
+              note={
+                draft.weightKgMin === null && suggestion?.weight.refused
+                  ? (WITHHELD_REASON.weight ?? undefined)
+                  : undefined
+              }
+              hint={
+                <>
+                  Un rango, no un número exacto — se guarda siempre como estimación.
+                  Sirve para elegir el área y calcular raciones aproximadas, y
+                  <strong> nunca para calcular una dosis</strong>: eso lo hace el
+                  veterinario con una balanza.
+                </>
+              }
+              offers={
+                draft.weightKgMin === null &&
+                suggestion &&
+                !suggestion.weight.refused &&
+                suggestion.weight.weightKgMin !== null &&
+                suggestion.weight.weightKgMax !== null
+                  ? [
+                      {
+                        label: `${suggestion.weight.weightKgMin}–${suggestion.weight.weightKgMax} kg`,
+                        onAccept: () =>
+                          acceptSuggested(
+                            {
+                              weightKgMin: suggestion.weight.weightKgMin,
+                              weightKgMax: suggestion.weight.weightKgMax,
+                            },
+                            'weightKg',
+                          ),
+                      },
+                    ]
+                  : undefined
+              }
+              {...fieldProps('weight')}
+            >
+              <div className="admin-form__row">
+                <label className="auth__field">
+                  <span className="t-label">Desde (kg)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    inputMode="decimal"
+                    value={draft.weightKgMin ?? ''}
+                    disabled={busy}
+                    onChange={(e) =>
+                      update({ weightKgMin: e.target.value === '' ? null : Number(e.target.value) })
+                    }
+                  />
+                </label>
+                <label className="auth__field">
+                  <span className="t-label">Hasta (kg)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    inputMode="decimal"
+                    value={draft.weightKgMax ?? ''}
+                    disabled={busy}
+                    onChange={(e) =>
+                      update({ weightKgMax: e.target.value === '' ? null : Number(e.target.value) })
+                    }
+                  />
+                </label>
+              </div>
+            </EditableField>
+
+            <EditableField
+              label="Edad aproximada"
+              value={describeAge(draft.ageYears, draft.ageMonthsPart, draft.ageUnknown)}
+              note={
+                draft.suggestedFields.includes('ageMonths')
+                  ? 'Estimada con la foto de dientes.'
+                  : suggestion?.age.refused
+                    ? (WITHHELD_REASON.age ?? undefined)
+                    : undefined
+              }
+              {...fieldProps('age')}
+            >
+              <div className="admin-form__row">
+                <label className="auth__field">
+                  <span className="t-label">Años</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={40}
+                    value={draft.ageYears ?? ''}
+                    disabled={busy || draft.ageUnknown}
+                    onChange={(e) =>
+                      update({ ageYears: e.target.value === '' ? null : Number(e.target.value) })
+                    }
+                  />
+                </label>
+                <label className="auth__field">
+                  <span className="t-label">Meses</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={11}
+                    value={draft.ageMonthsPart ?? ''}
+                    disabled={busy || draft.ageUnknown}
+                    onChange={(e) =>
+                      update({
+                        ageMonthsPart: e.target.value === '' ? null : Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+              </div>
+              <label className="admin-form__check">
+                <input
+                  type="checkbox"
+                  checked={draft.ageUnknown}
+                  disabled={busy}
+                  onChange={(e) =>
+                    update({
+                      ageUnknown: e.target.checked,
+                      ...(e.target.checked ? { ageYears: null, ageMonthsPart: null } : {}),
+                    })
+                  }
+                />
+                No sabemos la edad
+              </label>
+            </EditableField>
+
+            <EditableField
+              label="Estado"
+              value={t.statusLabel(draft.status)}
+              note={
+                draft.status === 'available'
+                  ? 'Aparece en el muro público.'
+                  : 'Solo «Disponible» aparece en el muro público.'
+              }
+              {...fieldProps('status')}
+            >
+              <select
+                value={draft.status}
+                disabled={busy}
+                onChange={(e) => update({ status: e.target.value as PetStatus })}
+              >
+                {STATUS_OPTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {t.statusLabel(value)}
+                  </option>
+                ))}
+              </select>
+            </EditableField>
+
+            <EditableField
+              label="Dirección web"
+              value={draft.slug || null}
+              note={`wawitas.org/adopt/${draft.slug || '…'}`}
+              {...fieldProps('slug')}
+            >
+              <input
+                type="text"
+                value={draft.slug}
+                disabled={busy}
+                autoFocus
+                onChange={(e) => {
+                  setSlugTouched(true);
+                  update({ slug: e.target.value });
+                }}
+              />
+            </EditableField>
+          </div>
 
           <fieldset className="admin-form__fieldset">
             <legend className="t-label">Microchip</legend>
