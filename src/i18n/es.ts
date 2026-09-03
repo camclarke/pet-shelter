@@ -79,18 +79,18 @@ const MEDICAL_KIND: Record<MedicalRecordKind, string> = {
 };
 
 const MEDICAL_ERROR: Record<MedicalError, string> = {
-  'kind-required': 'Elegí qué tipo de registro es.',
-  'name-required': 'Escribí qué se aplicó o qué se hizo. Por ejemplo «Rabia» o «Quíntuple».',
+  'kind-required': 'Elige qué tipo de registro es.',
+  'name-required': 'Escribe qué se aplicó o qué se hizo. Por ejemplo «Rabia» o «Quíntuple».',
   'performed-required': 'Falta la fecha en que se hizo.',
-  'performed-in-future': 'Esa fecha todavía no llegó. Revisá el día.',
+  'performed-in-future': 'Esa fecha todavía no llegó. Revisa el día.',
   'due-before-performed': 'La próxima dosis no puede ser antes de la que se aplicó.',
   'valid-until-before-valid-from':
-    'La protección no puede terminar antes de empezar. Revisá las dos fechas.',
+    'La protección no puede terminar antes de empezar. Revisa las dos fechas.',
 };
 
 const MEDICAL_WARNING: Record<MedicalWarning, string> = {
   'rabies-before-microchip':
-    'La antirrábica figura ANTES de la colocación del microchip. Para viajar a la Unión Europea eso anula la vacuna: haría falta repetirla después del chip. Igual podés guardar el registro tal como pasó.',
+    'La antirrábica figura ANTES de la colocación del microchip. Para viajar a la Unión Europea eso anula la vacuna: haría falta repetirla después del chip. Igual puedes guardar el registro tal como pasó.',
   'rabies-under-age':
     'El animalito habría tenido menos de 12 semanas al momento de la antirrábica. Es el mínimo que exige la norma europea. Guardalo igual si así fue.',
   'rabies-no-valid-from':

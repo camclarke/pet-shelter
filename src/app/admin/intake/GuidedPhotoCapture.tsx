@@ -74,7 +74,7 @@ const SLOTS: SlotSpec[] = [
     slot: 'teeth',
     label: 'Dientes',
     unlocks: 'La edad. Sin esta foto no la estimamos.',
-    hint: 'Levantá el labio con cuidado. Si el animalito no se deja, saltala: la edad la pone el veterinario.',
+    hint: 'Levanta el labio con cuidado. Si el animalito no se deja, sáltala: la edad la pone el veterinario.',
   },
   {
     slot: 'genitals',
@@ -127,9 +127,9 @@ export default function GuidedPhotoCapture({
     <div className="admin-suggest">
       <h2 className="t-label">Fotos del animalito</h2>
       <p className="admin__sub">
-        Sacá las que puedas — <strong>con una alcanza</strong>. Cada foto agrega
+        Toma las que puedas — <strong>con una alcanza</strong>. Cada foto agrega
         un dato distinto, y todas se analizan juntas al final.{' '}
-        <strong>Vos revisás todo antes de publicar.</strong>
+        <strong>Tú revisas todo antes de publicar.</strong>
       </p>
 
       <ol className="capture">
@@ -222,7 +222,7 @@ export default function GuidedPhotoCapture({
         </button>
         {count === 0 && (
           <small className="auth__hint">
-            Sacá al menos una foto para poder analizar. También podés cargar
+            Toma al menos una foto para poder analizar. También puedes cargar
             todos los datos a mano.
           </small>
         )}
