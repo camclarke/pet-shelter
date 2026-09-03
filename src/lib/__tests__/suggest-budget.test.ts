@@ -7,8 +7,15 @@ import {
   SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH,
   SUGGEST_MAX_ATTEMPTS,
   SUGGEST_MIN_RETRY_MS,
+  SUGGEST_OVERLOAD_BACKOFF_MS,
   SUGGEST_TOTAL_BUDGET_MS,
   attemptTimeoutMsFor,
+  isOverloadedFailure,
+  isQuotaExhaustedFailure,
+  isRetryableFailure,
+  isTimeoutFailure,
+  retryBackoffMsFor,
+  shouldFallBackToWeakerModel,
 } from '../ai/suggest-budget';
 import { FLASH_LITE_MODEL, FLASH_MODEL } from '../ai/model-ids';
 
@@ -122,5 +129,137 @@ test('a retry is only worth starting if it has time to finish', () => {
   assert.ok(
     SUGGEST_MIN_RETRY_MS < SUGGEST_TOTAL_BUDGET_MS / SUGGEST_MAX_ATTEMPTS,
     'the floor must not be so high that a normal retry is skipped'
+  );
+});
+
+/**
+ * Mirrors the shape the AI SDK's APICallError actually arrives in: an Error
+ * carrying a `statusCode`. Built by hand rather than imported so these tests
+ * describe the CONTRACT we depend on, not the SDK's current class.
+ */
+function apiError(statusCode: number): Error & { statusCode: number; isRetryable: boolean } {
+  const err = new Error(`HTTP ${statusCode}`) as Error & {
+    statusCode: number;
+    isRetryable: boolean;
+  };
+  err.statusCode = statusCode;
+  // The SDK's own default, verbatim: 408 || 409 || 429 || >= 500.
+  err.isRetryable =
+    statusCode === 408 || statusCode === 409 || statusCode === 429 || statusCode >= 500;
+  return err;
+}
+
+function abortError(): Error {
+  const err = new Error('The operation was aborted due to timeout');
+  err.name = 'TimeoutError';
+  return err;
+}
+
+/**
+ * ══ THE 2026-09-03 REGRESSION ═══════════════════════════════════════════════
+ *
+ * Gemini answered `503 UNAVAILABLE` — "This model is currently experiencing
+ * high demand. Spikes in demand are usually temporary. Please try again
+ * later." Twice in one day, and neither was retried, because the policy knew
+ * only about hangs. The shelter was told the analysis had simply failed.
+ */
+test('a provider overload is retried — it is not a flat failure', () => {
+  assert.equal(isOverloadedFailure(apiError(503)), true);
+  assert.equal(isRetryableFailure(apiError(503)), true);
+  for (const status of [500, 502, 503, 504]) {
+    assert.equal(isRetryableFailure(apiError(status)), true, `HTTP ${status}`);
+  }
+
+  // And if it survives every retry, it degrades rather than failing: Flash-Lite
+  // is a different pool with 25x the free allowance, so it is very often up
+  // when Flash is not. Without this the shelter still gets nothing.
+  assert.equal(
+    shouldFallBackToWeakerModel(apiError(503)),
+    true,
+    'a sustained overload must fall back to the weaker model, not give up'
+  );
+});
+
+/**
+ * ⚠️ The single most important assertion in this file.
+ *
+ * The AI SDK's own `isRetryable` flag defaults to `408 || 409 || 429 || >= 500`
+ * — it says a 429 is retryable. Trusting that flag would retry an exhausted
+ * daily quota against the SAME model, burning the budget the Flash-Lite
+ * fallback needs, to reach a limit that does not refill for hours.
+ */
+test('a spent quota is NOT retried, even though the SDK flags it retryable', () => {
+  const quota = apiError(429);
+
+  assert.equal(quota.isRetryable, true, "the SDK's flag says retry");
+  assert.equal(isRetryableFailure(quota), false, 'ours must not');
+  assert.equal(isQuotaExhaustedFailure(quota), true);
+  assert.equal(
+    shouldFallBackToWeakerModel(quota),
+    true,
+    'it has a better remedy than a retry'
+  );
+});
+
+test('a hang is retried, and immediately — there is nothing to wait for', () => {
+  assert.equal(isTimeoutFailure(abortError()), true);
+  assert.equal(isRetryableFailure(abortError()), true);
+  assert.equal(retryBackoffMsFor(abortError()), 0);
+});
+
+test('an overload waits before retrying, because the pool is saturated now', () => {
+  assert.ok(
+    retryBackoffMsFor(apiError(503)) > 0,
+    'retrying into the same instant is what is least likely to work'
+  );
+});
+
+test('a request the provider rejected on its merits is never retried', () => {
+  for (const status of [400, 401, 403, 413, 415]) {
+    assert.equal(isRetryableFailure(apiError(status)), false, `HTTP ${status}`);
+    assert.equal(shouldFallBackToWeakerModel(apiError(status)), false, `HTTP ${status}`);
+  }
+});
+
+test('a failure with no status is not mistaken for an overload', () => {
+  assert.equal(isOverloadedFailure(new Error('boom')), false);
+  assert.equal(isOverloadedFailure(null), false);
+  assert.equal(isOverloadedFailure(undefined), false);
+  assert.equal(isOverloadedFailure('503'), false);
+});
+
+/**
+ * The arithmetic that keeps a retried overload deliverable.
+ *
+ * Measured 2026-09-03: a four-photo Flash 503 came back in 14323ms. The
+ * backoff plus a second full attempt has to still leave room for the
+ * Flash-Lite fallback inside ONE shared budget — and the whole thing inside
+ * Firebase Hosting's 60s ceiling.
+ */
+test('an overload, its retry and the weaker-model fallback all fit one budget', () => {
+  const observed503Ms = 14_323;
+  const flashAttempt = attemptTimeoutMsFor(FLASH_MODEL, 4);
+  const liteAttempt = attemptTimeoutMsFor(FLASH_LITE_MODEL, 4);
+
+  const usedByFlash =
+    observed503Ms + SUGGEST_OVERLOAD_BACKOFF_MS + observed503Ms;
+  const left = SUGGEST_TOTAL_BUDGET_MS - usedByFlash;
+
+  assert.ok(
+    left >= SUGGEST_MIN_RETRY_MS,
+    `two 503s and a backoff must leave enough to fall back, had ${left}ms`
+  );
+  assert.ok(liteAttempt <= left, 'the fallback attempt must fit in what remains');
+  assert.ok(
+    usedByFlash + liteAttempt < HOSTING_EDGE_TIMEOUT_MS,
+    'the whole operation must still be deliverable through Hosting'
+  );
+  assert.ok(flashAttempt > 0 && liteAttempt > 0);
+});
+
+test('the backoff cannot swallow a whole attempt', () => {
+  assert.ok(
+    SUGGEST_OVERLOAD_BACKOFF_MS < SUGGEST_MIN_RETRY_MS,
+    'a pause longer than the retry floor would strand every retry'
   );
 });

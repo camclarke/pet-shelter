@@ -1,6 +1,6 @@
 /**
- * How long a photo suggestion is allowed to take, and why the ceiling is not
- * ours to choose.
+ * How long a photo suggestion is allowed to take, when it is worth trying
+ * again, and why the ceiling is not ours to choose.
  *
  * Pure arithmetic, deliberately in its own module with NO `server-only`
  * import, so it can be unit-tested. Same split as `areas.ts`/`areas-admin.ts`
@@ -175,4 +175,98 @@ export function attemptTimeoutMsFor(modelId: string, photoCount = 1): number {
   const affordable = Math.floor(SUGGEST_TOTAL_BUDGET_MS / SUGGEST_MAX_ATTEMPTS);
 
   return Math.min(wanted, affordable);
+}
+
+/**
+ * How long to wait before trying an OVERLOADED provider again.
+ *
+ * A hang wants a fresh connection immediately — there is nothing to wait for.
+ * An overload is the opposite: the pool is saturated right now, and retrying
+ * into the same instant is the one thing least likely to work. Google's own
+ * words on the 503 are "Spikes in demand are usually temporary."
+ *
+ * 1.5s is chosen against the measured budget rather than picked round. A
+ * four-photo Flash 503 came back in 14.3s (2026-09-03), leaving ~36s; the
+ * backoff plus a full 25s attempt still lands at ~40s, inside the 50s total
+ * and well inside Firebase Hosting's 60s ceiling.
+ */
+export const SUGGEST_OVERLOAD_BACKOFF_MS = 1_500;
+
+/** APICallError carries `statusCode`; some transports use `status`. Accept both. */
+function statusCodeOf(err: unknown): number | undefined {
+  if (err === null || typeof err !== 'object') return undefined;
+  const e = err as { statusCode?: unknown; status?: unknown };
+  if (typeof e.statusCode === 'number') return e.statusCode;
+  if (typeof e.status === 'number') return e.status;
+  return undefined;
+}
+
+/** A timeout or an abort — both mean "no answer came back". */
+export function isTimeoutFailure(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+}
+
+/**
+ * The provider answered, and the answer was "I am overloaded, try again".
+ *
+ * Observed in production 2026-09-03, twice, on gemini-3.6-flash:
+ *
+ *     statusCode: 503
+ *     "This model is currently experiencing high demand. Spikes in demand
+ *      are usually temporary. Please try again later."
+ *     status: "UNAVAILABLE"
+ *
+ * Neither call was retried, because the retry policy only knew about hangs,
+ * and the admin got "Solo falló el análisis automático" — indistinguishable
+ * from a real failure for something the provider had just described as
+ * temporary.
+ *
+ * ⚠️ 408 is deliberately not special-cased. Our own per-attempt AbortSignal is
+ * shorter than any server-side request timeout, so that condition reaches us
+ * as a TimeoutError long before a 408 could.
+ */
+export function isOverloadedFailure(err: unknown): boolean {
+  const status = statusCodeOf(err);
+  return status !== undefined && status >= 500;
+}
+
+/** Out of quota, as opposed to broken. Matched on status, not provider prose. */
+export function isQuotaExhaustedFailure(err: unknown): boolean {
+  return statusCodeOf(err) === 429;
+}
+
+/**
+ * Worth another attempt on the SAME model.
+ *
+ * ⚠️ Deliberately narrower than the AI SDK's own `isRetryable` flag, and the
+ * difference is load-bearing. That flag defaults to
+ * `408 || 409 || 429 || >= 500` — it includes **429**. Retrying a 429 here
+ * would be actively harmful: 429 means the day's Flash quota is spent, it will
+ * not refill in twenty-five seconds, and there is a strictly better remedy
+ * already built — fall back to Flash-Lite, which has 500 requests a day
+ * against Flash's 20. Retrying first would burn the budget that fallback needs.
+ *
+ * So: retry what a second attempt can fix (a hang, a saturated pool), and hand
+ * everything else to the caller, which knows about tiers.
+ */
+export function isRetryableFailure(err: unknown): boolean {
+  return isTimeoutFailure(err) || isOverloadedFailure(err);
+}
+
+/** How long to pause before the next attempt at this particular failure. */
+export function retryBackoffMsFor(err: unknown): number {
+  return isOverloadedFailure(err) ? SUGGEST_OVERLOAD_BACKOFF_MS : 0;
+}
+
+/**
+ * Worth trying the WEAKER model instead.
+ *
+ * Both branches are "degrade rather than fail", which plan §3 requires: an
+ * animal arriving at 22:00 must not wait on a quota or on someone else's
+ * traffic spike. A quota is spent for the day; an overload has survived every
+ * retry we were willing to spend. Flash-Lite is a different pool with 25x the
+ * free allowance, so it is very often up when Flash is not.
+ */
+export function shouldFallBackToWeakerModel(err: unknown): boolean {
+  return isQuotaExhaustedFailure(err) || isOverloadedFailure(err);
 }
