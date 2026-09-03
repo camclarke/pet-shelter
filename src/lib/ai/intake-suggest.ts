@@ -13,6 +13,11 @@ import {
   SUGGEST_MIN_RETRY_MS,
   SUGGEST_TOTAL_BUDGET_MS,
   attemptTimeoutMsFor,
+  isOverloadedFailure,
+  isRetryableFailure,
+  isTimeoutFailure,
+  retryBackoffMsFor,
+  shouldFallBackToWeakerModel,
 } from './suggest-budget';
 
 /**
@@ -297,36 +302,36 @@ export interface SuggestResult {
  * Ask the model what it sees. Throws on failure — the caller decides what a
  * failure means, and for intake it means "carry on without suggestions".
  */
-/**
- * Out of quota, as opposed to broken. Matched on the status rather than the
- * message, because the message is provider prose and will change.
- */
-function isQuotaExhausted(err: unknown): boolean {
-  const status = (err as { statusCode?: number; status?: number } | null)?.statusCode
-    ?? (err as { status?: number } | null)?.status;
-  return status === 429;
-}
-
-/** A timeout or an abort — the shapes worth retrying, since both mean "no answer". */
-function isTimeout(err: unknown): boolean {
-  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+/** Pause between attempts. Only ever called with a positive, budgeted delay. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Retry ONLY on a timeout, and only within BOTH budgets — the per-attempt
- * one and the total.
+ * Retry what a second attempt can actually fix, within BOTH budgets — the
+ * per-attempt one and the total.
  *
- * Deliberately narrow. A 400 for a malformed image, a 401 for a bad key or a
- * 429 for a spent quota will all fail the same way twice, and retrying them
- * just doubles the wait before the admin sees the message they needed
- * immediately. A hang is the one failure a second attempt genuinely fixes,
- * because it gets a new connection.
+ * Two failures qualify, for opposite reasons. A HANG gets a retry because it
+ * gets a fresh connection. An OVERLOAD gets one because the provider itself
+ * said the condition is temporary — measured 2026-09-03, a 503 UNAVAILABLE
+ * reading "This model is currently experiencing high demand". Until then this
+ * function knew only about hangs, so that 503 was reported to the shelter as a
+ * flat failure and no second attempt was ever made.
+ *
+ * Everything else is still handed straight back. A 400 for a malformed image
+ * or a 401 for a bad key will fail identically twice, and a 429 has a better
+ * remedy than a retry — see shouldFallBackToWeakerModel.
+ *
+ * ⚠️ The deadline is passed IN, not created here. suggestFromPhoto may call
+ * this twice — once per model tier — and two self-made deadlines would let the
+ * pair run to 2 x SUGGEST_TOTAL_BUDGET_MS, which is past the 60s ceiling the
+ * budget exists to respect. That is the 2026-09-02 defect, one path over.
  */
 async function withRetry<T>(
+  deadline: number,
   perAttemptMs: number,
   call: (budgetMs: number) => Promise<T>
 ): Promise<T> {
-  const deadline = Date.now() + SUGGEST_TOTAL_BUDGET_MS;
   let lastErr: unknown;
 
   for (let attempt = 1; attempt <= SUGGEST_MAX_ATTEMPTS; attempt++) {
@@ -335,26 +340,28 @@ async function withRetry<T>(
       return await call(Math.min(perAttemptMs, deadline - started));
     } catch (err) {
       lastErr = err;
-      if (!isTimeout(err) || attempt === SUGGEST_MAX_ATTEMPTS) throw err;
+      if (!isRetryableFailure(err) || attempt === SUGGEST_MAX_ATTEMPTS) throw err;
 
       const elapsed = Date.now() - started;
-      const left = deadline - Date.now();
+      const backoffMs = retryBackoffMsFor(err);
+      const left = deadline - Date.now() - backoffMs;
       if (left < SUGGEST_MIN_RETRY_MS) {
         // Say so rather than retrying into a wall. The admin gets the timeout
         // message now instead of after another attempt that cannot be
         // delivered, and a free-tier request — 20 a day on Flash — is not
         // spent on an answer the edge will discard.
         console.warn(
-          `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} timed out after ${elapsed}ms; only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms, not retrying`
+          `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describeFailure(err)} after ${elapsed}ms; only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms, not retrying`
         );
         throw err;
       }
-      // Logged per attempt, so a future failure still says which attempt died
-      // and how long it took — the thing that was missing when this was one
-      // opaque 25s abort.
+      // Logged per attempt, so a future failure still says which attempt died,
+      // how long it took, and WHY it is being retried — the thing that was
+      // missing when this was one opaque 25s abort.
       console.warn(
-        `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} timed out after ${elapsed}ms; retrying with ${left}ms left`
+        `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describeFailure(err)} after ${elapsed}ms; retrying in ${backoffMs}ms with ${left}ms left`
       );
+      if (backoffMs > 0) await sleep(backoffMs);
     }
   }
   throw lastErr;
@@ -373,26 +380,54 @@ export async function suggestFromPhoto(
   photos: readonly SlottedPhoto[]
 ): Promise<SuggestResult> {
   if (photos.length === 0) throw new Error('suggestFromPhoto: at least one photo is required');
+
+  // ONE deadline for the whole operation, both tiers included. Each
+  // extractWith used to make its own, so a fallback started a fresh full
+  // budget and the pair could run to twice the ceiling. Nothing had tripped it
+  // only because a 429 fails fast; an overload does not.
+  const deadline = Date.now() + SUGGEST_TOTAL_BUDGET_MS;
+
   try {
-    return await extractWith(SUGGEST_MODEL, photos);
+    return await extractWith(SUGGEST_MODEL, photos, deadline);
   } catch (err) {
-    if (!isQuotaExhausted(err)) throw err;
+    if (!shouldFallBackToWeakerModel(err)) throw err;
+
     // Degrade rather than fail. Plan §3: a gate stricter than the reality of
     // the shelter gets worked around, and an animal arriving at 22:00 must
-    // not wait on a daily quota.
+    // not wait on a daily quota or on someone else's traffic spike.
+    //
+    // But only if there is time left to say something useful. Falling back
+    // into 200ms of remaining budget just replaces one failure with a slower
+    // one, and spends a request from the weaker tier's allowance to do it.
+    const left = deadline - Date.now();
+    if (left < SUGGEST_MIN_RETRY_MS) {
+      console.warn(
+        `[intake-suggest] ${SUGGEST_MODEL} ${describeFailure(err)}; only ${left}ms left, not falling back`
+      );
+      throw err;
+    }
+
     console.warn(
-      `[intake-suggest] ${SUGGEST_MODEL} out of quota; falling back to ${SUGGEST_FALLBACK_MODEL}`
+      `[intake-suggest] ${SUGGEST_MODEL} ${describeFailure(err)}; falling back to ${SUGGEST_FALLBACK_MODEL} with ${left}ms left`
     );
-    return extractWith(SUGGEST_FALLBACK_MODEL, photos);
+    return extractWith(SUGGEST_FALLBACK_MODEL, photos, deadline);
   }
+}
+
+/** For a log line that has to say what went wrong without a stack. */
+function describeFailure(err: unknown): string {
+  if (isTimeoutFailure(err)) return 'timed out';
+  if (isOverloadedFailure(err)) return 'reported overload';
+  return 'failed';
 }
 
 async function extractWith(
   modelId: string,
-  photos: readonly SlottedPhoto[]
+  photos: readonly SlottedPhoto[],
+  deadline: number
 ): Promise<SuggestResult> {
   const perAttemptMs = attemptTimeoutMsFor(modelId, photos.length);
-  const { object, usage, providerMetadata } = await withRetry(perAttemptMs, (budgetMs) =>
+  const { object, usage, providerMetadata } = await withRetry(deadline, perAttemptMs, (budgetMs) =>
     generateObject({
       // ⚠️ Flash-LITE, and this is a measured choice rather than thrift.
       //
