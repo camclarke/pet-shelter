@@ -140,7 +140,7 @@ export default function MedicalPanel({
       await reload();
     } catch (caught) {
       console.error('[medical]', caught);
-      setError('No pudimos guardar el registro. Revisá tu conexión y probá de nuevo.');
+      setError('No pudimos guardar el registro. Revisa tu conexión e inténtalo de nuevo.');
     } finally {
       setBusy(false);
     }
@@ -169,7 +169,7 @@ export default function MedicalPanel({
 
       {records !== null && records.length === 0 && (
         <p className="admin__sub">
-          Todavía no hay registros médicos. Anotá las vacunas, desparasitaciones y
+          Todavía no hay registros médicos. Anota las vacunas, desparasitaciones y
           consultas acá — <strong>una vacuna de campaña sin veterinario ni lote también
           cuenta</strong>, no hace falta dejarla afuera por eso.
         </p>
