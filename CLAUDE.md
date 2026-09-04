@@ -953,6 +953,113 @@ scanned chip resolves to a name and a phone call.
   deliberate breaks in #28 were caught by name**, and the break probe validated
   its own parser against a known-failing run first, so a zero could not be a
   false negative. `pets` still holds **0 documents**.
+
+- **2026-09-03** — **Three merges (#30, #31, #32): the intake step stopped asking
+  every question twice, the whole interface moved to neutral Spanish including
+  what the model writes back, and a provider overload became something the
+  retry policy knows about.** All three are merged to `master`. ⚠️ **#32's
+  deploy did not run** — see the next entry.
+
+  **#30 — "the value IS the control", and it came from the shelter rather than
+  from a test.** The identity step rendered every field twice: *"Lo que se ve en
+  las fotos"* printed the model's reading, and a few centimetres below the form
+  asked for the same thing as an empty control. The screen said `Sexo: Hembra`
+  and then `Sexo: [Elegir…]`. **Two questions about one animal, and the second
+  one implies the first was not recorded** — which is exactly what a person
+  reading it concluded.
+
+  The fix is not to hide the form; it is to stop having two surfaces. Each field
+  is now ONE row (`EditableField.tsx`) showing what the record holds, opening
+  that field's editor on click — so what a model read, what a person typed, and
+  what is still missing all render the same way in one place. **Provenance moved
+  next to the value it explains**: *"Leído en la foto de genitales"* now sits
+  under the sex row instead of in a panel the reader had to correlate by hand,
+  and so do the withheld reasons — *"no se puede estimar el tamaño sin algo que
+  dé escala"* is only useful beside the empty field it explains. `PhotoSuggestions`
+  keeps only what has no field to land in and is now narrative, not a form.
+
+  **Only one field opens at a time, deliberately.** Intake runs on a phone, often
+  one-handed with an animal in the other arm; several open editors push the rest
+  of the animal off-screen, and the summary of what is known so far is the thing
+  an admin needs before publishing. Measured against the real stylesheet at
+  **360px** — the width a real device reported, not the 375 an earlier check
+  used — with tap targets 85–113px and long values ellipsising rather than
+  pushing the action off the row.
+
+  **#31 — neutral Spanish, and the half that would have been missed is the
+  PROMPTS.** The interface read as Argentinean: voseo throughout — *"sacá"*,
+  *"poné"*, *"elegí"*, *"vos"*. The shelter is in Cochabamba and the site is
+  meant to read across Latin America. Converted to neutral tuteo — but two of
+  the six files changed are instructions to Gemini, and **a model answers in the
+  register it is addressed in.** *"Observá esta fotografía"* was producing free
+  text in the same voice, and that text goes straight onto the screen as
+  `colorPattern`, `coatType`, `generalObservations` and `notes`. Rewriting only
+  the static copy would have left half the interface in voseo, **arriving one
+  API call later** — which is the kind of gap that survives a full visual review
+  because it is not in the source at all. The vision prompt now says outright to
+  write in neutral Spanish, because what it writes is displayed verbatim.
+
+  ⚠️ **The dictation prompt is deliberately ASYMMETRIC.** Its instructions are
+  neutral now, but nothing asks the model to normalise what it *heard*, and
+  nothing may: `heardAs` is the literal phrase a veterinarian spoke and it is the
+  evidence a disputed dose is checked against. A vet who says *"ponele medio
+  mililitro"* must be transcribed saying exactly that.
+
+  **#32 — retry a provider overload, and one shared deadline.** Gemini answered
+  **503 `UNAVAILABLE`** twice on `gemini-3.6-flash` ("high demand… usually
+  temporary"). Neither was retried: the policy knew only about hangs, because
+  `isTimeout()` checks `err.name`. So an error the provider had just described as
+  temporary went to the shelter as *"Solo falló el análisis automático"*,
+  indistinguishable from a real failure. Nothing was billed — `api_usage_daily`
+  has no entry for 2026-09-03, because metering only fires on success. An
+  overload is retried now **after a backoff**, since a hang wants a fresh
+  connection immediately while an overloaded pool wants a moment, and retrying
+  into the same instant is the one thing least likely to work.
+
+  ⚠️ **The policy is deliberately NARROWER than the AI SDK's own `isRetryable`
+  flag, and that is the load-bearing part.** The SDK defaults it to
+  `408 || 409 || 429 || >= 500` — **it includes 429**. Trusting it would retry an
+  exhausted daily quota against the same model, burning the budget the Flash-Lite
+  fallback needs to reach a limit that does not refill for hours. So we retry
+  what a second attempt can fix and hand 429 to the tier logic, which has a
+  better answer. A sustained overload now falls back to Flash-Lite too — Lite is
+  a different pool with 25× the free allowance, so it is very often up when Flash
+  is not, and plan §3 holds that an animal arriving at 22:00 must not wait on
+  someone else's traffic spike.
+
+  **The latent defect that fix uncovered is the more valuable half.**
+  `withRetry` created its own deadline, and `suggestFromPhoto` calls
+  `extractWith` once per tier — so the fallback started a **fresh**
+  `SUGGEST_TOTAL_BUDGET_MS` and the pair could run to **100s against Firebase
+  Hosting's 60s ceiling**. That is the 2026-09-02 defect exactly, one path over.
+  It had never fired only because a 429 fails fast, so the fallback always had
+  room; **an overload does not fail fast, so adding the overload fallback would
+  have made it live.** There is now one deadline for the whole operation, created
+  in `suggestFromPhoto` and passed to both tiers, and the fallback is skipped
+  when too little of it remains to say anything useful. The classification moved
+  to `suggest-budget.ts`, which has no `server-only` import and is therefore
+  testable — the same split as `areas.ts`/`areas-admin.ts`. All six deliberate
+  breaks were caught by name, **including one real coverage gap the probe found**:
+  nothing asserted that a sustained overload falls back rather than giving up, so
+  deleting half the fix left every test green.
+
+  **Two scanner failures worth keeping, both from #31's sweep.** `grep -i`
+  **cannot fold case on accented characters** under this machine's `C.UTF-8`
+  locale, so a case-insensitive search for Spanish copy returns nothing at all —
+  indistinguishable from *"that text is not there"*. And a Node scanner written
+  through a shell heredoc had its `\p{L}` boundaries silently reduced to the
+  literal class `[p{L}]`, which then matched *"tomá"* inside *"automáticamente"*
+  and *"abrí"* inside *"habría"*. The same scanner written by the editor to a
+  file was correct. **Sixth recorded recurrence: escaping-sensitive code goes in
+  a file you run.**
+
+  ⚠️ **Neither #31's prompt edit nor #32's retry has been measured against a live
+  model.** `INTAKE_SUGGEST_SYSTEM` carries a warning that copy edits there have
+  non-local effects — a sibling stack dropped an eval from 11/11 to 9/11 by
+  removing one framing sentence — and #31's change is larger than one sentence.
+  #32's retry and Flash-Lite fallback are unexercised by construction: they need
+  a provider overload to happen. What both have is typecheck, **287 tests**, and
+  a clean build.
 ---
 
 ## Next session — start here
