@@ -922,13 +922,17 @@ scanned chip resolves to a name and a phone call.
      surfaces it counted.** The sweep that found them enumerated root
      collections with `listCollections()` rather than checking a list, and
      checked phantom parents and every collection group.
-  2. **⚠️ OPEN: "esta foto nunca se publica" is enforced only in Firestore.**
-     `pets-admin.ts` builds one path for every slot — `pets/{petId}/{id}.jpg` —
-     and `storage.rules` grants `allow read: if true` on that prefix. The
-     `media` document's `tier` governs what the app RENDERS, not what the
-     bucket SERVES, so a genital photograph is fetchable by URL for as long as
-     it exists. Not exploited, not urgent while `pets` is empty, and **must be
-     fixed before a real animal goes through**.
+  2. **✅ CLOSED 2026-09-03 — "esta foto nunca se publica" was enforced only in
+     Firestore.** `pets-admin.ts` built one path for every slot —
+     `pets/{petId}/{id}.jpg` — and `storage.rules` grants `allow read: if true`
+     on that prefix, so a genital photograph was fetchable by URL: measured at
+     **200 with a download token and 200 without**. Fixed in two halves,
+     because either alone is cosmetic — the never-public slots moved to
+     `pets/{petId}/private/`, which a new rule gates on auth, AND the upload
+     path stopped calling `getDownloadURL()` on them, **because a download
+     token bypasses `storage.rules` outright and cannot be revoked**. Proven
+     with an anonymous fetch of three objects: public cover 200, private
+     prefix 403, admin-only `medical/**` control 403. See the log entry.
   3. **ADC flipped to the work account MID-SESSION**, between two runs of the
      same script, while `gcloud config` still read `wawitas`. Symptom was a
      bare `7 PERMISSION_DENIED` from Firestore, which reads like a rules bug
@@ -953,6 +957,217 @@ scanned chip resolves to a name and a phone call.
   deliberate breaks in #28 were caught by name**, and the break probe validated
   its own parser against a known-failing run first, so a zero could not be a
   false negative. `pets` still holds **0 documents**.
+
+- **2026-09-03** — **Three merges (#30, #31, #32): the intake step stopped asking
+  every question twice, the whole interface moved to neutral Spanish including
+  what the model writes back, and a provider overload became something the
+  retry policy knows about.** All three are merged to `master`. ⚠️ **#32's
+  deploy did not run** — see the next entry.
+
+  **#30 — "the value IS the control", and it came from the shelter rather than
+  from a test.** The identity step rendered every field twice: *"Lo que se ve en
+  las fotos"* printed the model's reading, and a few centimetres below the form
+  asked for the same thing as an empty control. The screen said `Sexo: Hembra`
+  and then `Sexo: [Elegir…]`. **Two questions about one animal, and the second
+  one implies the first was not recorded** — which is exactly what a person
+  reading it concluded.
+
+  The fix is not to hide the form; it is to stop having two surfaces. Each field
+  is now ONE row (`EditableField.tsx`) showing what the record holds, opening
+  that field's editor on click — so what a model read, what a person typed, and
+  what is still missing all render the same way in one place. **Provenance moved
+  next to the value it explains**: *"Leído en la foto de genitales"* now sits
+  under the sex row instead of in a panel the reader had to correlate by hand,
+  and so do the withheld reasons — *"no se puede estimar el tamaño sin algo que
+  dé escala"* is only useful beside the empty field it explains. `PhotoSuggestions`
+  keeps only what has no field to land in and is now narrative, not a form.
+
+  **Only one field opens at a time, deliberately.** Intake runs on a phone, often
+  one-handed with an animal in the other arm; several open editors push the rest
+  of the animal off-screen, and the summary of what is known so far is the thing
+  an admin needs before publishing. Measured against the real stylesheet at
+  **360px** — the width a real device reported, not the 375 an earlier check
+  used — with tap targets 85–113px and long values ellipsising rather than
+  pushing the action off the row.
+
+  **#31 — neutral Spanish, and the half that would have been missed is the
+  PROMPTS.** The interface read as Argentinean: voseo throughout — *"sacá"*,
+  *"poné"*, *"elegí"*, *"vos"*. The shelter is in Cochabamba and the site is
+  meant to read across Latin America. Converted to neutral tuteo — but two of
+  the six files changed are instructions to Gemini, and **a model answers in the
+  register it is addressed in.** *"Observá esta fotografía"* was producing free
+  text in the same voice, and that text goes straight onto the screen as
+  `colorPattern`, `coatType`, `generalObservations` and `notes`. Rewriting only
+  the static copy would have left half the interface in voseo, **arriving one
+  API call later** — which is the kind of gap that survives a full visual review
+  because it is not in the source at all. The vision prompt now says outright to
+  write in neutral Spanish, because what it writes is displayed verbatim.
+
+  ⚠️ **The dictation prompt is deliberately ASYMMETRIC.** Its instructions are
+  neutral now, but nothing asks the model to normalise what it *heard*, and
+  nothing may: `heardAs` is the literal phrase a veterinarian spoke and it is the
+  evidence a disputed dose is checked against. A vet who says *"ponele medio
+  mililitro"* must be transcribed saying exactly that.
+
+  **#32 — retry a provider overload, and one shared deadline.** Gemini answered
+  **503 `UNAVAILABLE`** twice on `gemini-3.6-flash` ("high demand… usually
+  temporary"). Neither was retried: the policy knew only about hangs, because
+  `isTimeout()` checks `err.name`. So an error the provider had just described as
+  temporary went to the shelter as *"Solo falló el análisis automático"*,
+  indistinguishable from a real failure. Nothing was billed — `api_usage_daily`
+  has no entry for 2026-09-03, because metering only fires on success. An
+  overload is retried now **after a backoff**, since a hang wants a fresh
+  connection immediately while an overloaded pool wants a moment, and retrying
+  into the same instant is the one thing least likely to work.
+
+  ⚠️ **The policy is deliberately NARROWER than the AI SDK's own `isRetryable`
+  flag, and that is the load-bearing part.** The SDK defaults it to
+  `408 || 409 || 429 || >= 500` — **it includes 429**. Trusting it would retry an
+  exhausted daily quota against the same model, burning the budget the Flash-Lite
+  fallback needs to reach a limit that does not refill for hours. So we retry
+  what a second attempt can fix and hand 429 to the tier logic, which has a
+  better answer. A sustained overload now falls back to Flash-Lite too — Lite is
+  a different pool with 25× the free allowance, so it is very often up when Flash
+  is not, and plan §3 holds that an animal arriving at 22:00 must not wait on
+  someone else's traffic spike.
+
+  **The latent defect that fix uncovered is the more valuable half.**
+  `withRetry` created its own deadline, and `suggestFromPhoto` calls
+  `extractWith` once per tier — so the fallback started a **fresh**
+  `SUGGEST_TOTAL_BUDGET_MS` and the pair could run to **100s against Firebase
+  Hosting's 60s ceiling**. That is the 2026-09-02 defect exactly, one path over.
+  It had never fired only because a 429 fails fast, so the fallback always had
+  room; **an overload does not fail fast, so adding the overload fallback would
+  have made it live.** There is now one deadline for the whole operation, created
+  in `suggestFromPhoto` and passed to both tiers, and the fallback is skipped
+  when too little of it remains to say anything useful. The classification moved
+  to `suggest-budget.ts`, which has no `server-only` import and is therefore
+  testable — the same split as `areas.ts`/`areas-admin.ts`. All six deliberate
+  breaks were caught by name, **including one real coverage gap the probe found**:
+  nothing asserted that a sustained overload falls back rather than giving up, so
+  deleting half the fix left every test green.
+
+  **Two scanner failures worth keeping, both from #31's sweep.** `grep -i`
+  **cannot fold case on accented characters** under this machine's `C.UTF-8`
+  locale, so a case-insensitive search for Spanish copy returns nothing at all —
+  indistinguishable from *"that text is not there"*. And a Node scanner written
+  through a shell heredoc had its `\p{L}` boundaries silently reduced to the
+  literal class `[p{L}]`, which then matched *"tomá"* inside *"automáticamente"*
+  and *"abrí"* inside *"habría"*. The same scanner written by the editor to a
+  file was correct. **Sixth recorded recurrence: escaping-sensitive code goes in
+  a file you run.**
+
+  ⚠️ **Neither #31's prompt edit nor #32's retry has been measured against a live
+  model.** `INTAKE_SUGGEST_SYSTEM` carries a warning that copy edits there have
+  non-local effects — a sibling stack dropped an eval from 11/11 to 9/11 by
+  removing one framing sentence — and #31's change is larger than one sentence.
+  #32's retry and Flash-Lite fallback are unexercised by construction: they need
+  a provider overload to happen. What both have is typecheck, **287 tests**, and
+  a clean build.
+
+- **2026-09-03** — **The bucket now enforces the tier the app declares — and
+  proving the old gap turned up a Firebase behaviour that makes half the
+  obvious fix useless, plus a second disclosure bug nobody had looked for.**
+  Also: #32's deploy had been **cancelled**, not failed, so its code sat merged
+  and unshipped; re-run, and the deployed tag now equals `git rev-parse master`.
+
+  **⚠️ A FIREBASE DOWNLOAD TOKEN BYPASSES `storage.rules` ENTIRELY.** Measured,
+  not read: one object uploaded to `medical/**`, whose rule is
+  `allow read: if isAdmin()`, given a `firebaseStorageDownloadTokens` value, then
+  fetched anonymously two ways — **200 with `?token=`, 403 without.** Same
+  object, same rule, same instant. A token is a capability that outranks the
+  rules, it never expires, and no rule can revoke it.
+
+  That reframes two things. First, it means **`getDownloadURL()` is a
+  disclosure decision, not a URL getter** — it MINTS a token if none exists, so
+  calling it on a photo hands out permanent public access to that photo
+  regardless of any rule written before or after. Second, it narrows a claim
+  this file has carried since 2026-08-23: the `medical/**` 403 that was called
+  proof the rules enforce is proof only for the **tokenless** URL form. It was
+  true, and it was narrower than it read.
+
+  **The reported gap was real and worse than reported.** `pets-admin.ts` built
+  one path for every slot — `pets/{petId}/{id}.jpg` — and `storage.rules` serves
+  that prefix with `allow read: if true`. So the capture UI's promise *"esta foto
+  nunca se publica"* was enforced only in Firestore, where `tier` governs what
+  the app RENDERS. Measured against a real genital photograph left by an E2E
+  run: **200 with a token AND 200 without** — doubly reachable, because the
+  public rule alone was enough.
+
+  **The fix is two halves, and either one alone is cosmetic.** The
+  never-public slots now write to `pets/{petId}/private/{id}.jpg`, which a new
+  rule gates on `request.auth != null`; and `uploadProcessedPhoto` **does not
+  call `getDownloadURL` for those slots**, so no token is ever minted. Those
+  photos carry an empty `url` by design and are read back through
+  `readPhotoBlob()`, which goes through the Storage SDK with the caller's ID
+  token and is therefore subject to the rules. `PetPhoto.tsx` renders either
+  tier and revokes its object URLs.
+
+  **The load-bearing assumption was measured rather than reasoned about.** The
+  whole design rests on `match /pets/{petId}/{fileName}` using a ONE-segment
+  wildcard that cannot reach `pets/x/private/y.jpg` — if it could, its
+  `allow read: if true` would still serve the intimate photos. Three uploads,
+  three anonymous fetches: **public cover 200, private prefix 403, and an
+  admin-only `medical/**` control 403.** The control is what makes the 403 mean
+  something rather than being a probe that cannot reach anything.
+
+  **The gate is `request.auth != null`, not `isAdmin()`, on purpose.**
+  `mediaTierFor()` returns `'auth'` for these slots, so the bucket now enforces
+  exactly what the document declares. Tightening only one of the two would put
+  them back out of step, which is the defect being closed. Whether an intimate
+  photo should be admin-only rather than merely signed-in is a real question
+  about the tier model, and it is the owner's to answer — it is not something to
+  redefine in passing inside an enforcement fix.
+
+  **The second bug was found by the change, not by the report, and it is the
+  one that would have reached the public wall.** `coverPhoto` was
+  `draft.media[0]?.url`, and media is stored in **capture order** — while
+  `mediaTierFor`'s own comment says a teeth or genital shot can legitimately be
+  first, because slots fill in whatever order the animal tolerates being
+  handled. So an animal photographed genitals-first published that photograph as
+  its cover on `pets/{petId}`, **the public document, which is exactly what the
+  adoption wall renders.** The subcollection got the slot right and the cover
+  field never asked. It is now `coverPhotoFrom()`, which takes the first
+  publishable photo, and it also fixes the `?? null` half — `''` is not null, so
+  the old expression would have yielded an empty `src` rather than no image.
+
+  **The break probe found a coverage gap in the fix, twice, and both were real.**
+  `coverPhotoFrom` has two conditions and they are only *coincidentally*
+  redundant today: an intimate photo currently always carries `url: ''`, so
+  deleting the slot check left every test green. If those photos ever gain a
+  signed URL for rendering, the slot check is the only thing left between one
+  and the wall — so it is now asserted directly, with a url present. Deleting
+  the empty-url check was then uncovered too, and got its own test. **8 of 8
+  breaks now caught by name**, with the instrument validated first against a
+  guaranteed-fatal edit so a zero could not be a false negative.
+
+  **One correction to this file: `node --test` emits TAP here, not the spec
+  reporter.** The 2026-08-26 entry says the opposite and warns that a `not ok`
+  regex never matches. Read off raw output this session: `not ok 134 - a teeth
+  or genital photo is NEVER public…`. Both claims cannot be right, and the
+  transferable rule is the one that survives either way — **read the reporter's
+  actual output before trusting a parser, and validate the probe against a
+  known-failing run.**
+
+  **Residue cleared, and it was larger than the handoff knew.** `petDrafts` held
+  **2**, not 4. The bucket held **12** JPEGs across **three** prefixes — and one
+  prefix, `pets/l4ZH8ude…/`, had **no draft document at all**: the draft was
+  deleted and its photos survived, which is the documented non-throwing
+  best-effort cleanup caught in the act. All 12 carried download tokens. Root
+  collections were enumerated with `listCollections()` rather than checked
+  against a list. Now: **0 bucket objects, 0 petDrafts, 0 pets, 0 areas, 0 in
+  every collection group, 1 user (the real admin), 3 `api_usage_daily` rows** —
+  and no row for 2026-09-03, which independently confirms #32's claim that the
+  two 503s were never billed, because metering only fires on success.
+
+  ⛔ **What is NOT proven, stated plainly.** The rules half is measured end to
+  end. The **rendering** half is not: `PetPhoto` reading a private photo through
+  `getBlob` has typecheck, a clean build and 296 tests behind it, but no browser
+  has run it, because `/admin/intake` sits behind `AdminGate` and that needs a
+  human password. **The first person to open the wizard should confirm the four
+  slot thumbnails still appear** — that is the one claim this session could not
+  earn. Equally unmeasured, and unchanged from the previous session: #31's
+  prompt rewrite and #32's overload retry have still never met a live model.
 ---
 
 ## Next session — start here
