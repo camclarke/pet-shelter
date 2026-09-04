@@ -42,10 +42,15 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import type { FieldValue } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
-import { mediaTierFor } from './types';
+import {
+  coverPhotoFrom,
+  isPrivatePhotoPath,
+  mediaTierFor,
+  storagePathFor,
+} from './types';
 import type { Pet, PetPhotoSlot } from './types';
 
 import { getFirebase } from './firebase-client';
@@ -272,11 +277,20 @@ export async function uploadProcessedPhoto(
   const dimensions = await readDimensions(processed);
 
   const id = crypto.randomUUID();
-  const path = `pets/${petId}/${id}.jpg`;
+  const path = storagePathFor(petId, id, slot);
 
   const storageRef = ref(storage, path);
   await uploadBytes(storageRef, processed, { contentType: 'image/jpeg' });
-  const url = await getDownloadURL(storageRef);
+
+  // ⚠️ getDownloadURL() MINTS a permanent Firebase download token, and a token
+  // BYPASSES storage.rules — measured 2026-09-03 against an admin-only
+  // `medical/**` object: 200 with `?token=`, 403 without. Calling it on a
+  // never-public slot would hand out a capability URL that no rule can revoke
+  // and that outlives publish, reordering, and the draft's own deletion.
+  //
+  // Private photos therefore carry an EMPTY url and are read back through
+  // readPhotoBlob(), which goes through the rules with the caller's token.
+  const url = isPrivatePhotoPath(path) ? '' : await getDownloadURL(storageRef);
 
   return { id, slot, path, url, alt: '', ...dimensions };
 }
@@ -313,6 +327,38 @@ export async function deletePhotos(paths: readonly string[]): Promise<void> {
       }
     }),
   );
+}
+
+/**
+ * Read a photo's bytes, whichever tier it is stored at.
+ *
+ * A public photo already has a `url` and is fetched normally. A private one
+ * deliberately has none — see uploadProcessedPhoto — so it is read through the
+ * Storage SDK, which sends the caller's ID token and is therefore subject to
+ * `storage.rules`. That is the point: the bytes reach a signed-in admin and
+ * nobody else.
+ */
+export async function readPhotoBlob(media: {
+  path: string;
+  url: string;
+}): Promise<Blob> {
+  if (media.url) return (await fetch(media.url)).blob();
+  const { storage } = getFirebase();
+  return getBlob(ref(storage, media.path));
+}
+
+/**
+ * Same, as an object URL for an `<img src>`.
+ *
+ * The caller MUST revoke it — see PetPhoto.tsx, which is the only component
+ * that should call this.
+ */
+export async function readPhotoObjectUrl(media: {
+  path: string;
+  url: string;
+}): Promise<string> {
+  if (media.url) return media.url;
+  return URL.createObjectURL(await readPhotoBlob(media));
 }
 
 async function readDimensions(blob: Blob): Promise<{ width: number; height: number }> {
@@ -390,8 +436,10 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
     weightIsEstimate: draft.weightKgMin !== null || draft.weightKgMax !== null,
     status: draft.status,
     hasMicrochip: draft.hasMicrochip,
-    // Derived from the first uploaded photo, never typed. See uploadPetPhoto.
-    coverPhoto: draft.media[0]?.url ?? null,
+    // Derived from the first PUBLISHABLE photo, never typed, and never from
+    // media[0] — media is in capture order and a genital shot can legitimately
+    // be first, which would have put it on the public wall. See coverPhotoFrom.
+    coverPhoto: coverPhotoFrom(draft.media),
     // Provenance: which fields a vision model influenced, if any. Empty for a
     // hand-typed animal. This records INFLUENCE, not unreviewed writing — an
     // admin accepted every value that reached here.

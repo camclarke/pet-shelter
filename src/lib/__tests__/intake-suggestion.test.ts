@@ -18,7 +18,12 @@ import {
   reviewSuggestion,
   type RawPhotoSuggestion,
 } from '../intake-suggestion';
-import { mediaTierFor } from '../types';
+import {
+  coverPhotoFrom,
+  isPrivatePhotoPath,
+  mediaTierFor,
+  storagePathFor,
+} from '../types';
 
 /**
  * A deliberately BLAND baseline: everything null, every confidence low, no
@@ -511,4 +516,117 @@ test('the first ordinary photo is the public cover', () => {
 test('later ordinary photos are gated, matching public teaser / gated detail', () => {
   assert.equal(mediaTierFor('front', 1), 'auth');
   assert.equal(mediaTierFor('other', 2), 'auth');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Photo disclosure — where the bytes actually live
+//
+// mediaTierFor() decides what the APP renders. Until 2026-09-03 that was the
+// only thing deciding anything: every slot was written to `pets/{petId}/x.jpg`,
+// which storage.rules serves with `allow read: if true`, so a genital photo was
+// measured returning 200 to an unauthenticated fetch. These tests cover the
+// other half — the path the bytes are written to.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a never-public slot is stored under a prefix the rules gate', () => {
+  assert.equal(storagePathFor('pet1', 'm1', 'genitals'), 'pets/pet1/private/m1.jpg');
+  assert.equal(storagePathFor('pet1', 'm1', 'teeth'), 'pets/pet1/private/m1.jpg');
+});
+
+test('an ordinary slot keeps the public path the wall and next.config expect', () => {
+  assert.equal(storagePathFor('pet1', 'm1', 'front'), 'pets/pet1/m1.jpg');
+  assert.equal(storagePathFor('pet1', 'm1', 'side'), 'pets/pet1/m1.jpg');
+  assert.equal(storagePathFor('pet1', 'm1', 'other'), 'pets/pet1/m1.jpg');
+});
+
+test('the storage path agrees with the tier for EVERY slot', () => {
+  // The coupling is the guarantee. A slot added to NEVER_PUBLIC_SLOTS must get
+  // a private path automatically — if these two ever disagree, the app renders
+  // a photo as gated while the bucket serves it to anyone.
+  const slots = ['front', 'side', 'teeth', 'genitals', 'other'] as const;
+  for (const slot of slots) {
+    const gated = mediaTierFor(slot, 0) === 'auth';
+    const priv = isPrivatePhotoPath(storagePathFor('pet1', 'm1', slot));
+    if (slot === 'teeth' || slot === 'genitals') {
+      assert.equal(gated, true, `${slot} must be gated`);
+      assert.equal(priv, true, `${slot} must be stored privately`);
+    } else {
+      assert.equal(priv, false, `${slot} is a gallery photo`);
+    }
+  }
+});
+
+test('the public cover is never an intimate photo, even when taken first', () => {
+  // Media is stored in CAPTURE order and the guided flow tolerates a genital
+  // shot being first. coverPhoto lives on the public pets/{petId} document and
+  // is what the adoption wall renders, so "first" is the wrong selector.
+  const cover = coverPhotoFrom([
+    { slot: 'genitals', url: '' },
+    { slot: 'teeth', url: '' },
+    { slot: 'front', url: 'https://example.test/front.jpg' },
+  ]);
+  assert.equal(cover, 'https://example.test/front.jpg');
+});
+
+test('the SLOT bars an intimate photo from the cover, not merely its empty url', () => {
+  // A break probe found these two checks only coincidentally redundant: today
+  // an intimate photo always carries url: '', so dropping the slot check left
+  // every test green. The empty url is a consequence of not minting a token —
+  // if these photos ever gain a signed URL for rendering, the slot check is the
+  // only thing still standing between one and the public wall. So assert it
+  // directly, with a url present.
+  const cover = coverPhotoFrom([
+    { slot: 'genitals', url: 'https://example.test/genitals.jpg' },
+    { slot: 'front', url: 'https://example.test/front.jpg' },
+  ]);
+  assert.equal(cover, 'https://example.test/front.jpg');
+
+  // And with no ordinary photo to fall back to, there is no cover at all.
+  assert.equal(
+    coverPhotoFrom([{ slot: 'teeth', url: 'https://example.test/teeth.jpg' }]),
+    null,
+  );
+});
+
+test('a pet photographed ONLY intimately has no cover at all, not an empty one', () => {
+  // `media[0]?.url ?? null` would give '' here, because ?? does not catch the
+  // empty string — and an empty src renders as a broken image on the wall.
+  assert.equal(coverPhotoFrom([{ slot: 'genitals', url: '' }]), null);
+  assert.equal(coverPhotoFrom([]), null);
+});
+
+test('an ordinary photo with no url is skipped rather than published empty', () => {
+  // The second half of the guard, and a break probe showed it had no coverage.
+  // `publishable?.url ?? null` yields '' when the found photo's url is '',
+  // because ?? does not catch the empty string — and an empty coverPhoto
+  // renders as a broken image on the wall rather than as no image.
+  assert.equal(coverPhotoFrom([{ slot: 'front', url: '' }]), null);
+
+  // It should fall through to a later photo that does have one.
+  assert.equal(
+    coverPhotoFrom([
+      { slot: 'front', url: '' },
+      { slot: 'side', url: 'https://example.test/side.jpg' },
+    ]),
+    'https://example.test/side.jpg',
+  );
+});
+
+test('the cover is the first ordinary photo, preserving capture order', () => {
+  assert.equal(
+    coverPhotoFrom([
+      { slot: 'front', url: 'https://example.test/a.jpg' },
+      { slot: 'side', url: 'https://example.test/b.jpg' },
+    ]),
+    'https://example.test/a.jpg',
+  );
+});
+
+test('isPrivatePhotoPath only matches the private prefix', () => {
+  assert.equal(isPrivatePhotoPath('pets/abc/private/m.jpg'), true);
+  assert.equal(isPrivatePhotoPath('pets/abc/m.jpg'), false);
+  // A file literally NAMED private is not a private path — the segment matters.
+  assert.equal(isPrivatePhotoPath('pets/abc/private.jpg'), false);
+  assert.equal(isPrivatePhotoPath('medical/abc/card.jpg'), false);
+  assert.equal(isPrivatePhotoPath('sightings/abc/private/m.jpg'), false);
 });
