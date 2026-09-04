@@ -258,6 +258,65 @@ export function mediaTierFor(slot: PetPhotoSlot, index: number): MediaTier {
   return index === 0 ? 'public' : 'auth';
 }
 
+/**
+ * Where a photo is STORED, decided by the same slot that decides its tier.
+ *
+ * `mediaTierFor()` governed what the app RENDERED and nothing else: every slot
+ * was written to `pets/{petId}/{id}.jpg`, which `storage.rules` serves with
+ * `allow read: if true`. So a genital photograph carrying the promise "esta
+ * foto nunca se publica" was fetchable by URL by anyone — measured on
+ * 2026-09-03 against a real object: 200 with a download token AND 200 without.
+ *
+ * The never-public slots now live under a `private/` prefix the rules gate on
+ * auth. The one-segment wildcard in `match /pets/{petId}/{fileName}` cannot
+ * match a two-segment tail, so the public rule does not reach them and the
+ * private rule is the only thing that grants access.
+ *
+ * ⚠️ The path is derived from the SLOT, never from the index. A slot's tier is
+ * a fixed property knowable at upload time; its index is a UI ordering decided
+ * at publish. Deriving the path from the index would mean moving objects when
+ * someone reorders photos, and a move that half-fails leaves an intimate photo
+ * sitting at a public path.
+ */
+export function storagePathFor(
+  petId: string,
+  mediaId: string,
+  slot: PetPhotoSlot,
+): string {
+  return NEVER_PUBLIC_SLOTS.includes(slot)
+    ? `pets/${petId}/private/${mediaId}.jpg`
+    : `pets/${petId}/${mediaId}.jpg`;
+}
+
+/**
+ * The photo that may appear on the public wall, or null if there is not one.
+ *
+ * ⚠️ NOT `media[0]`, which is what this used to be. Media is stored in CAPTURE
+ * order, and the guided flow explicitly tolerates an intimate shot being taken
+ * first — mediaTierFor's own comment says so. So an animal photographed
+ * genitals-first published that photograph as `coverPhoto` on `pets/{petId}`,
+ * which is the PUBLIC document and is exactly what the adoption wall renders.
+ * The media subcollection got the slot right and the cover field did not.
+ *
+ * Also skips an empty url: a never-public photo now carries none by design, so
+ * `media[0]?.url ?? null` would yield the empty string rather than null —
+ * `??` does not catch `''`.
+ */
+export function coverPhotoFrom(
+  media: readonly { slot: PetPhotoSlot; url: string }[],
+): string | null {
+  const publishable = media.find(
+    (m) => !NEVER_PUBLIC_SLOTS.includes(m.slot) && m.url !== '',
+  );
+  return publishable?.url ?? null;
+}
+
+/** True when a path is one the rules refuse to serve unauthenticated. */
+export function isPrivatePhotoPath(path: string): boolean {
+  const segments = path.split('/');
+  return segments.length === 4 && segments[0] === 'pets' && segments[2] === 'private';
+}
+
 export type MediaKind = 'photo' | 'video';
 export type MediaTier = 'public' | 'auth';
 

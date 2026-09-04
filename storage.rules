@@ -39,6 +39,30 @@ service firebase.storage {
       allow delete: if isAdmin();
     }
 
+    // ── intimate + clinical pet photos ─────────────────────────────────────
+    // The teeth and genital shots exist to read age and sex. Neither belongs on
+    // an adoption listing, and the capture UI promises "esta foto nunca se
+    // publica" — a promise that lived only in Firestore until 2026-09-03, when
+    // a real object was measured returning 200 to an unauthenticated fetch,
+    // both with a download token and without one.
+    //
+    // ⚠️ This rule is only HALF the fix. A Firebase DOWNLOAD TOKEN bypasses
+    // storage.rules entirely — measured against an admin-only `medical/**`
+    // object: 200 with `?token=`, 403 without, same object, same rule. So the
+    // upload path must ALSO refrain from calling getDownloadURL() on these,
+    // because that call MINTS a token and no rule can revoke one.
+    // See uploadProcessedPhoto() in src/lib/pets-admin.ts.
+    //
+    // Read is `request.auth != null` rather than isAdmin() so the bucket
+    // enforces exactly the tier the media document declares — mediaTierFor()
+    // returns 'auth' for these slots. Tightening only one of the two would put
+    // them back out of step, which is the defect this rule exists to close.
+    match /pets/{petId}/private/{fileName} {
+      allow read: if request.auth != null;
+      allow create, update: if isAdmin() && isImage() && request.resource.size < 8 * 1024 * 1024;
+      allow delete: if isAdmin();
+    }
+
     // ── sighting photos ────────────────────────────────────────────────────
     // Uploaded by anonymous reporters, so tighter: smaller cap, and App Check
     // is enforced at the bucket level. Sightings are moderated in Firestore

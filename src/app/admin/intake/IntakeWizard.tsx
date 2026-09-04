@@ -66,6 +66,7 @@ import {
   mintPetId,
   PhotoUnreadableError,
   publishDraft,
+  readPhotoBlob,
   reopenPet,
   saveDraft,
   loadDraft,
@@ -89,6 +90,7 @@ import PhotoSuggestions, {
 } from './PhotoSuggestions';
 import EditableField from './EditableField';
 import GuidedPhotoCapture from './GuidedPhotoCapture';
+import { PetPhoto } from './PetPhoto';
 import { t } from '@/i18n';
 
 const STEPS: { key: IntakeStep; label: string }[] = [
@@ -497,7 +499,7 @@ export function IntakeWizard() {
       const photos = await Promise.all(
         draft.media.map(async (m) => ({
           slot: m.slot,
-          blob: photoBlobs.get(m.slot) ?? (await (await fetch(m.url)).blob()),
+          blob: photoBlobs.get(m.slot) ?? (await readPhotoBlob(m)),
         })),
       );
 
@@ -990,6 +992,7 @@ export function IntakeWizard() {
           <GuidedPhotoCapture
             captured={draft.media.map((m) => ({
               slot: m.slot,
+              path: m.path,
               url: m.url,
               busy: false,
             }))}
@@ -1613,7 +1616,7 @@ export function IntakeWizard() {
             <ul className="admin-photos">
               {draft.media.map((media, index) => (
                 <li key={media.id} className="admin-photo">
-                  <img src={media.url} alt={media.alt || 'Foto sin descripción'} />
+                  <PetPhoto media={media} alt={media.alt || 'Foto sin descripción'} />
                   <div className="admin-photo__body">
                     {index === 0 ? (
                       <span className="admin-photo__badge">Portada</span>
