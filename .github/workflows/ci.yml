@@ -50,6 +50,20 @@ jobs:
       # is not a reason to block an unrelated pull request — but it is
       # absolutely a reason to show a warning on the run. The `overrides` block
       # in package.json is what actually holds this at zero.
+      #
+      # ⚠️ timeout-minutes is load-bearing and is NOT redundant with
+      # continue-on-error. That flag rescues a step that FAILS; it does nothing
+      # for one that HANGS. npm's audit endpoint returned Service Unavailable
+      # and then hung on 2026-09-03 and again on 2026-09-04, both times eating
+      # this job's whole 10-minute budget — so the JOB was cancelled, and a
+      # cancelled job SKIPS `Build, push, deploy` entirely. Two merges sat
+      # undeployed, reported as "cancelled", which reads like a human pressed
+      # the button rather than like a registry outage.
+      #
+      # With a step timeout the hang becomes a step failure, continue-on-error
+      # catches it as designed, and the deploy proceeds. Keep this comfortably
+      # under the job's timeout-minutes above.
       - name: Audit production dependencies
         continue-on-error: true
+        timeout-minutes: 3
         run: npm audit --omit=dev
