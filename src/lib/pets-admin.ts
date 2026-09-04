@@ -282,11 +282,15 @@ export async function uploadProcessedPhoto(
   const storageRef = ref(storage, path);
   await uploadBytes(storageRef, processed, { contentType: 'image/jpeg' });
 
-  // ⚠️ getDownloadURL() MINTS a permanent Firebase download token, and a token
-  // BYPASSES storage.rules — measured 2026-09-03 against an admin-only
+  // ⚠️ getDownloadURL() returns a permanent Firebase download token, and a
+  // token BYPASSES storage.rules — measured 2026-09-03 against an admin-only
   // `medical/**` object: 200 with `?token=`, 403 without. Calling it on a
   // never-public slot would hand out a capability URL that no rule can revoke
   // and that outlives publish, reordering, and the draft's own deletion.
+  //
+  // ⚠️ This stops the token being DISCLOSED, not from existing: Firebase's
+  // upload endpoint mints one by itself, measured in production 2026-09-04.
+  // See the residual noted in storage.rules.
   //
   // Private photos therefore carry an EMPTY url and are read back through
   // readPhotoBlob(), which goes through the rules with the caller's token.

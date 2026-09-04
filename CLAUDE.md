@@ -1097,7 +1097,9 @@ scanned chip resolves to a name and a phone call.
   **The fix is two halves, and either one alone is cosmetic.** The
   never-public slots now write to `pets/{petId}/private/{id}.jpg`, which a new
   rule gates on `request.auth != null`; and `uploadProcessedPhoto` **does not
-  call `getDownloadURL` for those slots**, so no token is ever minted. Those
+  call `getDownloadURL` for those slots**, so no token is ever DISCLOSED —
+  see the correction in the next entry, which narrows this: the upload endpoint
+  mints one anyway. Those
   photos carry an empty `url` by design and are read back through
   `readPhotoBlob()`, which goes through the Storage SDK with the caller's ID
   token and is therefore subject to the rules. `PetPhoto.tsx` renders either
@@ -1168,6 +1170,91 @@ scanned chip resolves to a name and a phone call.
   slot thumbnails still appear** — that is the one claim this session could not
   earn. Equally unmeasured, and unchanged from the previous session: #31's
   prompt rewrite and #32's overload retry have still never met a live model.
+
+- **2026-09-04** — **The four photos went through the DEPLOYED wizard, and the
+  run settled #31, #32 and the private-photo rendering at once — while finding
+  that the fix merged an hour earlier claims more than it delivers.** PR #33
+  merged (`5fa712d`), deployed, tag equals `git rev-parse master`.
+
+  **⚠️ FIREBASE'S UPLOAD ENDPOINT AUTO-MINTS A DOWNLOAD TOKEN. Not calling
+  `getDownloadURL` does NOT stop a token existing.** #33's commit message says
+  *"no token is ever minted"* — that is **false**, and only the real run showed
+  it. On the live wizard's own private objects: **403 without the token, 200
+  WITH it.** The honest claim is that the token is never **disclosed** — the app
+  never reads it, it is not in Firestore, it never reaches a client — and
+  undisclosed is a weaker guarantee than unusable. Corrected in three places
+  rather than left standing. **The residual is open**; closing it means
+  stripping the token after upload, which needs a client-SDK probe first,
+  because a metadata-only write is evaluated against `create, update` and
+  `request.resource` semantics there are the same null-dereference class that
+  made `allow write` deny every delete for three weeks.
+
+  **What the run DID prove, measured on real objects written by the live UI:**
+  teeth and genitals routed to `pets/{petId}/private/`, carrying `url: ''`
+  because `getDownloadURL` was never called; front and side to the public
+  prefix with a url. Anonymous fetch of all four: **public 200, 200 — private
+  403, 403.** And the half #33 could not earn: **all four slot thumbnails
+  rendered**, including both never-public ones, so `PetPhoto` reading through
+  `getBlob` under the rules works in a real browser.
+
+  **#32's overload retry fired in production, which it could not do on
+  demand.** Gemini was genuinely overloaded, so the path that was *"unexercised
+  by construction"* ran twice:
+
+  ```
+  attempt 1/2 reported overload after 2866ms; retrying in 1500ms with 45634ms left
+  attempt 1/2 timed out  after 25003ms; retrying in    0ms with 24997ms left
+  gemini-3.6-flash reported overload; falling back to gemini-3.1-flash-lite with 12411ms left
+  ok in 42659ms  photo=749KB slots=front+side+teeth+genitals
+  ```
+
+  Every design decision in #32 is visible in those four lines. **A 1500ms
+  backoff for an overload and 0ms for a timeout** — a hang wants a fresh
+  connection immediately, an overloaded pool wants a moment. **The Flash-Lite
+  fallback on sustained overload**, which previously only happened on a spent
+  quota. And the **one shared deadline**, decrementing 45634 → 24997 → 12411
+  across tiers rather than the fallback starting fresh: that is exactly the
+  latent defect #32 fixed, and had it not been fixed this run would have gone
+  past Hosting's 60s ceiling and the answer would have been undeliverable.
+  **42659ms total** — a hang, a retry, an overload and a tier fallback, all
+  still inside 60s.
+
+  The first click failed honestly at 29375ms with *"El análisis tardó demasiado
+  y lo cortamos"* — #28's timeout branch, **not** the misleading
+  "no está configurado" 503 that used to be unreachable-through-Hosting.
+
+  **#31 is settled: the model wrote neutral Spanish.** Free text it produced —
+  *"Se observa: perro de pelaje abundante, se encuentra descansando sobre el
+  suelo"*, *"Señas: ojos de distinto color (heterocromía)"*, *"largo, denso,
+  doble capa"* — is impersonal neutral register with **no voseo anywhere**, and
+  this is the half that could not be reviewed in source because it arrives one
+  API call later.
+
+  **The extraction was correct and the design held.** Age **3 años** from the
+  teeth slot; **sex read from the genitals slot and offered, with `sex` stored
+  as `null`** — offered for one tap, never prefilled; breed wording still gated
+  behind sex (*"Elige primero el sexo: la palabra cambia entre «mestizo» y
+  «mestiza»"*); colour and coat separate; weight 18–25 kg; heterochromia
+  spotted. `suggestedByModel: flash-lite` correctly records the **fallback**
+  model rather than the one first asked. Metered:
+  `2026-09-04__intake_suggest__gemini-3.1-flash-lite`, 1 call, 5686 in / 391
+  out, **$0.002008**.
+
+  **⚠️ A hanging `npm audit` had silently blocked TWO deploys.** #32's and
+  #33's deploy runs both reported *"cancelled"* and shipped nothing.
+  Diagnosis: `ci.yml` sets `timeout-minutes: 10` on the job; the audit step had
+  `continue-on-error` but **no timeout of its own**, npm's endpoint returned
+  `Service Unavailable` and hung, the job hit its ceiling, and **a cancelled
+  job SKIPS the deploy**. The run duration was 10m18s against a 10-minute
+  budget. **`continue-on-error` rescues a step that FAILS and does nothing for
+  one that HANGS** — and a cancelled run reads like a human pressed the button,
+  so nobody goes looking for a registry outage. #32's code sat merged and
+  undeployed for a day, found only by comparing the deployed Cloud Run tag
+  against `git rev-parse master`. Fix in PR #34: a step-level
+  `timeout-minutes: 3`.
+
+  Residue cleared and read back: **0 bucket objects, 0 petDrafts, 0 pets, 0
+  areas, 0 in every collection group, 1 user, 4 `api_usage_daily` rows.**
 ---
 
 ## Next session — start here

@@ -50,8 +50,21 @@ service firebase.storage {
     // storage.rules entirely — measured against an admin-only `medical/**`
     // object: 200 with `?token=`, 403 without, same object, same rule. So the
     // upload path must ALSO refrain from calling getDownloadURL() on these,
-    // because that call MINTS a token and no rule can revoke one.
+    // because that call returns a token and no rule can revoke one.
     // See uploadProcessedPhoto() in src/lib/pets-admin.ts.
+    //
+    // ⚠️⚠️ KNOWN RESIDUAL, measured in production 2026-09-04: Firebase's UPLOAD
+    // endpoint auto-mints a firebaseStorageDownloadTokens value by itself, so
+    // not calling getDownloadURL is NOT enough to stop a token EXISTING. On a
+    // real private object written by the live wizard: 403 without the token,
+    // 200 WITH it. The token is never read by the app, never written to
+    // Firestore and never reaches a client, so it is undisclosed rather than
+    // published — but undisclosed is a weaker guarantee than unusable.
+    // Closing it means stripping the token after upload; do that only with a
+    // client-SDK probe behind it, because a metadata update is evaluated
+    // against `create, update` below and request.resource semantics on a
+    // metadata-only write are exactly the null-dereference class that made
+    // `allow write` deny every delete for three weeks.
     //
     // Read is `request.auth != null` rather than isAdmin() so the bucket
     // enforces exactly the tier the media document declares — mediaTierFor()
