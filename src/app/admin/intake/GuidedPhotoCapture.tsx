@@ -3,6 +3,7 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 
 import type { PetPhotoSlot } from '@/lib/types';
+import { PetPhoto } from './PetPhoto';
 
 /**
  * Guided intake capture: four named shots, then ONE analysis.
@@ -31,6 +32,13 @@ import type { PetPhotoSlot } from '@/lib/types';
 
 export interface CapturedSlot {
   slot: PetPhotoSlot;
+  /**
+   * Storage path. Required even though `url` is right there, because a
+   * never-public slot (teeth, genitals) deliberately has an EMPTY url — see
+   * uploadProcessedPhoto — and the path is then the only way to reach the
+   * bytes. PetPhoto uses whichever of the two is populated.
+   */
+  path: string;
   url: string;
   busy: boolean;
 }
@@ -171,8 +179,7 @@ export default function GuidedPhotoCapture({
 
               <div className="capture__preview">
                 {done ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={done.url} alt={`Foto ${spec.label.toLowerCase()}`} />
+                  <PetPhoto media={done} alt={`Foto ${spec.label.toLowerCase()}`} />
                 ) : (
                   <span className="capture__placeholder" aria-hidden="true">
                     {index + 1}

@@ -922,13 +922,17 @@ scanned chip resolves to a name and a phone call.
      surfaces it counted.** The sweep that found them enumerated root
      collections with `listCollections()` rather than checking a list, and
      checked phantom parents and every collection group.
-  2. **⚠️ OPEN: "esta foto nunca se publica" is enforced only in Firestore.**
-     `pets-admin.ts` builds one path for every slot — `pets/{petId}/{id}.jpg` —
-     and `storage.rules` grants `allow read: if true` on that prefix. The
-     `media` document's `tier` governs what the app RENDERS, not what the
-     bucket SERVES, so a genital photograph is fetchable by URL for as long as
-     it exists. Not exploited, not urgent while `pets` is empty, and **must be
-     fixed before a real animal goes through**.
+  2. **✅ CLOSED 2026-09-03 — "esta foto nunca se publica" was enforced only in
+     Firestore.** `pets-admin.ts` built one path for every slot —
+     `pets/{petId}/{id}.jpg` — and `storage.rules` grants `allow read: if true`
+     on that prefix, so a genital photograph was fetchable by URL: measured at
+     **200 with a download token and 200 without**. Fixed in two halves,
+     because either alone is cosmetic — the never-public slots moved to
+     `pets/{petId}/private/`, which a new rule gates on auth, AND the upload
+     path stopped calling `getDownloadURL()` on them, **because a download
+     token bypasses `storage.rules` outright and cannot be revoked**. Proven
+     with an anonymous fetch of three objects: public cover 200, private
+     prefix 403, admin-only `medical/**` control 403. See the log entry.
   3. **ADC flipped to the work account MID-SESSION**, between two runs of the
      same script, while `gcloud config` still read `wawitas`. Symptom was a
      bare `7 PERMISSION_DENIED` from Firestore, which reads like a rules bug
@@ -1060,6 +1064,110 @@ scanned chip resolves to a name and a phone call.
   #32's retry and Flash-Lite fallback are unexercised by construction: they need
   a provider overload to happen. What both have is typecheck, **287 tests**, and
   a clean build.
+
+- **2026-09-03** — **The bucket now enforces the tier the app declares — and
+  proving the old gap turned up a Firebase behaviour that makes half the
+  obvious fix useless, plus a second disclosure bug nobody had looked for.**
+  Also: #32's deploy had been **cancelled**, not failed, so its code sat merged
+  and unshipped; re-run, and the deployed tag now equals `git rev-parse master`.
+
+  **⚠️ A FIREBASE DOWNLOAD TOKEN BYPASSES `storage.rules` ENTIRELY.** Measured,
+  not read: one object uploaded to `medical/**`, whose rule is
+  `allow read: if isAdmin()`, given a `firebaseStorageDownloadTokens` value, then
+  fetched anonymously two ways — **200 with `?token=`, 403 without.** Same
+  object, same rule, same instant. A token is a capability that outranks the
+  rules, it never expires, and no rule can revoke it.
+
+  That reframes two things. First, it means **`getDownloadURL()` is a
+  disclosure decision, not a URL getter** — it MINTS a token if none exists, so
+  calling it on a photo hands out permanent public access to that photo
+  regardless of any rule written before or after. Second, it narrows a claim
+  this file has carried since 2026-08-23: the `medical/**` 403 that was called
+  proof the rules enforce is proof only for the **tokenless** URL form. It was
+  true, and it was narrower than it read.
+
+  **The reported gap was real and worse than reported.** `pets-admin.ts` built
+  one path for every slot — `pets/{petId}/{id}.jpg` — and `storage.rules` serves
+  that prefix with `allow read: if true`. So the capture UI's promise *"esta foto
+  nunca se publica"* was enforced only in Firestore, where `tier` governs what
+  the app RENDERS. Measured against a real genital photograph left by an E2E
+  run: **200 with a token AND 200 without** — doubly reachable, because the
+  public rule alone was enough.
+
+  **The fix is two halves, and either one alone is cosmetic.** The
+  never-public slots now write to `pets/{petId}/private/{id}.jpg`, which a new
+  rule gates on `request.auth != null`; and `uploadProcessedPhoto` **does not
+  call `getDownloadURL` for those slots**, so no token is ever minted. Those
+  photos carry an empty `url` by design and are read back through
+  `readPhotoBlob()`, which goes through the Storage SDK with the caller's ID
+  token and is therefore subject to the rules. `PetPhoto.tsx` renders either
+  tier and revokes its object URLs.
+
+  **The load-bearing assumption was measured rather than reasoned about.** The
+  whole design rests on `match /pets/{petId}/{fileName}` using a ONE-segment
+  wildcard that cannot reach `pets/x/private/y.jpg` — if it could, its
+  `allow read: if true` would still serve the intimate photos. Three uploads,
+  three anonymous fetches: **public cover 200, private prefix 403, and an
+  admin-only `medical/**` control 403.** The control is what makes the 403 mean
+  something rather than being a probe that cannot reach anything.
+
+  **The gate is `request.auth != null`, not `isAdmin()`, on purpose.**
+  `mediaTierFor()` returns `'auth'` for these slots, so the bucket now enforces
+  exactly what the document declares. Tightening only one of the two would put
+  them back out of step, which is the defect being closed. Whether an intimate
+  photo should be admin-only rather than merely signed-in is a real question
+  about the tier model, and it is the owner's to answer — it is not something to
+  redefine in passing inside an enforcement fix.
+
+  **The second bug was found by the change, not by the report, and it is the
+  one that would have reached the public wall.** `coverPhoto` was
+  `draft.media[0]?.url`, and media is stored in **capture order** — while
+  `mediaTierFor`'s own comment says a teeth or genital shot can legitimately be
+  first, because slots fill in whatever order the animal tolerates being
+  handled. So an animal photographed genitals-first published that photograph as
+  its cover on `pets/{petId}`, **the public document, which is exactly what the
+  adoption wall renders.** The subcollection got the slot right and the cover
+  field never asked. It is now `coverPhotoFrom()`, which takes the first
+  publishable photo, and it also fixes the `?? null` half — `''` is not null, so
+  the old expression would have yielded an empty `src` rather than no image.
+
+  **The break probe found a coverage gap in the fix, twice, and both were real.**
+  `coverPhotoFrom` has two conditions and they are only *coincidentally*
+  redundant today: an intimate photo currently always carries `url: ''`, so
+  deleting the slot check left every test green. If those photos ever gain a
+  signed URL for rendering, the slot check is the only thing left between one
+  and the wall — so it is now asserted directly, with a url present. Deleting
+  the empty-url check was then uncovered too, and got its own test. **8 of 8
+  breaks now caught by name**, with the instrument validated first against a
+  guaranteed-fatal edit so a zero could not be a false negative.
+
+  **One correction to this file: `node --test` emits TAP here, not the spec
+  reporter.** The 2026-08-26 entry says the opposite and warns that a `not ok`
+  regex never matches. Read off raw output this session: `not ok 134 - a teeth
+  or genital photo is NEVER public…`. Both claims cannot be right, and the
+  transferable rule is the one that survives either way — **read the reporter's
+  actual output before trusting a parser, and validate the probe against a
+  known-failing run.**
+
+  **Residue cleared, and it was larger than the handoff knew.** `petDrafts` held
+  **2**, not 4. The bucket held **12** JPEGs across **three** prefixes — and one
+  prefix, `pets/l4ZH8ude…/`, had **no draft document at all**: the draft was
+  deleted and its photos survived, which is the documented non-throwing
+  best-effort cleanup caught in the act. All 12 carried download tokens. Root
+  collections were enumerated with `listCollections()` rather than checked
+  against a list. Now: **0 bucket objects, 0 petDrafts, 0 pets, 0 areas, 0 in
+  every collection group, 1 user (the real admin), 3 `api_usage_daily` rows** —
+  and no row for 2026-09-03, which independently confirms #32's claim that the
+  two 503s were never billed, because metering only fires on success.
+
+  ⛔ **What is NOT proven, stated plainly.** The rules half is measured end to
+  end. The **rendering** half is not: `PetPhoto` reading a private photo through
+  `getBlob` has typecheck, a clean build and 296 tests behind it, but no browser
+  has run it, because `/admin/intake` sits behind `AdminGate` and that needs a
+  human password. **The first person to open the wizard should confirm the four
+  slot thumbnails still appear** — that is the one claim this session could not
+  earn. Equally unmeasured, and unchanged from the previous session: #31's
+  prompt rewrite and #32's overload retry have still never met a live model.
 ---
 
 ## Next session — start here
