@@ -1183,11 +1183,8 @@ scanned chip resolves to a name and a phone call.
   WITH it.** The honest claim is that the token is never **disclosed** — the app
   never reads it, it is not in Firestore, it never reaches a client — and
   undisclosed is a weaker guarantee than unusable. Corrected in three places
-  rather than left standing. **The residual is open**; closing it means
-  stripping the token after upload, which needs a client-SDK probe first,
-  because a metadata-only write is evaluated against `create, update` and
-  `request.resource` semantics there are the same null-dereference class that
-  made `allow write` deny every delete for three weeks.
+  rather than left standing. **The residual is open** — and see 2026-09-10,
+  which measures how much it actually matters and narrows it considerably.
 
   **What the run DID prove, measured on real objects written by the live UI:**
   teeth and genitals routed to `pets/{petId}/private/`, carrying `url: ''`
@@ -1255,6 +1252,78 @@ scanned chip resolves to a name and a phone call.
 
   Residue cleared and read back: **0 bucket objects, 0 petDrafts, 0 pets, 0
   areas, 0 in every collection group, 1 user, 4 `api_usage_daily` rows.**
+
+- **2026-09-10** — **#35 merged, the rules drift closed, a second admin exists —
+  and the token residual turned out to be much narrower than the entry above
+  claims.** Deployed tag `0031fbf3` equals `git rev-parse master`, and the
+  deploy succeeded on its **first attempt**, which is the third in a row since
+  #34 (⚠️ but see below: that fix is still unexercised).
+
+  **⚠️ THE TOKEN RESIDUAL WIDENS NOTHING, and "undisclosed but usable" was too
+  alarming a way to put it.** The open question was who can actually *use* the
+  auto-minted token. It was reasoned about on 2026-09-04 and measured today.
+  The token lives in object **metadata**, and the metadata endpoint is gated by
+  the same rule as the bytes. Anonymously, on the private prefix:
+
+  ```
+  metadata (no ?alt=media) : 403   <- the token is NOT obtainable
+  bytes    (?alt=media)    : 403
+  bytes    WITH the token  : 200
+  ```
+
+  So the token is a working key that **only someone who already has read access
+  can obtain** — and such a caller can fetch the bytes directly anyway. It is
+  **defence in depth, not an open hole**: an unrevocable key that would matter
+  only if it escaped by some *other* route — a log, a backup, an export, or a
+  future code path that reads metadata and surfaces it. That reverses the
+  cost/benefit: since it widens nothing, shipping an untested change to the
+  upload path — the path every intake depends on — remains the worse trade.
+  **Leave it, and keep the note.**
+
+  Worth noting the control in the same run: the **public** prefix DOES hand its
+  token to an anonymous metadata read (200). Harmless there, because that path
+  is `allow read: if true` and the token grants nothing extra — but it is the
+  measurement that proves the 403 above is the *rule* deciding, not the
+  endpoint being closed to everyone.
+
+  **The rules drift from 2026-09-04 is closed.** `storage.rules` had been
+  deployed from the #35 branch while `master` still carried the older comments,
+  so the live ruleset matched a branch rather than the default branch. With #35
+  merged, a readback confirms **identical, 5265 chars LF-normalised on both
+  sides** — normalised, because the live copy is LF and the local one CRLF, so
+  a naive byte comparison reports drift on this machine forever.
+
+  **There are now TWO admins.** `johana.jp.15.jp@gmail.com` signed up
+  2026-09-10 15:26 GMT and sat unprivileged for about two hours — able to reach
+  `/admin` and be refused, and nothing else. Granted at the owner's explicit
+  instruction, never on my own initiative: the claim is write access to every
+  pet, area and medical record, and this project deliberately keeps it a
+  script-only decision with no self-service path. Verified two ways, the
+  script's own read-back and `--list` enumerating every account and filtering on
+  the claim. **The grant merged rather than replaced** — prior claims were `{}`,
+  so nothing was lost, but that is the property to check, not assume.
+
+  ⚠️ **A fresh grant is invisible to an already-signed-in browser for up to an
+  hour.** If Johana cannot get in, that is almost certainly this rather than a
+  failed write — sign out and back in. `AdminGate` forces a token refresh on
+  mount precisely to paper over it.
+
+  ⚠️ **#34's `timeout-minutes: 3` on the audit step is still UNEXERCISED.**
+  Three deploys have passed since it landed and npm's endpoint was healthy for
+  all three, so the timeout has never fired. It is verified as correct config
+  and a correct diagnosis; it is **not** verified against a live hang. That
+  claim gets earned the next time npm has a bad day, and not before.
+
+  State after six quiet days, root collections enumerated with
+  `listCollections()` rather than checked against a list: **0 pets, 0 areas, 0
+  adoptions, 0 petDrafts, 0 across every collection group, 0 bucket objects, 2
+  users, 4 `api_usage_daily` rows** — no new AI calls since the 2026-09-04 E2E
+  run. All routes 200 on both hosts; auth boundary still 401/405.
+
+  **`pets` is still 0, and access is no longer what stands in the way.** Two
+  people can now enter an animal at `/admin/intake`. What is missing is the
+  shelter's own animal and photograph — and `status` must be **`available`**,
+  not the `shelter` default, for it to reach the wall.
 ---
 
 ## Next session — start here
