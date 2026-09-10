@@ -53,18 +53,31 @@ service firebase.storage {
     // because that call returns a token and no rule can revoke one.
     // See uploadProcessedPhoto() in src/lib/pets-admin.ts.
     //
-    // ⚠️⚠️ KNOWN RESIDUAL, measured in production 2026-09-04: Firebase's UPLOAD
-    // endpoint auto-mints a firebaseStorageDownloadTokens value by itself, so
-    // not calling getDownloadURL is NOT enough to stop a token EXISTING. On a
-    // real private object written by the live wizard: 403 without the token,
-    // 200 WITH it. The token is never read by the app, never written to
-    // Firestore and never reaches a client, so it is undisclosed rather than
-    // published — but undisclosed is a weaker guarantee than unusable.
-    // Closing it means stripping the token after upload; do that only with a
-    // client-SDK probe behind it, because a metadata update is evaluated
-    // against `create, update` below and request.resource semantics on a
-    // metadata-only write are exactly the null-dereference class that made
-    // `allow write` deny every delete for three weeks.
+    // ⚠️ KNOWN RESIDUAL, and 2026-09-10 measured how much it matters.
+    // Firebase's UPLOAD endpoint auto-mints a firebaseStorageDownloadTokens
+    // value by itself, so not calling getDownloadURL does NOT stop a token
+    // EXISTING, and a token bypasses these rules. On a private object:
+    // 403 without it, 200 WITH it.
+    //
+    // But the token lives in object METADATA, and the metadata endpoint is
+    // gated by this same rule. Measured anonymously on the private prefix:
+    //
+    //     metadata (no ?alt=media) : 403   <- the token is NOT obtainable
+    //     bytes    (?alt=media)    : 403
+    //     bytes    with the token  : 200
+    //
+    // So the token is reachable only by someone who already has read access,
+    // and such a caller can fetch the bytes directly. IT WIDENS NOTHING. The
+    // residual is defence in depth, not an open hole: an unrevocable key that
+    // would matter if it ever escaped by some OTHER route — a log, a backup,
+    // an export, or a future code path that reads metadata and surfaces it.
+    //
+    // Closing it means stripping the token after upload, and that is still
+    // gated on a client-SDK probe, because a metadata-only write is evaluated
+    // against `create, update` below and request.resource semantics there are
+    // the null-dereference class that made `allow write` deny every delete for
+    // three weeks. Given it widens nothing, that trade still favours leaving
+    // the upload path alone.
     //
     // Read is `request.auth != null` rather than isAdmin() so the bucket
     // enforces exactly the tier the media document declares — mediaTierFor()
