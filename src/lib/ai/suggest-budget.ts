@@ -259,14 +259,109 @@ export function retryBackoffMsFor(err: unknown): number {
 }
 
 /**
- * Worth trying the WEAKER model instead.
+ * Worth trying the NEXT model down the ladder.
  *
  * Both branches are "degrade rather than fail", which plan §3 requires: an
  * animal arriving at 22:00 must not wait on a quota or on someone else's
  * traffic spike. A quota is spent for the day; an overload has survived every
- * retry we were willing to spend. Flash-Lite is a different pool with 25x the
- * free allowance, so it is very often up when Flash is not.
+ * retry we were willing to spend. Each tier is a different pool — free-tier
+ * quota is counted per model — so a tier below is very often up when the one
+ * above is not.
+ *
+ * ⚠️ A HANG DELIBERATELY DOES NOT ADVANCE THE TIER, and the reason is
+ * arithmetic rather than taste. Decided 2026-09-10 with the three-tier
+ * cascade:
+ *
+ *   - A hang already has a better remedy, and it is already applied: a fresh
+ *     connection to the SAME model. Production data (2026-08-30) shows a hang
+ *     is a hung socket rather than a slow model — the failures sit on the
+ *     abort to the millisecond while healthy calls answer in 4-7s — and there
+ *     is no evidence any of it is model-specific.
+ *   - The budget cannot afford both. A hang consumes the whole 25s
+ *     per-attempt clamp, so two of them exhaust SUGGEST_TOTAL_BUDGET_MS and
+ *     SUGGEST_MIN_RETRY_MS then refuses to start anything else. Advancing the
+ *     tier on a hang would therefore not BUY an extra attempt; it would only
+ *     spend the one remaining attempt on a different model, giving up the
+ *     fresh-connection retry that is the thing actually known to work.
+ *
+ * So: a hang is retried where isRetryableFailure says so, and the ladder is
+ * for failures that a second attempt on the same model cannot fix.
  */
 export function shouldFallBackToWeakerModel(err: unknown): boolean {
   return isQuotaExhaustedFailure(err) || isOverloadedFailure(err);
+}
+
+/**
+ * Walk a model ladder under ONE shared deadline.
+ *
+ * ⚠️ This lives here, not in `intake-suggest.ts`, for one reason: the single
+ * shared deadline is the property that broke on 2026-09-02 and it was
+ * UNTESTABLE while it sat inside a `server-only` module that makes network
+ * calls. A deliberate-break probe reported it uncovered — deleting the shared
+ * deadline left every test green — which is the whole argument for the
+ * `areas.ts`/`areas-admin.ts` split applied one module further in. The
+ * decision is testable; the call that uses it is not.
+ *
+ * What the shared deadline prevents: each tier creating its own full budget,
+ * so N tiers could run to N x SUGGEST_TOTAL_BUDGET_MS. At two tiers that was
+ * 100s against Firebase Hosting's 60s ceiling — an answer built, billed and
+ * discarded. At four tiers it would be 200s.
+ *
+ * @param ladder  models to try, strongest first
+ * @param call    given a model and THE deadline, produce an answer or throw
+ * @param deps    injected clock and logger, so a test can drive both
+ */
+export async function walkModelLadder<T>(
+  ladder: readonly string[],
+  call: (model: string, deadline: number) => Promise<T>,
+  deps: { now?: () => number; warn?: (message: string) => void; describe?: (err: unknown) => string } = {}
+): Promise<T> {
+  const now = deps.now ?? Date.now;
+  const warn = deps.warn ?? console.warn;
+  const describe = deps.describe ?? (() => 'failed');
+
+  if (ladder.length === 0) throw new Error('walkModelLadder: ladder must not be empty');
+
+  // ONE deadline, created once, handed to every tier unchanged.
+  const deadline = now() + SUGGEST_TOTAL_BUDGET_MS;
+
+  let lastErr: unknown;
+  for (let tier = 0; tier < ladder.length; tier++) {
+    const model = ladder[tier]!;
+
+    if (tier > 0) {
+      // Degrade rather than fail, but only while there is time to say
+      // something useful. Starting a tier into 200ms of remaining budget just
+      // replaces one failure with a slower one, and spends a request from that
+      // tier's daily allowance to do it.
+      //
+      // This is also what keeps the ladder honest about HANGS: a hang costs
+      // the full per-attempt clamp, so after two of them nothing below is
+      // reachable and the walk stops here rather than pretending otherwise.
+      const left = deadline - now();
+      if (left < SUGGEST_MIN_RETRY_MS) {
+        warn(
+          `[intake-suggest] only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms; not trying ${model} (tier ${tier + 1}/${ladder.length})`
+        );
+        break;
+      }
+      warn(
+        `[intake-suggest] ${ladder[tier - 1]} ${describe(lastErr)}; falling back to ${model} (tier ${tier + 1}/${ladder.length}) with ${left}ms left`
+      );
+    }
+
+    try {
+      return await call(model, deadline);
+    } catch (err) {
+      lastErr = err;
+      // Only quota and overload move DOWN the ladder. A 400 for a malformed
+      // image or a 401 for a bad key fails identically on every tier, and a
+      // HANG is deliberately not on the list — see shouldFallBackToWeakerModel.
+      if (!shouldFallBackToWeakerModel(err)) throw err;
+    }
+  }
+  // Every tier refused, or the budget ran out part-way down. The LAST error is
+  // thrown, so the caller's message describes the tier that actually gave up
+  // rather than the first one that did.
+  throw lastErr;
 }

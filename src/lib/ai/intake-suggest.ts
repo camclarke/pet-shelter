@@ -4,7 +4,7 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 
 import { google } from './google';
-import { FLASH_LITE_MODEL, FLASH_MODEL, modelKeyFor } from './model-ids';
+import { SUGGEST_MODEL_LADDER, modelKeyFor } from './model-ids';
 import type { PetPhotoSlot } from '../types';
 import { recordAiUsage, type AiProcess } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
@@ -17,7 +17,7 @@ import {
   isRetryableFailure,
   isTimeoutFailure,
   retryBackoffMsFor,
-  shouldFallBackToWeakerModel,
+  walkModelLadder,
 } from './suggest-budget';
 
 /**
@@ -246,37 +246,20 @@ const USER_INSTRUCTION =
   'Observa esta fotografía del animal recién ingresado y completa los campos.';
 
 /**
- * The Flash tier, not Flash-Lite — and the reason is an error, not a preference.
+ * The tier ladder lives in `model-ids.ts` — read its comment for why a
+ * cascade exists at all (quota, not quality and not hangs) and why Flash-Lite
+ * stays last.
  *
- * Measured 2026-08-30 in AI Studio, same prompt and same photographs, on a
- * husky-type dog: a Lite-tier model read the white facial MASK as muzzle
- * greying and called the animal "mature adult to senior, 6-8+ years". A
- * full Flash model with thinking on read the dentition instead and returned
- * "young adult, 1.5-3 years". The Lite run even noted the teeth were clean
- * and then overrode itself with the coat.
- *
- * On a public listing that gap decides whether an animal is passed over, so
- * age is what buys the tier. Breed, colour and coat are comfortable on Lite.
- *
- * ⚠️ gemini-3.7-flash is available on this key and tested well, but it is
- * listed in UNPRICED_BUT_AVAILABLE and the rule recorded there is to add the
- * price row BEFORE swapping. Until an invoice gives a real rate, this stays
- * on the priced model. Switching is one env var, GEMINI_FLASH_MODEL, and no
- * deploy — do it once the row exists.
+ * Flash before Lite is an error, not a preference. Measured 2026-08-30 in AI
+ * Studio, same prompt and same photographs, on a husky-type dog: a Lite-tier
+ * model read the white facial MASK as muzzle greying and called the animal
+ * "mature adult to senior, 6-8+ years". A full Flash model with thinking read
+ * the dentition instead and returned "young adult, 1.5-3 years". The Lite run
+ * even noted the teeth were clean and then overrode itself with the coat. On a
+ * public listing that gap decides whether an animal is passed over, so AGE is
+ * what buys the tier. Breed, colour and coat are comfortable on Lite.
  */
-export const SUGGEST_MODEL = FLASH_MODEL;
-
-/**
- * Used only when the primary is out of daily quota.
- *
- * Free-tier limits on this project, read off its own quota 2026-08-30:
- * Flash models get 20 requests/day, Flash-Lite gets 500. So the strong
- * model runs out first, and falling back to a weaker answer beats failing
- * — an intake must never depend on a suggestion. The degradation is
- * recorded in the modelKey, so a later reader can tell which tier
- * produced a given record.
- */
-export const SUGGEST_FALLBACK_MODEL = FLASH_LITE_MODEL;
+export { SUGGEST_MODEL_LADDER } from './model-ids';
 
 /** One photograph plus the slot it was taken for. */
 export interface SlottedPhoto {
@@ -415,44 +398,18 @@ export async function suggestFromPhoto(
 ): Promise<SuggestResult> {
   if (photos.length === 0) throw new Error('suggestFromPhoto: at least one photo is required');
 
-  const [primary, fallback] = options.models ?? [SUGGEST_MODEL, SUGGEST_FALLBACK_MODEL];
-  if (primary === undefined) throw new Error('suggestFromPhoto: models must not be empty');
+  const ladder = options.models ?? SUGGEST_MODEL_LADDER;
   const proc = options.process ?? 'intake_suggest';
 
-  // ONE deadline for the whole operation, both tiers included. Each
-  // extractWith used to make its own, so a fallback started a fresh full
-  // budget and the pair could run to twice the ceiling. Nothing had tripped it
-  // only because a 429 fails fast; an overload does not.
-  const deadline = Date.now() + SUGGEST_TOTAL_BUDGET_MS;
-
-  try {
-    return await extractWith(primary, photos, deadline, proc);
-  } catch (err) {
-    // A pinned single-model ladder has nowhere to fall back TO, which is what
-    // makes a benchmark measure the model it named.
-    if (fallback === undefined) throw err;
-    if (!shouldFallBackToWeakerModel(err)) throw err;
-
-    // Degrade rather than fail. Plan §3: a gate stricter than the reality of
-    // the shelter gets worked around, and an animal arriving at 22:00 must
-    // not wait on a daily quota or on someone else's traffic spike.
-    //
-    // But only if there is time left to say something useful. Falling back
-    // into 200ms of remaining budget just replaces one failure with a slower
-    // one, and spends a request from the weaker tier's allowance to do it.
-    const left = deadline - Date.now();
-    if (left < SUGGEST_MIN_RETRY_MS) {
-      console.warn(
-        `[intake-suggest] ${primary} ${describeFailure(err)}; only ${left}ms left, not falling back`
-      );
-      throw err;
-    }
-
-    console.warn(
-      `[intake-suggest] ${primary} ${describeFailure(err)}; falling back to ${fallback} with ${left}ms left`
-    );
-    return extractWith(fallback, photos, deadline, proc);
-  }
+  // ⚠️ The ONE shared deadline lives inside walkModelLadder, deliberately.
+  // It was inline here until a deliberate-break probe showed that deleting it
+  // left every test green — the 2026-09-02 defect, uncovered. It is now pure,
+  // injectable and directly asserted. Do not reintroduce a deadline here.
+  return walkModelLadder(
+    ladder,
+    (model, deadline) => extractWith(model, photos, deadline, proc),
+    { describe: describeFailure }
+  );
 }
 
 /** For a log line that has to say what went wrong without a stack. */
