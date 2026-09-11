@@ -595,6 +595,22 @@ textarea {
 :root[data-theme='dark'] .poster__name { color: var(--jade-light); }
 .poster__footer .t-data { margin-top: 10px; }
 
+/* The breed, sitting between the name and the age/sex/size line.
+   Measured at 360px: two lines of this carry the realistic worst case whole
+   and cost 40px on a 499px card. `t.formatBreedLine()` owns the truncation —
+   there is deliberately no clamp here, so a pathological string grows the card
+   rather than being silently cut by a second, invisible mechanism. */
+/* Scoped under .poster__footer to match the specificity of the
+   `.poster__footer .t-data` rule above — at one class this block's margin
+   would simply lose to it and read as a setting that does nothing. */
+.poster__footer .poster__breed {
+  margin-top: 9px;
+  line-height: 1.45;
+  /* Slightly stronger than the .t-data default of 0.62: this is content a
+     stranger decides from, not metadata. */
+  opacity: 0.78;
+}
+
 .poster__cta {
   font-size: 11px;
   font-weight: 700;

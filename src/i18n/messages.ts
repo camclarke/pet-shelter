@@ -105,6 +105,24 @@ export interface Messages {
   /** The uppercase data line under a name: "3 MESES · MACHO · MEDIANO". */
   formatMeta(pet: { ageMonths: number | null; sex: PetSex; size: PetSize }): string;
 
+  /**
+   * The breed, trimmed to what fits on an adoption-wall card.
+   *
+   * ⚠️ Deliberately NOT folded into `formatMeta`. Three of its five call
+   * sites already render `breed` themselves — `{pet.breed} · {t.formatMeta(pet)}`
+   * in the admin dashboard, the re-admission card and the chip-match card — so
+   * adding it there would print the breed twice on each of them.
+   *
+   * Returns `null` when there is nothing worth a line, so the caller omits the
+   * element rather than rendering an empty one.
+   *
+   * On truncation: cuts on a WORD boundary and appends an ellipsis, never
+   * mid-word. "MESTIZA CON RASGOS DE HUSKY SIBE…" reads as a rendering bug;
+   * "MESTIZA CON RASGOS DE HUSKY…" reads as a list that continues. The budget
+   * is measured, not guessed — see the implementation.
+   */
+  formatBreedLine(breed: string): string | null;
+
   /** Short label for the status chip on a poster. */
   statusLabel(status: PetStatus): string;
 
