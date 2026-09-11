@@ -4,6 +4,7 @@ import { useRef, useState, type ChangeEvent } from 'react';
 
 import type { PetPhotoSlot } from '@/lib/types';
 import { PetPhoto } from './PetPhoto';
+import { AnalysisProgress } from './AnalysisProgress';
 
 /**
  * Guided intake capture: four named shots, then ONE analysis.
@@ -235,13 +236,11 @@ export default function GuidedPhotoCapture({
         )}
       </div>
 
-      {analysing && (
-        <p className="auth__notice" role="status">
-          Mirando las fotos. Con varias puede tardar cerca de un minuto.{' '}
-          <strong>No cierres esta pantalla</strong> — las fotos ya se guardaron y
-          quedan aunque el análisis falle.
-        </p>
-      )}
+      {/* Replaces a static "Con varias puede tardar cerca de un minuto", which
+          left someone holding an animal with no way to tell a slow call from a
+          stuck one. See AnalysisProgress for why it shows elapsed time against
+          a known ceiling rather than anything resembling progress. */}
+      {analysing && <AnalysisProgress photoCount={count} />}
     </div>
   );
 }

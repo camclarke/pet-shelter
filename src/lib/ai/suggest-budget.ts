@@ -178,6 +178,60 @@ export function attemptTimeoutMsFor(modelId: string, photoCount = 1): number {
 }
 
 /**
+ * When the FIRST attempt must be over by, counted from the moment the request
+ * was sent. For the waiting UI, and for nothing else.
+ *
+ * ⚠️ Assumes the Flash tier deliberately. The ladder's primary is always
+ * Flash-class, and the browser cannot know which model the server picked — the
+ * ids come from server-only env vars. Assuming Flash gives the LONGER window,
+ * so the UI errs toward saying "still on the first attempt" rather than
+ * announcing a retry that has not started. Claiming too little is the honest
+ * direction when the claim is about someone else's progress.
+ *
+ * This is the only thing about the server's progress that a client can state
+ * as fact, and it is a fact only because `attemptTimeoutMsFor` CLAMPS an
+ * attempt: an attempt cannot run longer than this, so past it there is
+ * genuinely a second one under way — whether that is a same-model retry or the
+ * next tier down.
+ *
+ * ⚠️ `photoCount` is currently INERT on the Flash tier, and that is worth
+ * knowing rather than discovering. Measured: the window is 25000ms at 1, 2, 3,
+ * 4 and 8 photos, because SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH already equals the
+ * affordable share of the budget, so the clamp binds at one photo. The
+ * argument is kept rather than hardcoded because it becomes live again the
+ * moment the budget rises — which it can only do by taking this call off
+ * Firebase Hosting. A hardcoded 25000 would make the waiting UI quietly wrong
+ * on that day.
+ */
+export function firstAttemptEndsAtMs(photoCount: number): number {
+  // Any non-lite id selects the Flash branch; the value is what matters.
+  return attemptTimeoutMsFor('gemini-flash', photoCount);
+}
+
+/**
+ * How much the waiting UI is entitled to say about the server's progress.
+ *
+ * ⚠️ THREE phases and no more, because three is all the facts support. The
+ * suggest call does not stream and reports no stages, so the browser knows
+ * exactly two things: its own elapsed time, and two constants — the clamp on a
+ * single attempt and the budget the whole operation is cut off at.
+ *
+ * `retrying` is an INFERENCE, and a sound one: `attemptTimeoutMsFor` clamps an
+ * attempt, so past that window the first attempt is definitively over and a
+ * second is under way. What it deliberately does NOT claim is WHICH second
+ * attempt — a same-model retry and a fall to the next tier are
+ * indistinguishable from here, and both are honestly "probando otra vez".
+ *
+ * Anything finer would be invented. See AnalysisProgress.tsx.
+ */
+export type AnalysisPhase = 'first' | 'retrying' | 'nearly-up';
+
+export function analysisPhaseFor(elapsedMs: number, photoCount: number): AnalysisPhase {
+  if (elapsedMs >= SUGGEST_TOTAL_BUDGET_MS) return 'nearly-up';
+  return elapsedMs >= firstAttemptEndsAtMs(photoCount) ? 'retrying' : 'first';
+}
+
+/**
  * How long to wait before trying an OVERLOADED provider again.
  *
  * A hang wants a fresh connection immediately — there is nothing to wait for.
