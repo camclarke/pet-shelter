@@ -23,8 +23,8 @@
     "ageMonthsMin": 12,
     "ageMonthsMax": 36,
 
-    "//lifeStage": "One of puppy | young | adult | senior, or null to skip.",
-    "lifeStage": "adult",
+    "//lifeStage": "puppy | young | adult | senior — or an ARRAY of the stages that are all defensible for this animal, which is usually what you want. At 1-3 years 'young' and 'adult' are both honest readings, so demanding one of them measures label preference rather than accuracy. Keep the list to adjacent stages: the misreading worth catching is a young adult scored 'senior' off a white facial mask, and that must still fail.",
+    "lifeStage": ["adult", "young"],
 
     "//resemblesBreeds": "The breeds a knowledgeable person would name. Matched loosely — accent-insensitive substring, either direction — so 'husky' matches 'husky siberiano'. Each entry may be an array of acceptable spellings for the SAME breed.",
     "resemblesBreeds": [

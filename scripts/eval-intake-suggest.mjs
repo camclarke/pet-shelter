@@ -118,6 +118,12 @@ function assertNoLeakage(systemPrompt) {
   for (const b of want.resemblesBreeds ?? []) values.push(...(Array.isArray(b) ? b : [b]));
   if (want.sex) values.push(want.sex === 'female' ? 'hembra' : 'macho', want.sex);
   if (want.lifeStage) values.push(want.lifeStage);
+  // ⚠️ NEGATIVE expectations leak too, and less obviously. Telling the model
+  // "no digas «tipo nórdico»" narrows it toward exactly the family this
+  // animal belongs to, so the visibleType check would start certifying a hint
+  // rather than a reading. A counter-example must name a family the fixture
+  // does NOT expect.
+  values.push(...(want.rejectBreedFamilies ?? []));
   // `subject` is deliberately NOT checked: it is prose for the report header,
   // not an expected value, and leak-checking a whole sentence only invites
   // confusion about what the guard is for.
@@ -201,7 +207,19 @@ function score(raw, review) {
     }
   }
   if (want.lifeStage) {
-    add('life stage', raw.lifeStage === want.lifeStage, `got ${raw.lifeStage}`);
+    // ⚠️ ACCEPTS A SET, and that is not the fixture being softened to fit a
+    // result. The check exists to catch a GROSS misreading — the documented
+    // failure is a Lite-tier model calling a young adult "6-8+ years, senior"
+    // off a white facial mask. Adjacent stages are both defensible at 1-3
+    // years, so demanding exact equality measures which label the model
+    // prefers, not whether it read the animal correctly. `puppy` and `senior`
+    // still fail here, which is the reading that actually matters.
+    const ok = Array.isArray(want.lifeStage) ? want.lifeStage : [want.lifeStage];
+    add(
+      `life stage is one of ${ok.join(' / ')}`,
+      ok.includes(raw.lifeStage),
+      `got ${raw.lifeStage}`,
+    );
   }
 
   // BREED — must NAME breeds, and must still fail toward mestizo.
@@ -223,6 +241,19 @@ function score(raw, review) {
       named.length === 0,
       `returned ${JSON.stringify(named)} — a family is not wrong, but a person ` +
         'scrolling an adoption wall cannot act on it',
+    );
+
+    // The same question of the PROSE field. `resemblesBreeds` is structured
+    // and the wizard composes the card label from it; `visibleType` is the
+    // sentence an admin reads. Both were reaching for a family in every
+    // measured run while the structured field named breeds correctly, so
+    // scoring only the structured one would have declared this fixed.
+    const vt = fold(raw.visibleType ?? '');
+    const reached = families.filter((f) => vt.includes(f));
+    add(
+      'visibleType names a breed rather than only a family',
+      reached.length === 0,
+      `"${raw.visibleType}" reaches for ${JSON.stringify(reached)}`,
     );
   }
   if (want.isLikelyPurebred !== undefined) {
