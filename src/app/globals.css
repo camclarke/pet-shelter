@@ -595,6 +595,22 @@ textarea {
 :root[data-theme='dark'] .poster__name { color: var(--jade-light); }
 .poster__footer .t-data { margin-top: 10px; }
 
+/* The breed, sitting between the name and the age/sex/size line.
+   Measured at 360px: two lines of this carry the realistic worst case whole
+   and cost 40px on a 499px card. `t.formatBreedLine()` owns the truncation —
+   there is deliberately no clamp here, so a pathological string grows the card
+   rather than being silently cut by a second, invisible mechanism. */
+/* Scoped under .poster__footer to match the specificity of the
+   `.poster__footer .t-data` rule above — at one class this block's margin
+   would simply lose to it and read as a setting that does nothing. */
+.poster__footer .poster__breed {
+  margin-top: 9px;
+  line-height: 1.45;
+  /* Slightly stronger than the .t-data default of 0.62: this is content a
+     stranger decides from, not metadata. */
+  opacity: 0.78;
+}
+
 .poster__cta {
   font-size: 11px;
   font-weight: 700;
@@ -1287,6 +1303,62 @@ textarea {
 
 .capture__submit .btn {
   min-height: 52px;
+}
+
+/* ── the waiting state (AnalysisProgress.tsx) ────────────────────────────────
+   ⚠️ The bar is a CLOCK, not a progress bar. It fills with ELAPSED TIME
+   against the 50s budget the server actually gives up at — the call does not
+   stream and reports no stages, so anything that eased toward "done" would be
+   inventing a number. Do not add a keyframe animation here: a bar that moves
+   on its own is exactly the lie this component was written to avoid. */
+.analysing {
+  align-self: stretch;
+  margin-top: var(--space-2);
+  padding: 14px 15px 15px;
+  border: 1px solid var(--line);
+  background: var(--cream-2);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.analysing__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Tabular figures so the seconds do not shuffle the layout each tick. */
+.analysing__clock {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.analysing__track {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.analysing__fill {
+  height: 100%;
+  background: var(--jade);
+  /* Matches the one-second tick, so the fill moves at the rate the underlying
+     number does rather than gliding ahead of it. */
+  transition: width 1s linear;
+}
+:root[data-theme='dark'] .analysing__fill { background: var(--jade-light); }
+
+@media (prefers-reduced-motion: reduce) {
+  .analysing__fill { transition: none; }
+}
+
+.analysing__phase {
+  margin: 0;
 }
 
 @media (max-width: 760px) {

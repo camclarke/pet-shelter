@@ -4,9 +4,14 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 
 import { google } from './google';
-import { FLASH_LITE_MODEL, FLASH_MODEL, modelKeyFor } from './model-ids';
+import { SUGGEST_MODEL_LADDER, modelKeyFor } from './model-ids';
+// The prompt lives in its own module so the unit-test suite can read it —
+// `server-only` throws outside a server context, so a prompt kept here is a
+// prompt whose safety instructions nothing can assert. Re-exported below for
+// callers (and the eval harness) that expect it from this module.
+import { INTAKE_SUGGEST_SYSTEM, SLOT_LABEL, USER_INSTRUCTION } from './intake-prompt';
 import type { PetPhotoSlot } from '../types';
-import { recordAiUsage } from './metered';
+import { recordAiUsage, type AiProcess } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
 import {
   SUGGEST_MAX_ATTEMPTS,
@@ -17,8 +22,33 @@ import {
   isRetryableFailure,
   isTimeoutFailure,
   retryBackoffMsFor,
-  shouldFallBackToWeakerModel,
+  walkModelLadder,
 } from './suggest-budget';
+
+export { INTAKE_SUGGEST_SYSTEM } from './intake-prompt';
+
+/**
+ * The tier ladder lives in `model-ids.ts` — read its comment for why a
+ * cascade exists at all (quota, not quality and not hangs) and why Flash-Lite
+ * stays last.
+ *
+ * Flash before Lite is an error, not a preference. Measured 2026-08-30 in AI
+ * Studio, same prompt and same photographs, on a husky-type dog: a Lite-tier
+ * model read the white facial MASK as muzzle greying and called the animal
+ * "mature adult to senior, 6-8+ years". A full Flash model with thinking read
+ * the dentition instead and returned "young adult, 1.5-3 years". The Lite run
+ * even noted the teeth were clean and then overrode itself with the coat. On a
+ * public listing that gap decides whether an animal is passed over, so AGE is
+ * what buys the tier. Breed, colour and coat are comfortable on Lite.
+ */
+export { SUGGEST_MODEL_LADDER } from './model-ids';
+
+/** One photograph plus the slot it was taken for. */
+export interface SlottedPhoto {
+  slot: PetPhotoSlot;
+  bytes: Uint8Array;
+  mediaType: string;
+}
 
 /**
  * Photo-assisted intake: the model call.
@@ -141,161 +171,36 @@ const SuggestionSchema = z.object({
   notes: z.string().nullable(),
 });
 
-/**
- * Exported so an eval harness imports the SAME prompt production uses. A guard
- * measured against a copy of its prompt measures nothing — playbook §13.
- *
- * ⚠️ Copy edits here have non-local effects. Removing one framing sentence
- * dropped a sibling-stack eval from 11/11 to 9/11, because without it the model
- * padded the gap with invented content. Re-measure after ANY wording change.
- */
-export const INTAKE_SUGGEST_SYSTEM = `
-Eres un asistente veterinario que ayuda a un refugio de animales en Cochabamba,
-Bolivia, a registrar un animal recién ingresado a partir de una fotografía.
-
-Tu tarea es describir ÚNICAMENTE lo que se ve en la imagen, y nada más.
-Todo lo que no puedas ver, no lo sabes. No hay ningún premio por adivinar.
-
-Escribe SIEMPRE en español neutro, tratando de "tú". Nada de voseo ("sacá",
-"poné", "tenés", "elegí") ni de regionalismos: lo que escribas se muestra tal
-cual en el sitio, y lo leen personas de varios países.
-
-RAZA. La enorme mayoría de los animales de este refugio son rescates de calle y
-son mestizos. Pon isLikelyPurebred en true SOLO si el animal muestra la
-conformación distintiva y sin ambigüedad de una raza reconocida. Ante cualquier
-duda, es mestizo. En visibleType describe lo que se ve — por ejemplo "mestizo
-mediano de pelo corto con rasgos de pastor" — sin afirmar una raza. Una raza
-equivocada en un aviso público atrae a la familia equivocada y el animal
-termina devuelto.
-
-Además, en resemblesBreeds pon entre una y tres razas a las que este animal se
-PAREZCA, ordenadas de más a menos parecida — por ejemplo ["pastor alemán",
-"husky siberiano"]. Esto NO afirma que sea de esa raza: describe a qué se
-parece, que es lo que una persona buscando adoptar entiende de un vistazo.
-Usa nombres de raza comunes en español. Si de verdad no se parece a ninguna
-raza reconocible, devuelve una lista vacía — eso también es una respuesta
-válida y es mejor que inventar un parecido.
-
-FOTOS. Vas a recibir entre una y cuatro fotografías, cada una precedida de
-una etiqueta que dice qué es: «frente», «perfil», «dientes» o «genitales».
-Usa cada una para lo que sirve y no para otra cosa:
-
-- La EDAD se estima SÓLO de la foto de dientes. Si no hay foto de dientes,
-  pon ageConfidence en "low" y devuelve un rango honesto o ninguno. El pelo
-  claro alrededor del hocico NO es canas: en muchas razas es la máscara
-  facial y no dice nada de la edad.
-- El SEXO se determina SÓLO de la foto de genitales. Si no hay foto de
-  genitales, pon sex en null, sexFromGenitalPhoto en false y
-  sexConfidence en "low". No lo deduzcas del tamaño ni de la forma del
-  cuerpo: no se ve ahí.
-- En apparentlySterilized pon "yes" sólo si se ve evidencia clara
-  (testículos ausentes, cicatriz de castración). Ante la duda, "unknown".
-- La RAZA, el COLOR y el PELAJE se leen de las fotos de frente y de perfil.
-
-COLOR Y PELAJE. Son dos campos distintos y no los mezcles. En colorPattern
-pon los colores y las marcas visibles — por ejemplo "negro, gris y blanco, con
-máscara facial y pecho blanco". En coatType pon la textura, el largo y la
-densidad — por ejemplo "doble capa, largo y denso, con flecos en las patas".
-El color es lo que escribe alguien que busca a su perro perdido; el pelaje es
-lo que le dice a quien adopta cuánto cepillado le espera.
-
-OBSERVACIONES. En generalObservations describe el porte, la postura y lo que
-llame la atención y no entre en los campos anteriores. NO pongas nada de salud
-acá: para eso está notes, y el veterinario necesita un solo campo que leer.
-
-PESO. Estimá un rango en kilos en weightKgMin y weightKgMax, nunca un número
-único, y sólo si hay algo en la foto que dé escala. Sin escala pon los dos en
-null y weightConfidence en "low": un perro solo en una foto puede pesar 4 kg o
-40 kg. Quien rescata no tiene balanza, así que este número sirve para elegir un
-área y calcular raciones aproximadas, y NUNCA para calcular una dosis.
-
-EDAD. Indicá en ageBasis en qué te basaste. Si se ven los dientes, usalos: en
-cachorros la erupción dentaria sigue un calendario estrecho y es confiable; en
-adultos el desgaste depende de la dieta y de qué mastica el animal, y un perro
-de calle no se desgasta como uno de casa. Devuelve SIEMPRE un rango en
-ageMonthsMin y ageMonthsMax, nunca un número único. Si el rango honesto es más
-ancho que dos años, pon ageConfidence en "low".
-
-TAMAÑO. Solo estimá el tamaño si hay algo en la foto que dé escala — una
-persona, una mano, una puerta, un plato, una reja. Pon hasSizeReference según
-corresponda. Un animal solo, sin referencia, no permite juzgar su tamaño por
-más nítida que sea la foto.
-
-NOMBRES. Sugerí entre 3 y 5 nombres cortos, cálidos y fáciles de llamar en
-español. Nunca un nombre que se burle del animal ni que describa una herida,
-una carencia o un defecto.
-
-NOTAS. En notes señalá lo que una persona debería mirar de cerca: una herida
-visible, delgadez marcada, un problema de piel o de ojos. Describe lo que se
-ve. NO diagnostiques y no sugieras tratamiento.
-
-Este bloque establece qué observar y nada más. Cualquier cosa que no esté
-listada arriba queda fuera: no inventes historia, no supongas el carácter, no
-afirmes si está castrado, vacunado o con chip, y no deduzcas de dónde viene.
-`.trim();
-
-const USER_INSTRUCTION =
-  'Observa esta fotografía del animal recién ingresado y completa los campos.';
-
-/**
- * The Flash tier, not Flash-Lite — and the reason is an error, not a preference.
- *
- * Measured 2026-08-30 in AI Studio, same prompt and same photographs, on a
- * husky-type dog: a Lite-tier model read the white facial MASK as muzzle
- * greying and called the animal "mature adult to senior, 6-8+ years". A
- * full Flash model with thinking on read the dentition instead and returned
- * "young adult, 1.5-3 years". The Lite run even noted the teeth were clean
- * and then overrode itself with the coat.
- *
- * On a public listing that gap decides whether an animal is passed over, so
- * age is what buys the tier. Breed, colour and coat are comfortable on Lite.
- *
- * ⚠️ gemini-3.7-flash is available on this key and tested well, but it is
- * listed in UNPRICED_BUT_AVAILABLE and the rule recorded there is to add the
- * price row BEFORE swapping. Until an invoice gives a real rate, this stays
- * on the priced model. Switching is one env var, GEMINI_FLASH_MODEL, and no
- * deploy — do it once the row exists.
- */
-export const SUGGEST_MODEL = FLASH_MODEL;
-
-/**
- * Used only when the primary is out of daily quota.
- *
- * Free-tier limits on this project, read off its own quota 2026-08-30:
- * Flash models get 20 requests/day, Flash-Lite gets 500. So the strong
- * model runs out first, and falling back to a weaker answer beats failing
- * — an intake must never depend on a suggestion. The degradation is
- * recorded in the modelKey, so a later reader can tell which tier
- * produced a given record.
- */
-export const SUGGEST_FALLBACK_MODEL = FLASH_LITE_MODEL;
-
-/** One photograph plus the slot it was taken for. */
-export interface SlottedPhoto {
-  slot: PetPhotoSlot;
-  bytes: Uint8Array;
-  mediaType: string;
-}
-
-/**
- * The Spanish label each slot is announced with in the prompt. These strings
- * are read by the MODEL, not by a person, but they are Spanish because the
- * whole prompt is — mixing languages in one instruction measurably degrades
- * following, and the prompt is the one place this project does not keep
- * Spanish out of code.
- */
-const SLOT_LABEL: Record<PetPhotoSlot, string> = {
-  front: 'frente',
-  side: 'perfil',
-  teeth: 'dientes',
-  genitals: 'genitales',
-  other: 'otra',
-};
 
 export interface SuggestResult {
   suggestion: RawPhotoSuggestion;
   /** The stable model KEY, for provenance. Never the raw id. */
   modelKey: string;
+}
+
+/**
+ * Knobs the EVAL HARNESS needs and production never touches.
+ *
+ * Both default to production behaviour, so `suggestFromPhoto(photos)` is
+ * unchanged. They exist so `npm run eval:intake` can measure the real thing —
+ * the same prompt, schema, budget and retry policy — rather than a copy of it.
+ * A guard measured against a copy of its prompt measures nothing; playbook §13.
+ */
+export interface SuggestOptions {
+  /**
+   * Pin the model ladder. The harness passes exactly ONE id, which makes a
+   * tier fallback impossible — otherwise a benchmark of model A could quietly
+   * report model B's answer, which is the one result a benchmark must never
+   * produce. Retries still apply, because a retry is part of what is being
+   * measured.
+   */
+  models?: readonly string[];
+  /**
+   * Which budget line this spend belongs to. Defaults to the shelter's own.
+   * The harness passes `intake_suggest_eval` so benchmarking never pollutes
+   * the shelter's usage in `api_usage_daily`.
+   */
+  process?: AiProcess;
 }
 
 /**
@@ -377,41 +282,23 @@ async function withRetry<T>(
  * that is 20 animals a day; one call per photo would be five.
  */
 export async function suggestFromPhoto(
-  photos: readonly SlottedPhoto[]
+  photos: readonly SlottedPhoto[],
+  options: SuggestOptions = {}
 ): Promise<SuggestResult> {
   if (photos.length === 0) throw new Error('suggestFromPhoto: at least one photo is required');
 
-  // ONE deadline for the whole operation, both tiers included. Each
-  // extractWith used to make its own, so a fallback started a fresh full
-  // budget and the pair could run to twice the ceiling. Nothing had tripped it
-  // only because a 429 fails fast; an overload does not.
-  const deadline = Date.now() + SUGGEST_TOTAL_BUDGET_MS;
+  const ladder = options.models ?? SUGGEST_MODEL_LADDER;
+  const proc = options.process ?? 'intake_suggest';
 
-  try {
-    return await extractWith(SUGGEST_MODEL, photos, deadline);
-  } catch (err) {
-    if (!shouldFallBackToWeakerModel(err)) throw err;
-
-    // Degrade rather than fail. Plan §3: a gate stricter than the reality of
-    // the shelter gets worked around, and an animal arriving at 22:00 must
-    // not wait on a daily quota or on someone else's traffic spike.
-    //
-    // But only if there is time left to say something useful. Falling back
-    // into 200ms of remaining budget just replaces one failure with a slower
-    // one, and spends a request from the weaker tier's allowance to do it.
-    const left = deadline - Date.now();
-    if (left < SUGGEST_MIN_RETRY_MS) {
-      console.warn(
-        `[intake-suggest] ${SUGGEST_MODEL} ${describeFailure(err)}; only ${left}ms left, not falling back`
-      );
-      throw err;
-    }
-
-    console.warn(
-      `[intake-suggest] ${SUGGEST_MODEL} ${describeFailure(err)}; falling back to ${SUGGEST_FALLBACK_MODEL} with ${left}ms left`
-    );
-    return extractWith(SUGGEST_FALLBACK_MODEL, photos, deadline);
-  }
+  // ⚠️ The ONE shared deadline lives inside walkModelLadder, deliberately.
+  // It was inline here until a deliberate-break probe showed that deleting it
+  // left every test green — the 2026-09-02 defect, uncovered. It is now pure,
+  // injectable and directly asserted. Do not reintroduce a deadline here.
+  return walkModelLadder(
+    ladder,
+    (model, deadline) => extractWith(model, photos, deadline, proc),
+    { describe: describeFailure }
+  );
 }
 
 /** For a log line that has to say what went wrong without a stack. */
@@ -424,7 +311,8 @@ function describeFailure(err: unknown): string {
 async function extractWith(
   modelId: string,
   photos: readonly SlottedPhoto[],
-  deadline: number
+  deadline: number,
+  proc: AiProcess
 ): Promise<SuggestResult> {
   const perAttemptMs = attemptTimeoutMsFor(modelId, photos.length);
   const { object, usage, providerMetadata } = await withRetry(deadline, perAttemptMs, (budgetMs) =>
@@ -483,7 +371,7 @@ async function extractWith(
   // void, never awaited: metering must not be able to break the thing it
   // measures, and must not add latency to an admin waiting on a form.
   void recordAiUsage({
-    process: 'intake_suggest',
+    process: proc,
     model: modelId,
     usage,
     providerMetadata,

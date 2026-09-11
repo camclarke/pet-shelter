@@ -1,0 +1,41 @@
+{
+  "//": "Ground truth for `npm run eval:intake`. Copy to _e2e/ground-truth.json and fill in from an animal you actually know.",
+  "//WHY_THIS_FILE_IS_NOT_A_PROMPT": "Everything below is the ANSWER KEY. It is never sent to the model, never interpolated into INTAKE_SUGGEST_SYSTEM, and never used to build a hint. Hardcoding any of it into the prompt would make the harness pass for every dog on earth, which is the one failure mode an eval cannot survive. scripts/eval-intake-suggest.mjs asserts this by refusing to run if the prompt contains any expected value.",
+  "//PRIVACY": "_e2e/ is gitignored in full — real animal photographs carry EXIF, and one taken in a foster home carries a volunteer's home address. Only this template is tracked. Do not commit a filled-in copy.",
+
+  "subject": "one-line description for the report header, e.g. 'husky-type female, the 2026-08-30 E2E animal'",
+
+  "photos": {
+    "//": "Slot name -> file, relative to this file's directory. Omit a slot you do not have; the harness scores only what the photos can support. Valid slots: front, side, teeth, genitals.",
+    "front": "front.jpeg",
+    "side": "side.jpg",
+    "teeth": "teeth.jpeg",
+    "genitals": "genitals.jpeg"
+  },
+
+  "expect": {
+    "species": "dog",
+
+    "//sex": "Only meaningful when a genitals photo is supplied. The harness additionally requires sexFromGenitalPhoto to be true — a correct sex GUESSED from body shape is a failure, not a pass, because the guard that matters is where the reading came from.",
+    "sex": "female",
+
+    "//ageMonths": "The honest range for this animal. The harness checks that the model's returned range OVERLAPS this one, not that it matches: a wider honest range is a correct answer, and demanding a point estimate would reward the exact overconfidence decideAge() exists to refuse.",
+    "ageMonthsMin": 12,
+    "ageMonthsMax": 36,
+
+    "//lifeStage": "puppy | young | adult | senior — or an ARRAY of the stages that are all defensible for this animal, which is usually what you want. At 1-3 years 'young' and 'adult' are both honest readings, so demanding one of them measures label preference rather than accuracy. Keep the list to adjacent stages: the misreading worth catching is a young adult scored 'senior' off a white facial mask, and that must still fail.",
+    "lifeStage": ["adult", "young"],
+
+    "//resemblesBreeds": "The breeds a knowledgeable person would name. Matched loosely — accent-insensitive substring, either direction — so 'husky' matches 'husky siberiano'. Each entry may be an array of acceptable spellings for the SAME breed.",
+    "resemblesBreeds": [
+      ["husky siberiano", "husky"],
+      ["alaskan malamute", "malamute"]
+    ],
+
+    "//rejectBreedFamilies": "Answers that name a FAMILY instead of a breed. These are the near-misses worth failing: 'tipo nordico' is not wrong, but it is not what a person scrolling an adoption wall can act on. Listing them here is what makes prompt specificity measurable.",
+    "rejectBreedFamilies": ["tipo nordico", "tipo nórdico", "nordico", "nórdico", "tipo spitz", "spitz", "tipo lobo"],
+
+    "//isLikelyPurebred": "false for a mixed-breed. Breed must fail toward mestizo; a true here on a street rescue is the failure that puts a wrong breed on a public listing.",
+    "isLikelyPurebred": false
+  }
+}

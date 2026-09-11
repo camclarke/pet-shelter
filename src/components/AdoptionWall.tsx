@@ -67,6 +67,13 @@ export async function AdoptionWall({ title, ...filters }: AdoptionWallProps) {
 
 function PetPoster({ pet, index }: { pet: Pet; index: number }) {
   const urgent = pet.status === 'lost';
+  // "mestiza con rasgos de husky siberiano y alaskan malamute" is the single
+  // most adoption-motivating thing this card can say, and until now it was
+  // only visible after a click. The resemblance machinery has existed end to
+  // end since 2026-08-30 — the model returns `resemblesBreeds`, the wizard
+  // composes it through `t.mixedBreedWithTraits` — and it simply never reached
+  // the wall.
+  const breedLine = t.formatBreedLine(pet.breed);
 
   return (
     <Link
@@ -93,6 +100,7 @@ function PetPoster({ pet, index }: { pet: Pet; index: number }) {
       </div>
       <div className="poster__footer">
         <div className="t-name poster__name">{pet.name}</div>
+        {breedLine && <div className="t-data poster__breed">{breedLine}</div>}
         <div className="t-data">{t.formatMeta(pet)}</div>
         <div className="poster__cta">
           Adóptame <span aria-hidden="true">↗</span>

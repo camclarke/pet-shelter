@@ -24,6 +24,38 @@ import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
 
 /**
+ * How much breed copy an adoption-wall card can carry. MEASURED, not guessed.
+ *
+ * Taken at 360px — the width a real device reported, not the 375 an earlier
+ * check used — against this project's own `.t-data` rule (10.5px Instrument
+ * Sans, 0.13em letter-spacing, uppercased by CSS) inside `.poster__footer`:
+ *
+ *     available line width               280.00 px
+ *     line-height                         15.22 px
+ *     characters per line                    36
+ *     "mestiza con rasgos de husky siberiano y alaskan malamute"
+ *       — the real ground truth, 56 ch     2 lines
+ *     longest string still fitting 2 lines   66 ch
+ *     cost of a 2-line breed on a 499px card  +40.4 px
+ *
+ * Two lines rather than one, deliberately. One line is 36 characters, which
+ * cuts "mestiza con rasgos de husky siberiano y alaskan malamute" after the
+ * first breed — and the second resemblance is half of why this line exists at
+ * all. Two lines carry the realistic worst case (three breeds, the cap in
+ * `resemblesBreeds`) whole.
+ *
+ * A longer string than this degrades to a third line rather than breaking the
+ * card: the grid rows are auto-height. That is the reason there is no CSS
+ * clamp as well — one deterministic, testable mechanism beats two, and the
+ * second one would be invisible.
+ *
+ * ⚠️ Re-measure if `.t-data`, `.poster__footer` padding, or the `.wall` grid's
+ * 236px minimum change. The number is a property of that typography, not of
+ * Spanish.
+ */
+const BREED_LINE_MAX_CHARS = 66;
+
+/**
  * Size adjectives, as stems. "grande" is invariant — it already ends in -e and
  * takes no gendered form — so it is handled separately rather than stemmed.
  */
@@ -287,6 +319,32 @@ export const es: Messages = {
     return [this.formatAge(pet.ageMonths), SEX[pet.sex], this.sizeLabel(pet.size, pet.sex)].join(
       ' · ',
     );
+  },
+
+  formatBreedLine(breed) {
+    const text = breed.trim().replace(/\s+/g, ' ');
+    if (text === '') return null;
+    if (text.length <= BREED_LINE_MAX_CHARS) return text;
+
+    // ⚠️ The ellipsis is RENDERED, so it spends one of the measured
+    // characters. Budgeting the kept text at the full limit and then appending
+    // it produces a line one glyph over — which is exactly what the first
+    // version of this did, caught by the test below rather than by reading.
+    const keptBudget = BREED_LINE_MAX_CHARS - 1;
+
+    // Cut on the last word boundary that fits. A space found at index i means
+    // the text before it is i characters long, so searching a window of
+    // `keptBudget + 1` is what lets a word end precisely on the limit.
+    const cut = text.slice(0, keptBudget + 1).lastIndexOf(' ');
+    // A single word longer than the whole budget is not realistic Spanish
+    // breed copy, but it is reachable by typing, so hard-cut rather than
+    // returning an empty line.
+    const kept = cut > 0 ? text.slice(0, cut) : text.slice(0, keptBudget);
+
+    // Drop a dangling connector so the ellipsis does not read as a broken
+    // sentence: "…pastor alemán, husky siberiano y…" should be
+    // "…pastor alemán, husky siberiano…".
+    return `${kept.replace(/[\s,;]*(?:\sy)?[\s,;]*$/u, '')}…`;
   },
 
   statusLabel: (status) => STATUS[status],
