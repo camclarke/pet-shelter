@@ -36,7 +36,7 @@ scanned chip resolves to a name and a phone call.
 | Terraform | ✅ **APPLIED — 40 resources live.** GCS backend in `gs://wawitas-terraform-state`. One known-benign perpetual diff on `cloud_run scaling`, documented in `cloud_run.tf` |
 | **Secret Manager** | ✅ **APPLIED AND BOUND 2026-08-27** — PR #17 (`40b764d`), all three steps run. `gemini-api-key` version 1, enabled, 39 bytes. Cloud Run revision **`00017-qf9`** booted Ready with the `secretKeyRef`. **The first secret this project has ever had.** ⚠️ `gemini_api_key_enabled = true` lives only in gitignored `terraform.tfvars` — see the trap below |
 | **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf`. **All seven actions moved to Node 24 majors 2026-08-23** (PR #10) — the deprecation annotation is gone, measured against a back-to-back run on the old versions |
-| Dependency security | ✅ **0 vulnerabilities** in both the production and dev trees. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
+| Dependency security | ⚠️ **2 vulnerabilities (1 critical, 1 high) as of 2026-09-10** — two newly published `next` criticals (`>=16.0.0 <16.3.3`, one of them unauthenticated RCE in the Image Optimization API this project uses for every pet photo) plus `sharp` `<0.35.4`. Fixes exist; not from any recent change. Was **0 vulnerabilities** in both the production and dev trees. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
 | **Live site** | ✅ **https://wawitas.org**, **https://wawitas.web.app** and the Cloud Run URL — all serving on **every** route including the bare apex, real Spanish HTML, wall reading live Firestore |
 | **Firebase Hosting** | ✅ **DEPLOYED 2026-08-22 — the first release ever.** `sites/wawitas/releases` had been `{}` since the project began, so `wawitas.web.app` 404'd. Cause: `firebase.json`'s hosting block had `rewrites` + `headers` but **no `public`/`source`**, so there was no document root to upload. A rewrite is not a deployable artifact |
@@ -66,6 +66,8 @@ scanned chip resolves to a name and a phone call.
 | Arrival pipeline — model layer | ✅ **Built + tested 2026-08-16.** Statuses, `areas`, `placements`, rules, indexes. **Outbreak trace verified against live Firestore with known data**, not just deployed |
 | **Arrival pipeline — UI (step 5a)** | ✅ **BUILT + PROVEN AGAINST LIVE FIRESTORE AND IN A BROWSER 2026-08-24** — plan §13. `/admin/areas` (occupancy board + area editor) and `/admin/pets/{petId}` (where it is, where it has been, move / clear / release, and the outbreak trace). `src/lib/areas.ts` is pure (34 tests), `src/lib/areas-admin.ts` is the client Firestore layer. **No rules change and no index change were needed** — both were written 2026-08-16 and had simply never had a caller |
 | Veterinary record standards | ✅ **Researched 2026-08-16** — [`veterinary-records-standards.md`](docs/veterinary-records-standards.md). No international EMR standard exists; modelled on the EU passport + WSAVA 2024 |
+| **Intake model cascade** | ✅ **BUILT 2026-09-10** — `SUGGEST_MODEL_LADDER`, four tiers, walked by the pure `walkModelLadder()` under ONE shared deadline. Order is **3.6 → 3.8 → 3.7 → Lite**, and that order is a MEASUREMENT: 3.8 delivered the sex reading 0 of 3 where 3.6 delivered it 2 of 2. Triples the daily Flash allowance, 20 → 60 animals |
+| **Eval harness** | ✅ **BUILT 2026-09-10** — `npm run eval:intake`, over the four `_e2e/` photos. Calls the REAL `suggestFromPhoto`, so it measures production rather than a copy. Refuses to run if the answer key has leaked into the prompt — and it caught one on its first run |
 | **AI foundations (step 8)** | ✅ **MERGED + DEPLOYED 2026-08-26** (PR #15, `ee2e1df`) — `src/lib/ai/`: provider, model ids with the key/id split, a bill-derived `pricing.mjs`, and `recordAiUsage` wired at the FIRST call site. ✅ **A `GEMINI_API_KEY` now exists** in `.env.local` (gitignored, untracked) and all three model ids are **verified live** via `npm run ai:probe`. ⛔ Still **no call has ever gone through the APP path** — `api_usage_daily` is 0 |
 | **Photo-assisted intake** | ✅ **MERGED + DEPLOYED + SERVING 2026-08-26** (PR #15) — but **INERT**: no API key, so `/api/intake/suggest` answers 503 and the manual form runs unchanged. Photo at step 1 → species + age prefilled, breed/size/names offered. Pure policy in `src/lib/intake-suggestion.ts` (38 tests, all break-verified). **`sex` is absent from the schema by construction** |
 | **First API route in the project** | ✅ `/api/intake/suggest`, deployed 2026-08-26. ⚠️ **A new surface class: it sits OUTSIDE `firestore.rules`**, so it verifies the ID token and admin claim itself. Auth boundary proven in production — 401/401/405 |
@@ -1324,6 +1326,301 @@ scanned chip resolves to a name and a phone call.
   people can now enter an animal at `/admin/intake`. What is missing is the
   shelter's own animal and photograph — and `status` must be **`available`**,
   not the `shelter` default, for it to reach the wall.
+
+- **2026-09-10** — **Five merges on `feat/model-cascade-and-breed-visibility`:
+  the wall card finally says what the animal looks like, the intake cascade
+  went from two hardcoded tiers to four, and this project has an EVAL for the
+  first time — which immediately found that the prompt had been handing the
+  model half its own answer key.** Read the eval half first; it is the part
+  that changes how the next model decision gets made.
+
+  **BREED ON THE CARD.** `t.formatMeta()` rendered age · sex · size and omitted
+  breed, so a stranger scrolling `/adopt` never saw *"mestiza con rasgos de
+  husky siberiano y alaskan malamute"* — the single most adoption-motivating
+  thing a card can say — until after they clicked through. The resemblance
+  machinery has existed end to end since 2026-08-30 and simply never reached
+  the poster.
+
+  **Deliberately NOT folded into `formatMeta`.** Three of its five call sites
+  already render `pet.breed` themselves — the admin dashboard, the re-admission
+  card and the chip-match card all print `{breed} · {formatMeta(pet)}` — so
+  adding it there would have printed the breed twice on each. The card got its
+  own `t.formatBreedLine()`.
+
+  **The truncation budget is MEASURED**, at **360px** against this project's
+  own `.t-data` rule inside `.poster__footer`:
+
+  | | |
+  |---|---|
+  | available line width | **280.00 px** |
+  | line-height | 15.22 px |
+  | characters per line | **36** |
+  | the ground truth, 56 ch | **2 lines** |
+  | longest string still fitting 2 lines | **66 ch** |
+  | cost of a 2-line breed on a 499px card | +40.4 px |
+
+  Two lines rather than one, because one line is 36 characters and cuts the
+  ground-truth string after the FIRST breed — and the second resemblance is
+  half of why the line exists. A longer string degrades to a third line rather
+  than breaking the card, which is also why there is no CSS clamp as well: one
+  deterministic, testable mechanism beats two, and the second would be
+  invisible.
+
+  ── **THE EVAL HARNESS, and what it found** ────────────────────────────────
+
+  **`npm run eval:intake`** scores the four `_e2e/` photographs against a known
+  animal. A bare invocation is a DRY RUN that prints what it would spend;
+  `--run` calls the model. One model is ONE request per run, and free-tier
+  quota is per model. `--models cascade` runs the real ladder and reports which
+  tier answered.
+
+  It measures PRODUCTION rather than a copy of it — it calls `suggestFromPhoto`
+  itself, then the same pure `reviewSuggestion` the wizard renders from, so a
+  field the model returned but the UI would withhold does not score as a win.
+  `suggestFromPhoto` gained two options for this, both defaulting to today's
+  behaviour: a **pinned model ladder**, so a tier fallback cannot make a
+  benchmark of model A report model B's answer, and a **metering process**, so
+  eval spend lands under `intake_suggest_eval` and never pollutes the
+  shelter's own usage.
+
+  **⚠️ THE ANSWER KEY LIVES IN A FIXTURE AND THE HARNESS REFUSES TO RUN IF IT
+  FINDS ONE IN THE PROMPT — and on its very first run it refused.** The
+  prompt's worked example for `resemblesBreeds` read
+  `["pastor alemán", "husky siberiano"]`, and the only animal this project has
+  photographs of is husky-type. **The prompt was handing the model half the
+  answer key.** Changed to `["pastor alemán", "labrador"]`: an example is meant
+  to show the SHAPE of an answer, not to suggest its content. An eval whose key
+  has leaked certifies the very thing it was built to catch.
+
+  The guard also reported `"adult"` as leaked, from the Spanish word
+  *"adultos"* in an unrelated sentence. That was the probe — a bare substring
+  test. Word boundaries now, because a guard that cries wolf gets switched off.
+
+  **A NEGATIVE expectation leaks as surely as a positive one.** The
+  name-a-concrete-breed instruction needed counter-examples; telling the model
+  *"no digas «tipo nórdico»"* would narrow it toward exactly the family this
+  animal belongs to, and the `visibleType` check would then certify a hint
+  rather than a reading. The counter-examples are from a different family
+  (*tipo pastor*, *tipo terrier*, *tipo molosoide*), the leak guard now covers
+  `rejectBreedFamilies`, and a test asserts the prompt names none of them.
+
+  ── **THE CASCADE — and why it is 3.6 → 3.8 → 3.7 → Lite** ─────────────────
+
+  `suggestFromPhoto` walked exactly two models in two constants. It now walks
+  ONE ORDERED ARRAY, `SUGGEST_MODEL_LADDER`. The reason is **quota**: free-tier
+  limits are a separate bucket PER MODEL — 20 requests/day each on 3.8, 3.7 and
+  3.6, 500 on Flash-Lite — so three Flash tiers take the shelter from 20
+  animals a day to **60** before it degrades to Lite.
+
+  **The planned order was 3.8 → 3.7 → 3.6. It is not, and the harness is why.**
+  Same four photographs, same prompt:
+
+  | model | successful runs | **sex delivered** | age (basis teeth) |
+  |---|---|---|---|
+  | `gemini-3.6-flash` | 11/11, 11/11 | **2 of 2**, confidence HIGH | 24-48, 12-36 mo |
+  | `gemini-3.8-flash` | 10/11, 8/11, 9/11 | **0 of 3** | 12-36, 18-36, 24-48 mo |
+  | `gemini-3.7-flash` | none — overloaded on all four attempts | — | — |
+
+  **AGE is fine on 3.8**, at least as tight as 3.6's and always from the teeth
+  slot. The documented stop condition for this swap was "3.8 reads age worse",
+  and it does not. What it reads worse is **SEX** — once `female` at `medium`
+  confidence, once `sexFromGenitalPhoto: false`, once `low`. Three different
+  ways of not delivering it, because `decideSex` requires high confidence from
+  the genital slot.
+
+  Sex is not one field among many here: it inflects every Spanish sentence
+  about the animal, and the breed wording is gated behind it (`mixedBreed`
+  takes a REQUIRED sex) — so losing sex also loses the resemblance line the
+  wall card was just built to show. **The asymmetry decides it.** Leading with
+  3.6 costs nothing if 3.8 was merely unlucky: 3.8 is still tier 2 and still
+  contributes its whole daily bucket, so the 20 → 60 gain is unchanged.
+  Leading with 3.8 costs every intake its sex suggestion, silently.
+
+  ⚠️ **n=2-3 per model, ONE animal, during a provider-wide overload.** A reason
+  to order conservatively, not a settled finding. Promoting 3.8 later is one
+  line in `model-ids.ts`.
+
+  **A HANG DOES NOT ADVANCE THE TIER**, decided deliberately. A hang already
+  has a better remedy that is already applied — a fresh connection to the SAME
+  model — and the budget cannot afford both: a hang costs the full 25s clamp,
+  so two spend `SUGGEST_TOTAL_BUDGET_MS` and `SUGGEST_MIN_RETRY_MS` then
+  refuses to start anything else. Advancing on a hang would not BUY an attempt,
+  it would spend the one remaining attempt on a different model and give up the
+  retry that works. **The cascade is a QUOTA strategy.** Three hangs are not
+  made survivable, because past Hosting's 60s ceiling nothing can be delivered.
+
+  **`FLASH_MODEL` deliberately still points at 3.6 and the newer tiers are
+  their own constants.** `FLASH_MODEL` is dictation's extractor A — the
+  highest-consequence path in the system and the one with no eval. Promoting an
+  intake tier must never silently change what reads a dose.
+
+  **Verified live, in one run showing every decision at once:**
+
+  ```
+  attempt 1/2 timed out after 25071ms; retrying in 0ms with 24929ms left
+  gemini-3.6-flash reported overload; falling back to gemini-3.8-flash
+    (tier 2/4) with 21483ms left
+  ok — answered by flash-3.8, 40292ms
+  ```
+
+  A hang retried on the same model; the overload that followed advanced the
+  tier; tier 2 answered; 40s, inside the 50s budget and inside the 60s ceiling.
+  **The `left` figures decrementing 24929 → 21483 ACROSS tiers are the one
+  shared deadline, observed rather than asserted.**
+
+  **⚠️ Gemini was overloaded on ALL THREE Flash tiers simultaneously for most
+  of this session** — 3.6, 3.7 and 3.8 each returned 503 repeatedly. That
+  matters for how the ladder is understood: **overload CORRELATES across Flash
+  tiers**, so the answer to a provider-wide spike is the Lite tier at the
+  bottom, not the Flash tiers in the middle. It is another argument for
+  Flash-Lite staying last and staying.
+
+  ── **PRICING, before any swap** ───────────────────────────────────────────
+
+  `gemini-3.8-flash` and `gemini-3.7-flash` now have rows, and every row
+  carries `source`. `pricingSourceFor()` returns **`'bill' | 'estimate' |
+  'fallback'`**, replacing the `pricedFromTable` boolean on the `[ai-usage]`
+  line — which became misleading the moment a row could be a documented guess,
+  because `true` then read as "we know the price".
+
+  The estimated rates are not a guess at what these models cost. They are the
+  **highest Flash-tier rate this table has bill-derived evidence for**
+  (`gemini-3.5-flash`, $1.5/$9.0), chosen because it CANNOT under-report
+  relative to anything we actually know. A test enforces that property.
+
+  ⚠️ **There will be no invoice to correct them from while the free tier
+  holds**: the AI Studio key belongs to `gen-lang-client-0564433675` with
+  billing disabled, so `wawitas` is never billed for Gemini at all.
+
+  ── **THE PROMPT, measured before and after** ──────────────────────────────
+
+  `resemblesBreeds` was already naming real breeds. **`visibleType` — the
+  sentence an admin actually reads — was reaching for the family in every
+  measured run**: *"mestizo mediano de pelaje denso con rasgos tipo nórdico"*.
+  Scoring only the structured field would have declared this fixed, so the eval
+  gained a check for the PROSE field first and the baseline was re-measured
+  before the prompt was touched.
+
+  | | |
+  |---|---|
+  | before | **11/12** — *"…rasgos tipo nórdico"* |
+  | after | **12/12** — *"…rasgos de husky siberiano"* |
+  | after | 11/12 (life stage; see below) |
+  | after | **12/12** |
+
+  `visibleType` named the breed in **3 of 3** post-change runs, nothing else
+  regressed, the prompt grew 2.5% and cost was flat.
+
+  **The one post-change failure was the FIXTURE, not the model**: `life stage`
+  returned "young" against a key demanding "adult", on an animal the same run
+  aged at 12-36 months. Adjacent stages are both defensible at 1-3 years, so
+  exact equality measures which label a model prefers rather than whether it
+  read the animal. `lifeStage` now accepts a set, bounded to adjacent stages —
+  `puppy` and `senior` still fail, which is the reading that matters, because
+  the documented misreading is a young adult scored "senior" off a facial mask.
+
+  **No guard was loosened, and that is now ENFORCEABLE.** The prompt moved to
+  **`src/lib/ai/intake-prompt.ts`** — `intake-suggest.ts` imports `server-only`,
+  which throws outside a server context, so nothing in the test suite could
+  read the prompt, and **a prompt nothing can read is a prompt whose safety
+  instructions nothing can assert.** 17 tests now pin them: breed fails toward
+  mestizo, a resemblance is not a claim, sex comes from the genital photo or
+  not at all, a facial mask is not grey hair, weight is barred from dosing, the
+  closing fence is intact.
+
+  ⚠️ **Those tests catch DELETIONS, not degradations.** A green run does not
+  mean the prompt still works; only `npm run eval:intake -- --run` does.
+
+  ── **AN HONEST WAITING CLOCK** ────────────────────────────────────────────
+
+  The analyse step showed a static "ANALIZANDO…" for 10-50s. It now shows
+  elapsed time against the 50s budget, plus a coarse phase.
+
+  **⚠️ It is a CLOCK, not a progress bar, and the distinction is the whole
+  design.** `/api/intake/suggest` does not stream and reports no stages, so
+  anything easing toward "done" would be inventing a number — and the first
+  time it sat at 90% and then failed, the person holding the animal would stop
+  believing the screen. Verified at 360px that the fill has
+  **`animation-name: none`**: it cannot advance on its own.
+
+  Deliberately NOT shown: which model, which tier, or how many attempts remain.
+  The retry and the tier walk both happen inside ONE HTTP request, so the
+  browser cannot know any of it. *"El primer intento no respondió"* is true
+  whether the server is retrying the same model or has fallen to the next tier,
+  which is exactly why that is the wording.
+
+  ── **What the break probe found, every time** ─────────────────────────────
+
+  Five probes, 39 deliberate breaks, **39 caught by name**, each with a control
+  validated first. Four of the breaks exposed a test that was wrong rather than
+  code that was:
+
+  1. **A control that was not guaranteed-fatal.** The first one broke
+     `formatAge`'s `< 12` branch, which no test exercises, so it reported a
+     false negative before any real break ran. That is the reason the probe
+     carries a control at all.
+  2. **A test for the WORD `visibletype` rather than the sentence.** That word
+     appears throughout the prompt, so the test passed with the instruction
+     deleted.
+  3. **An OR across two escape-hatch sentences** that answer different
+     questions, which let either be removed silently.
+  4. **`>=` where the two sides are always equal.** A test claiming "the
+     attempt window grows with photo count" was vacuously true — measured, the
+     Flash window is **25000ms at 1, 2, 3, 4 and 8 photos**, because
+     `SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH` already equals the affordable share of
+     the budget and the clamp binds at ONE photo. `photoCount` is therefore
+     inert on that tier today; it is kept rather than hardcoded because it goes
+     live again the moment the budget can rise, which can only happen by taking
+     this call off Hosting.
+
+  **And the most valuable one: the ONE SHARED DEADLINE was UNTESTED.** Deleting
+  it left every test green. That is the 2026-09-02 defect — a deadline per tier
+  lets N tiers run to N × the budget, which at two tiers was 100s against a 60s
+  ceiling and cost a real intake, and at four tiers would be 200s. It was
+  untestable because the loop sat inside a `server-only` module full of network
+  calls. The walk moved to `suggest-budget.ts` as **`walkModelLadder()`**, pure,
+  with an injected clock — the same `areas.ts`/`areas-admin.ts` split one module
+  further in. Every tier receiving an identical deadline is now asserted
+  directly.
+
+  ── **Smaller things** ─────────────────────────────────────────────────────
+
+  - **A shell heredoc left `pricing.test.ts` with MIXED line endings** (133
+    CRLF + 64 lone LF). Eighth recorded recurrence. Worth recording precisely:
+    **the editor tools handle this repo's CRLF correctly and preserve it; the
+    shell does not.** `cat -A` under Git Bash still does not show `^M`, so
+    endings must be counted in Node.
+  - **`node --test` emits TAP here** — `not ok N - name` — confirming the
+    2026-09-03 correction and not the 2026-08-26 entry's claim of the spec
+    reporter.
+  - **`server-only` can be neutralised for a script** with
+    `node --conditions=react-server`, which resolves it to the package's empty
+    module. That is what lets the eval harness call the real production path.
+  - Credentials were correct on arrival: `gcloud` on
+    `israel.rocha.clarke@gmail.com` / `wawitas`, and **ADC verified at
+    `oauth2/v3/userinfo`**, never at the `quota_project_id` label.
+
+  ── **⚠️ TWO THINGS FOR THE NEXT SESSION** ─────────────────────────────────
+
+  1. **`npm audit` is no longer 0.** It reports **2 vulnerabilities (1
+     critical, 1 high)** in BOTH trees, and they are NOT from this branch —
+     `package-lock.json` is untouched. Two newly published criticals against
+     `next` (`>=16.0.0 <16.3.3`): GHSA-p293-qw3h-jr36, unauthenticated RCE on
+     windows-hosted servers, and **GHSA-2xp9-vwfh-vxw4, unauthenticated RCE in
+     the Image Optimization API** — which this project uses via `next/image`
+     for every pet photo on the wall. Plus `sharp` `<0.35.4`, high,
+     GHSA-rgj7-g3m4-5g8c. Fixes exist for both. **`wawitas.org` is live.**
+  2. **A production-tagged `intake_suggest` row exists for 2026-09-11 that this
+     session did not create** — 1 call on `gemini-3.6-flash`, 5686 input
+     tokens, the same four-photo shape. Someone ran the deployed wizard. Not
+     acted on, only noted.
+
+  Verified at the end: **357 tests** (307 before this branch), typecheck clean,
+  build clean. Firestore unchanged where it matters — **0 pets, 0 areas, 0
+  adoptions**, 1 pre-existing blank `petDraft`, 2 users. The only writes this
+  session made are two `api_usage_daily` rows tagged `intake_suggest_eval`: 9
+  successful eval calls, **$0.29 total**, cleanly separated from the shelter's
+  own usage. **No pet, draft or photo was created.**
 ---
 
 ## Next session — start here
@@ -1334,6 +1631,43 @@ scanned chip resolves to a name and a phone call.
 > does NOT rewrite a workflow trigger, so `branches: [main]` would have gone on
 > matching nothing and **every push would have stopped deploying, silently**.
 > Log entries below that say `main` were accurate when they were written.
+
+### ⚠️ Read these three first — 2026-09-10
+
+**1. `npm audit` is no longer 0, and one of them touches the live site.**
+Two newly published **criticals** against `next` (`>=16.0.0 <16.3.3`):
+GHSA-p293-qw3h-jr36 (unauthenticated RCE on windows-hosted servers) and
+**GHSA-2xp9-vwfh-vxw4 (unauthenticated RCE in the Image Optimization API)** —
+which this project uses via `next/image` for every pet photo on the wall.
+Plus `sharp` `<0.35.4`, high. Fixes exist for both; `package-lock.json` was
+untouched by recent work, so these are advisories catching up with a pinned
+version rather than a regression. **`wawitas.org` is live.**
+
+**2. There is an EVAL now, and model decisions go through it.**
+`npm run eval:intake` (dry run) / `-- --run` (spends 1 free-tier request per
+model). It calls the REAL `suggestFromPhoto`, so it measures production rather
+than a copy, and it **refuses to run if the answer key has leaked into the
+prompt** — which it caught on its first run, with the prompt naming one of the
+two breeds the test animal actually is. The key lives in `_e2e/ground-truth.json`
+(gitignored with the photos; `_e2e/EXAMPLE-ground-truth.json` is the template).
+
+⚠️ **The prompt tests catch DELETIONS, not degradations.** A green `npm test`
+does not mean the prompt still works. After ANY wording change in
+`src/lib/ai/intake-prompt.ts`, run the eval.
+
+**3. The intake cascade is four tiers, and its ORDER is a measurement.**
+`SUGGEST_MODEL_LADDER` = **3.6 → 3.8 → 3.7 → Lite**, NOT the version order.
+On the same four photographs `gemini-3.8-flash` delivered the sex reading
+**0 of 3** where `gemini-3.6-flash` delivered it **2 of 2**; age was fine on
+both. Sex gates the breed wording, which is what the new wall card shows, so
+leading with 3.8 would silently cost every intake its sex suggestion. n=2-3 on
+one animal during a provider-wide overload — re-run the harness on a calm day
+before promoting 3.8, and it is one line if the evidence changes.
+
+⚠️ `FLASH_MODEL` still points at 3.6 **because it is also dictation's
+extractor A** — the highest-consequence path in the system, and the one with
+no eval. Never promote an intake tier by moving that constant.
+
 
 
 **Last session: 2026-08-27. PR #16 is MERGED, DEPLOYED, and VERIFIED SERVING
