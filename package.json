@@ -15,11 +15,13 @@
     "//seed:pet": "Publish one pet: validates the document, strips EXIF from the photo, uploads it, and DERIVES coverPhoto from the upload. See scripts/seed-pet.mjs. Usage: npm run seed:pet -- seed/luna.json",
     "seed:pet": "node scripts/seed-pet.mjs",
     "//test": "node --test globs do not work on Node 20, so every test file is named explicitly. Revisit when this machine moves to Node 22.",
-    "test": "node --test --import tsx src/lib/__tests__/microchip.test.ts src/lib/__tests__/placements.test.ts src/lib/__tests__/arrival.test.ts src/lib/__tests__/intake.test.ts src/lib/__tests__/readmission.test.ts src/lib/__tests__/areas.test.ts src/lib/__tests__/intake-suggestion.test.ts src/lib/__tests__/pricing.test.ts src/lib/__tests__/dictation.test.ts src/lib/__tests__/medical.test.ts src/lib/__tests__/suggest-budget.test.ts src/lib/__tests__/intake-suggest-client.test.ts",
+    "test": "node --test --import tsx src/lib/__tests__/microchip.test.ts src/lib/__tests__/placements.test.ts src/lib/__tests__/arrival.test.ts src/lib/__tests__/intake.test.ts src/lib/__tests__/readmission.test.ts src/lib/__tests__/areas.test.ts src/lib/__tests__/intake-suggestion.test.ts src/lib/__tests__/pricing.test.ts src/lib/__tests__/dictation.test.ts src/lib/__tests__/medical.test.ts src/lib/__tests__/suggest-budget.test.ts src/lib/__tests__/intake-suggest-client.test.ts src/lib/__tests__/i18n-es.test.ts src/lib/__tests__/model-ladder.test.ts src/lib/__tests__/intake-prompt.test.ts",
     "//grant:admin": "Grant/revoke the admin custom auth claim, the thing firestore.rules and storage.rules gate every write on. Needs GOOGLE_CLOUD_PROJECT set. Usage: npm run grant:admin -- someone@example.com  |  -- --list",
     "grant:admin": "node scripts/grant-admin.mjs",
   "//ai:probe": "Verify the Gemini setup: is there a key, does it work, and do the model IDs in src/lib/ai/model-ids.ts actually exist for that key? Those IDs came from a SIBLING project and have never been checked here. Never prints the key. Usage: npm run ai:probe  |  -- --call",
-  "ai:probe": "node scripts/ai-probe.mjs"
+  "ai:probe": "node scripts/ai-probe.mjs",
+  "//eval:intake": "Score photo-assisted intake against a known animal in _e2e/. Calls the REAL suggestFromPhoto, so it measures production rather than a copy of it. Bare invocation is a DRY RUN that prints what it would spend; --run actually calls the model at 1 free-tier request per model. --conditions=react-server is what lets the `server-only` import resolve to a no-op outside Next; without it the import throws. Usage: npm run eval:intake  |  -- --run  |  -- --run --models a,b",
+  "eval:intake": "node --import tsx --conditions=react-server --env-file-if-exists=.env.local scripts/eval-intake-suggest.mjs"
   },
   "engines": {
     "node": ">=20.9.0"

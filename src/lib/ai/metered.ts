@@ -2,7 +2,7 @@ import 'server-only';
 
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '../firebase-admin';
-import { countGroundedQueries, estimateCostUsd, hasPricingRow } from './pricing.mjs';
+import { countGroundedQueries, estimateCostUsd, pricingSourceFor } from './pricing.mjs';
 
 /**
  * The one function every AI call site in this project funnels through.
@@ -45,6 +45,20 @@ export const PROCESS_LABELS = {
   intake_suggest: 'Sugerencias de ingreso',
   dictation_transcribe: 'Transcripción de consulta',
   dictation_extract: 'Extracción de receta',
+  /**
+   * `npm run eval:intake`, kept SEPARATE from `intake_suggest` on purpose.
+   *
+   * The eval harness runs the real production path against real photographs
+   * and spends real free-tier requests — on the Flash tier that is 20 a day,
+   * shared with the shelter. Metering it under the same key would mix
+   * benchmarking into the shelter's own usage, and the first question anyone
+   * asks a cost dashboard is "who spent this".
+   *
+   * It is metered rather than exempted for the reason in the block above: the
+   * spend you leave unmetered because it is obviously small is the spend that
+   * surprises you.
+   */
+  intake_suggest_eval: 'Evaluación de sugerencias (banco de pruebas)',
 } as const;
 
 export type AiProcess = keyof typeof PROCESS_LABELS;
@@ -111,10 +125,14 @@ export async function recordAiUsage({
       reasoningTokens,
       groundingRequests: grounding,
       estCostUsd,
-      // Surfaces the over-report described in pricing.mjs: an unlisted model is
-      // costed at Flash rates, so the dashboard is wrong in a specific,
-      // knowable direction rather than mysteriously.
-      pricedFromTable: hasPricingRow(model),
+      // Where estCostUsd came from: 'bill', 'estimate' or 'fallback'.
+      //
+      // ⚠️ Replaces the old `pricedFromTable` boolean, which became misleading
+      // the moment a row could be a documented guess — `true` then read as "we
+      // know the price" for a number nobody had ever seen on an invoice.
+      // 'estimate' and 'fallback' both mean the figure is a hypothesis; they
+      // differ only in whether someone chose it deliberately. See pricing.mjs.
+      pricingSource: pricingSourceFor(model),
     };
 
     // Emitted synchronously and BEFORE the await, so the detail survives even if
