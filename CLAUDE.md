@@ -36,7 +36,7 @@ scanned chip resolves to a name and a phone call.
 | Terraform | ✅ **APPLIED — 40 resources live.** GCS backend in `gs://wawitas-terraform-state`. One known-benign perpetual diff on `cloud_run scaling`, documented in `cloud_run.tf` |
 | **Secret Manager** | ✅ **APPLIED AND BOUND 2026-08-27** — PR #17 (`40b764d`), all three steps run. `gemini-api-key` version 1, enabled, 39 bytes. Cloud Run revision **`00017-qf9`** booted Ready with the `secretKeyRef`. **The first secret this project has ever had.** ⚠️ `gemini_api_key_enabled = true` lives only in gitignored `terraform.tfvars` — see the trap below |
 | **CI/CD** | ✅ **GitHub Actions, applied 2026-08-12.** Keyless via Workload Identity Federation — no service-account key exists. `.github/workflows/{ci,deploy}.yml`, identity in `terraform/cicd.tf`. **All seven actions moved to Node 24 majors 2026-08-23** (PR #10) — the deprecation annotation is gone, measured against a back-to-back run on the old versions |
-| Dependency security | ⚠️ **2 vulnerabilities (1 critical, 1 high) as of 2026-09-10** — two newly published `next` criticals (`>=16.0.0 <16.3.3`, one of them unauthenticated RCE in the Image Optimization API this project uses for every pet photo) plus `sharp` `<0.35.4`. Fixes exist; not from any recent change. Was **0 vulnerabilities** in both the production and dev trees. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
+| Dependency security | ✅ **Back to 0 vulnerabilities in both trees, 2026-09-11** — the two `next` criticals and the `sharp` high are patched: **`next` 16.2.12 → 16.3.5**, **`sharp` override `^0.35.3` → `^0.35.4`**. Neither came from a code change; `package-lock.json` was byte-identical across branches. Two independent checks: `npm audit` in CI on every push, and **Dependabot alerts + automated security updates**, enabled 2026-08-12 |
 | GCP playbook | ✅ [`docs/gcp-lessons-from-trustcert.md`](docs/gcp-lessons-from-trustcert.md) — bootstrap order, ownership split, IAM, secrets, CI, and the incident catalogue from a live sibling stack |
 | **Live site** | ✅ **https://wawitas.org**, **https://wawitas.web.app** and the Cloud Run URL — all serving on **every** route including the bare apex, real Spanish HTML, wall reading live Firestore |
 | **Firebase Hosting** | ✅ **DEPLOYED 2026-08-22 — the first release ever.** `sites/wawitas/releases` had been `{}` since the project began, so `wawitas.web.app` 404'd. Cause: `firebase.json`'s hosting block had `rewrites` + `headers` but **no `public`/`source`**, so there was no document root to upload. A rewrite is not a deployable artifact |
@@ -1621,6 +1621,86 @@ scanned chip resolves to a name and a phone call.
   session made are two `api_usage_daily` rows tagged `intake_suggest_eval`: 9
   successful eval calls, **$0.29 total**, cleanly separated from the shelter's
   own usage. **No pet, draft or photo was created.**
+
+- **2026-09-11** — **`npm audit` went from 0 to 2 without a single line of this
+  repo changing, and one of the two is reachable from the adoption wall.**
+  Patched: `next` 16.2.12 → **16.3.5**, `sharp` override `^0.35.3` →
+  **`^0.35.4`**, both trees back to **0**.
+
+  **The standing invariant broke by the clock, not by a commit**, and that was
+  confirmed rather than assumed: `package-lock.json` was **byte-identical**
+  between `master` and the then-unmerged cascade branch, so no recent work
+  moved a dependency. This is precisely the case the 2026-08-12 entry argued
+  the CI audit step exists for — an advisory published during a quiet week —
+  except it was caught by reading rather than by a push.
+
+  | | |
+  |---|---|
+  | GHSA-p293-qw3h-jr36 | **critical** — unauthenticated RCE, windows-hosted servers |
+  | GHSA-2xp9-vwfh-vxw4 | **critical** — unauthenticated RCE in the **Image Optimization API, when AVIF is used** |
+  | GHSA-rgj7-g3m4-5g8c | high — `sharp` `<0.35.4`, libvips |
+
+  **⚠️ The second was not theoretical here, and the reason is a decision this
+  project made on purpose.** `next.config.ts` sets
+  `formats: ['image/avif', 'image/webp']` — AVIF **first**, with a comment
+  explaining why: the audience browses on mid-range Android over mobile data
+  and photographs are ~90% of the site's weight. Every pet photo on the wall
+  goes through `next/image`, `remotePatterns` admits
+  `firebasestorage.googleapis.com`, and **wawitas.org is live**. The
+  performance choice and the exposure are the same three lines of config.
+
+  **16.3.5 rather than the minimum 16.3.3**, because it is the newest release
+  on the patched line and **still declares `node >=20.9.0`** — checked against
+  the registry rather than assumed, since this machine is on 20.20.2 and a
+  raised engine floor would have broken local dev while CI on `node:22` stayed
+  green. `^16.2.12` already admitted 16.3.5; **raising the declared floor is
+  the point**, because the caret alone would let a fresh resolve land back
+  under the advisory.
+
+  **The stale-override hazard this file warns about turned up INVERTED.** The
+  2026-08-12 entry cautions that a Dependabot PR bumping a direct dependency
+  can leave a stale override behind. What happened is the reverse: **`next`
+  16.3.5 now declares `sharp: ^0.35.4` itself**, so the override no longer
+  decides the resolution. It is **kept** as an explicit floor — that is the job
+  it was added for, and dropping it would let a future `next` that loosens its
+  range pull a vulnerable `sharp` back in. The other three overrides were
+  audited in the same pass and are all still load-bearing: `next` pins
+  `postcss` at exactly `8.5.23`, and `gaxios` / `google-gax` / `teeny-request`
+  all declare `uuid ^9` against an override of `^11.1.1`.
+
+  **Two things were measured rather than read off a build table.** (1) **Cache
+  headers, from a real `next start`** — all nine static routes still answer
+  `s-maxage=300, stale-while-revalidate=31535700`. A minor Next bump silently
+  changing that would have re-poisoned the Hosting edge for a year, which is
+  the PR #7 defect, and the build table's `Revalidate 5m` column is a
+  different claim. (2) **The image allowlist still enforces on 16.3.5**, and
+  the control is what makes the result mean anything: a disallowed host is
+  refused **400 by Next**, while `firebasestorage.googleapis.com` is
+  **admitted** and answers **403 from Storage upstream**. A bare 400 alone
+  could not distinguish "the allowlist works" from "the optimizer is broken
+  for everything".
+
+  The lock diff was enumerated rather than eyeballed and is tightly scoped:
+  `next` plus its `@next/swc-*` and `env` platform packages, `sharp` plus its
+  `@img/*` and libvips platform packages, and `@swc/helpers`. **No drift into
+  `firebase`, `react` or the AI SDK.**
+
+  **One correction to this file's own numbers:** the 2026-09-10 entry records
+  the pre-cascade test baseline as 307. It is **296** — measured on `master`
+  before the merge. 296 plus the 61 in the cascade's three new files is
+  exactly its 357, so the branch total was right and the baseline was not.
+
+  ⚠️ **`master` moved under this work mid-session:** PR #39 merged the cascade
+  branch while the fix was being built, so the security commit was rebased from
+  `f0459a1` onto `9e78eb6` and re-verified on the combined tree rather than on
+  the tree it was written against. Worth the habit — **a green run on the old
+  base is not a green run on what ships.**
+
+  Verified after the rebase: **`npm audit` 0 and `npm audit --omit=dev` 0**,
+  run separately as this file's convention requires; typecheck clean;
+  **357/357** tests; clean build after `rm -rf .next`, every static route
+  keeping `Revalidate 5m`. **No pet, draft, photo or Firestore write of any
+  kind was created** — every check was local or read-only.
 ---
 
 ## Next session — start here
@@ -1632,16 +1712,20 @@ scanned chip resolves to a name and a phone call.
 > matching nothing and **every push would have stopped deploying, silently**.
 > Log entries below that say `main` were accurate when they were written.
 
-### ⚠️ Read these three first — 2026-09-10
+### ⚠️ Read these three first — 2026-09-10, item 1 resolved 2026-09-11
 
-**1. `npm audit` is no longer 0, and one of them touches the live site.**
-Two newly published **criticals** against `next` (`>=16.0.0 <16.3.3`):
+**1. ✅ RESOLVED 2026-09-11 — the two `next` criticals and the `sharp` high are
+patched.** `next` 16.2.12 → **16.3.5**, `sharp` override `^0.35.3` → **`^0.35.4`**;
+`npm audit` and `npm audit --omit=dev` both report **0**. Kept here because the
+shape recurs: **the invariant broke by the clock, not by a commit** —
+`package-lock.json` was byte-identical across branches, so these were newly
+published advisories catching up with already-pinned versions.
 GHSA-p293-qw3h-jr36 (unauthenticated RCE on windows-hosted servers) and
-**GHSA-2xp9-vwfh-vxw4 (unauthenticated RCE in the Image Optimization API)** —
-which this project uses via `next/image` for every pet photo on the wall.
-Plus `sharp` `<0.35.4`, high. Fixes exist for both; `package-lock.json` was
-untouched by recent work, so these are advisories catching up with a pinned
-version rather than a regression. **`wawitas.org` is live.**
+**GHSA-2xp9-vwfh-vxw4 (unauthenticated RCE in the Image Optimization API when
+AVIF is used)** — and that second one was **not theoretical here**, because
+`next.config.ts` puts AVIF first and every pet photo on the wall goes through
+`next/image`. Plus `sharp` `<0.35.4` (libvips). See the 2026-09-11 log entry
+for what was measured rather than assumed.
 
 **2. There is an EVAL now, and model decisions go through it.**
 `npm run eval:intake` (dry run) / `-- --run` (spends 1 free-tier request per
