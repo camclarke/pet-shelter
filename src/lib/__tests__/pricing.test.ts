@@ -5,10 +5,13 @@ import {
   FALLBACK_PRICING,
   GROUNDING_USD_PER_REQUEST,
   MODEL_PRICING,
+  UNPRICED_BUT_AVAILABLE,
   countGroundedQueries,
   estimateCostUsd,
   hasPricingRow,
+  pricingSourceFor,
 } from '../ai/pricing.mjs';
+import { FLASH_MODEL } from '../ai/model-ids';
 
 const FLASH = 'gemini-3.6-flash';
 
@@ -126,5 +129,69 @@ test('omitting reasoningTokens still costs the visible output correctly', () => 
   assert.equal(
     estimateCostUsd({ model: FLASH, inputTokens: 10, outputTokens: 20 }),
     estimateCostUsd({ model: FLASH, inputTokens: 10, outputTokens: 20, reasoningTokens: 0 })
+  );
+});
+
+// ─── pricing provenance ──────────────────────────────────────────────────────
+// Added 2026-09-10 with the three-tier Flash cascade. A row can now be a
+// documented ESTIMATE rather than bill-derived, so "has a row" and "we know the
+// price" stopped being the same claim.
+
+test('pricingSourceFor distinguishes bill, estimate and fallback', () => {
+  assert.equal(pricingSourceFor('gemini-3.6-flash'), 'bill');
+  assert.equal(pricingSourceFor('gemini-3.8-flash'), 'estimate');
+  assert.equal(pricingSourceFor('gemini-9.9-does-not-exist'), 'fallback');
+});
+
+test('an ESTIMATE can never under-report against the fallback it replaced', () => {
+  // The safety property the estimated rows are chosen for. An estimate that
+  // costs LESS than the Flash fallback would make a migration look cheaper
+  // than it is on the very dashboard used to confirm it — the shape of the
+  // sibling stack's 9x under-report.
+  for (const [model, rate] of Object.entries(MODEL_PRICING)) {
+    if (rate.source !== 'estimate') continue;
+    assert.ok(
+      rate.inputPer1M >= FALLBACK_PRICING.inputPer1M,
+      `${model} input rate ${rate.inputPer1M} is BELOW the fallback ${FALLBACK_PRICING.inputPer1M}`,
+    );
+    assert.ok(
+      rate.outputPer1M >= FALLBACK_PRICING.outputPer1M,
+      `${model} output rate ${rate.outputPer1M} is BELOW the fallback ${FALLBACK_PRICING.outputPer1M}`,
+    );
+  }
+});
+
+test('every row declares where its numbers came from', () => {
+  // A row with no `source` would silently read as 'fallback' through
+  // pricingSourceFor, i.e. as though it had no row at all.
+  for (const [model, rate] of Object.entries(MODEL_PRICING)) {
+    assert.ok(
+      rate.source === 'bill' || rate.source === 'estimate',
+      `${model} has no pricing source`,
+    );
+  }
+});
+
+test('a model cannot be both priced and listed as unpriced', () => {
+  // The two lists contradicting each other is how gemini-3.7-flash would have
+  // ended up costed from a row while the table still advertised it as having
+  // none.
+  for (const model of UNPRICED_BUT_AVAILABLE) {
+    assert.equal(
+      hasPricingRow(model),
+      false,
+      `${model} is in UNPRICED_BUT_AVAILABLE but has a row in MODEL_PRICING`,
+    );
+  }
+});
+
+test('the PRIMARY intake model is never unpriced', () => {
+  // ⚠️ The guard that matters. If the primary falls back, EVERY successful
+  // suggestion is metered at a rate nobody chose — and the primary is the one
+  // model that runs on every intake. Swapping GEMINI_FLASH_MODEL to something
+  // with no row must fail here rather than on an invoice months later.
+  assert.ok(
+    hasPricingRow(FLASH_MODEL),
+    `the configured primary ${FLASH_MODEL} has no pricing row — add one before swapping to it`,
   );
 });
