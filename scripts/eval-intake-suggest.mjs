@@ -45,6 +45,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+/** `--models cascade` means "run the real ladder", not "call a model named cascade". */
+const CASCADE = 'cascade';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const E2E = join(REPO, '_e2e');
@@ -236,7 +239,14 @@ function score(raw, review) {
 // ── run ─────────────────────────────────────────────────────────────────────
 async function main() {
   const ai = await import('../src/lib/ai/intake-suggest.ts');
-  const models = (flag('--models') ?? ai.SUGGEST_MODEL).split(',').map((m) => m.trim()).filter(Boolean);
+  // Default to the cascade's PRIMARY — the tier that answers on a normal
+  // intake. `--models a,b,c` compares tiers; each is still pinned to one id,
+  // so the ladder never masks which model produced an answer. The literal
+  // `cascade` runs the real ladder instead, for exercising the fallback.
+  const models = (flag('--models') ?? ai.SUGGEST_MODEL_LADDER[0])
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
 
   assertNoLeakage(ai.INTAKE_SUGGEST_SYSTEM);
 
@@ -244,8 +254,17 @@ async function main() {
   console.log(`subject : ${fixture.subject ?? '(unnamed)'}`);
   console.log(`photos  : ${photos.map((p) => p.slot).join(' + ')} (${photos.length} slots, ONE request each run)`);
   console.log(`models  : ${models.join(', ')}`);
-  console.log(`cost    : ${models.length} request(s) total — 1 per model, against that model's own`);
+  const cascades = models.filter((m) => m === CASCADE).length;
+  console.log(`cost    : ${models.length - cascades} pinned request(s) — 1 per model, against that model's own`);
   console.log(`          free-tier bucket (Flash: 20/day, 5/min · Flash-Lite: 500/day, 15/min)`);
+  if (cascades > 0) {
+    console.log(
+      `          + ${cascades} cascade run(s), which spend 1 request on the tier that ANSWERS`,
+    );
+    console.log(
+      `            plus 1 on each tier that refuses first — up to ${ai.SUGGEST_MODEL_LADDER.length} in the worst case`,
+    );
+  }
   console.log(`metered : process=intake_suggest_eval, kept out of the shelter's own usage`);
   console.log('answer key is a fixture and is NOT in the prompt — checked, not assumed');
 
@@ -263,16 +282,23 @@ async function main() {
   const report = [];
 
   for (const model of models) {
-    console.log(`\n── ${model} ${'─'.repeat(Math.max(0, 56 - model.length))}`);
+    const label = model === CASCADE ? `CASCADE ${ai.SUGGEST_MODEL_LADDER.join(' → ')}` : model;
+    console.log(`\n── ${label} ${'─'.repeat(Math.max(0, 56 - label.length))}`);
     const started = Date.now();
     let raw;
+    let answeredBy;
     try {
       // Pinned to ONE model: no fallback, so this measures what it names.
-      const out = await ai.suggestFromPhoto(photos, {
-        models: [model],
-        process: 'intake_suggest_eval',
-      });
+      // `--models cascade` instead runs the REAL ladder and reports which tier
+      // answered — the only way to exercise the fallback path on purpose.
+      const out = await ai.suggestFromPhoto(
+        photos,
+        model === CASCADE
+          ? { process: 'intake_suggest_eval' }
+          : { models: [model], process: 'intake_suggest_eval' },
+      );
       raw = out.suggestion;
+      answeredBy = out.modelKey;
     } catch (err) {
       const ms = Date.now() - started;
       console.log(`  FAILED after ${ms}ms: ${err?.message ?? err}`);
@@ -291,6 +317,11 @@ async function main() {
       console.log(`  ${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.ok ? '' : `\n          ${c.detail}`}`);
     }
     console.log(`  ${passed}/${checks.length} in ${ms}ms`);
+    // Provenance, which is the whole point of a cascade run: `suggestedByModel`
+    // is persisted onto Pet.extractedByModel, so a later accuracy problem is
+    // scopeable to one tier. A cascade that could not say which tier answered
+    // would make that unrecoverable.
+    console.log(`  answered by: ${answeredBy}${model === CASCADE ? '  (tier that won the ladder)' : ''}`);
     console.log(`  age        : ${raw.ageMonthsMin}-${raw.ageMonthsMax} months (basis ${raw.ageBasis}, conf ${raw.ageConfidence})`);
     console.log(`  sex        : ${raw.sex} (fromGenitalPhoto=${raw.sexFromGenitalPhoto}, conf ${raw.sexConfidence})`);
     console.log(`  resembles  : ${JSON.stringify(raw.resemblesBreeds)}`);
