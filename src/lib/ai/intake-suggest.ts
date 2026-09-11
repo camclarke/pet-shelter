@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { google } from './google';
 import { FLASH_LITE_MODEL, FLASH_MODEL, modelKeyFor } from './model-ids';
 import type { PetPhotoSlot } from '../types';
-import { recordAiUsage } from './metered';
+import { recordAiUsage, type AiProcess } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
 import {
   SUGGEST_MAX_ATTEMPTS,
@@ -148,6 +148,14 @@ const SuggestionSchema = z.object({
  * ⚠️ Copy edits here have non-local effects. Removing one framing sentence
  * dropped a sibling-stack eval from 11/11 to 9/11, because without it the model
  * padded the gap with invented content. Re-measure after ANY wording change.
+ *
+ * ⚠️ The worked example in the RAZA block must not name a breed the eval
+ * fixture expects. It used to read `["pastor alemán", "husky siberiano"]`, and
+ * the only animal this project has photographs of is husky-type — so the
+ * prompt was handing the model half the answer key, and `npm run eval:intake`
+ * refused to run until it changed (2026-09-10). An example is meant to show
+ * the SHAPE of the answer, not to suggest its content. Keep it to breeds no
+ * fixture names.
  */
 export const INTAKE_SUGGEST_SYSTEM = `
 Eres un asistente veterinario que ayuda a un refugio de animales en Cochabamba,
@@ -170,7 +178,7 @@ termina devuelto.
 
 Además, en resemblesBreeds pon entre una y tres razas a las que este animal se
 PAREZCA, ordenadas de más a menos parecida — por ejemplo ["pastor alemán",
-"husky siberiano"]. Esto NO afirma que sea de esa raza: describe a qué se
+"labrador"]. Esto NO afirma que sea de esa raza: describe a qué se
 parece, que es lo que una persona buscando adoptar entiende de un vistazo.
 Usa nombres de raza comunes en español. Si de verdad no se parece a ninguna
 raza reconocible, devuelve una lista vacía — eso también es una respuesta
@@ -299,6 +307,31 @@ export interface SuggestResult {
 }
 
 /**
+ * Knobs the EVAL HARNESS needs and production never touches.
+ *
+ * Both default to production behaviour, so `suggestFromPhoto(photos)` is
+ * unchanged. They exist so `npm run eval:intake` can measure the real thing —
+ * the same prompt, schema, budget and retry policy — rather than a copy of it.
+ * A guard measured against a copy of its prompt measures nothing; playbook §13.
+ */
+export interface SuggestOptions {
+  /**
+   * Pin the model ladder. The harness passes exactly ONE id, which makes a
+   * tier fallback impossible — otherwise a benchmark of model A could quietly
+   * report model B's answer, which is the one result a benchmark must never
+   * produce. Retries still apply, because a retry is part of what is being
+   * measured.
+   */
+  models?: readonly string[];
+  /**
+   * Which budget line this spend belongs to. Defaults to the shelter's own.
+   * The harness passes `intake_suggest_eval` so benchmarking never pollutes
+   * the shelter's usage in `api_usage_daily`.
+   */
+  process?: AiProcess;
+}
+
+/**
  * Ask the model what it sees. Throws on failure — the caller decides what a
  * failure means, and for intake it means "carry on without suggestions".
  */
@@ -377,9 +410,14 @@ async function withRetry<T>(
  * that is 20 animals a day; one call per photo would be five.
  */
 export async function suggestFromPhoto(
-  photos: readonly SlottedPhoto[]
+  photos: readonly SlottedPhoto[],
+  options: SuggestOptions = {}
 ): Promise<SuggestResult> {
   if (photos.length === 0) throw new Error('suggestFromPhoto: at least one photo is required');
+
+  const [primary, fallback] = options.models ?? [SUGGEST_MODEL, SUGGEST_FALLBACK_MODEL];
+  if (primary === undefined) throw new Error('suggestFromPhoto: models must not be empty');
+  const proc = options.process ?? 'intake_suggest';
 
   // ONE deadline for the whole operation, both tiers included. Each
   // extractWith used to make its own, so a fallback started a fresh full
@@ -388,8 +426,11 @@ export async function suggestFromPhoto(
   const deadline = Date.now() + SUGGEST_TOTAL_BUDGET_MS;
 
   try {
-    return await extractWith(SUGGEST_MODEL, photos, deadline);
+    return await extractWith(primary, photos, deadline, proc);
   } catch (err) {
+    // A pinned single-model ladder has nowhere to fall back TO, which is what
+    // makes a benchmark measure the model it named.
+    if (fallback === undefined) throw err;
     if (!shouldFallBackToWeakerModel(err)) throw err;
 
     // Degrade rather than fail. Plan §3: a gate stricter than the reality of
@@ -402,15 +443,15 @@ export async function suggestFromPhoto(
     const left = deadline - Date.now();
     if (left < SUGGEST_MIN_RETRY_MS) {
       console.warn(
-        `[intake-suggest] ${SUGGEST_MODEL} ${describeFailure(err)}; only ${left}ms left, not falling back`
+        `[intake-suggest] ${primary} ${describeFailure(err)}; only ${left}ms left, not falling back`
       );
       throw err;
     }
 
     console.warn(
-      `[intake-suggest] ${SUGGEST_MODEL} ${describeFailure(err)}; falling back to ${SUGGEST_FALLBACK_MODEL} with ${left}ms left`
+      `[intake-suggest] ${primary} ${describeFailure(err)}; falling back to ${fallback} with ${left}ms left`
     );
-    return extractWith(SUGGEST_FALLBACK_MODEL, photos, deadline);
+    return extractWith(fallback, photos, deadline, proc);
   }
 }
 
@@ -424,7 +465,8 @@ function describeFailure(err: unknown): string {
 async function extractWith(
   modelId: string,
   photos: readonly SlottedPhoto[],
-  deadline: number
+  deadline: number,
+  proc: AiProcess
 ): Promise<SuggestResult> {
   const perAttemptMs = attemptTimeoutMsFor(modelId, photos.length);
   const { object, usage, providerMetadata } = await withRetry(deadline, perAttemptMs, (budgetMs) =>
@@ -483,7 +525,7 @@ async function extractWith(
   // void, never awaited: metering must not be able to break the thing it
   // measures, and must not add latency to an admin waiting on a form.
   void recordAiUsage({
-    process: 'intake_suggest',
+    process: proc,
     model: modelId,
     usage,
     providerMetadata,

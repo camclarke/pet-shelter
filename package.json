@@ -19,7 +19,9 @@
     "//grant:admin": "Grant/revoke the admin custom auth claim, the thing firestore.rules and storage.rules gate every write on. Needs GOOGLE_CLOUD_PROJECT set. Usage: npm run grant:admin -- someone@example.com  |  -- --list",
     "grant:admin": "node scripts/grant-admin.mjs",
   "//ai:probe": "Verify the Gemini setup: is there a key, does it work, and do the model IDs in src/lib/ai/model-ids.ts actually exist for that key? Those IDs came from a SIBLING project and have never been checked here. Never prints the key. Usage: npm run ai:probe  |  -- --call",
-  "ai:probe": "node scripts/ai-probe.mjs"
+  "ai:probe": "node scripts/ai-probe.mjs",
+  "//eval:intake": "Score photo-assisted intake against a known animal in _e2e/. Calls the REAL suggestFromPhoto, so it measures production rather than a copy of it. Bare invocation is a DRY RUN that prints what it would spend; --run actually calls the model at 1 free-tier request per model. --conditions=react-server is what lets the `server-only` import resolve to a no-op outside Next; without it the import throws. Usage: npm run eval:intake  |  -- --run  |  -- --run --models a,b",
+  "eval:intake": "node --import tsx --conditions=react-server --env-file-if-exists=.env.local scripts/eval-intake-suggest.mjs"
   },
   "engines": {
     "node": ">=20.9.0"

@@ -45,5 +45,10 @@ Thumbs.db
 seed/*
 !seed/EXAMPLE-pet.json
 
-# Local-only E2E photo drop (real animal photos, never committed)
-_e2e/
+# Local-only E2E photo drop (real animal photos, never committed).
+# Same rule and same reason as seed/ above: a photo straight off a phone
+# carries EXIF, and one taken in a foster home carries a volunteer's home
+# address. Only the answer-key TEMPLATE is tracked — a filled-in
+# ground-truth.json describes a real animal and stays local with its photos.
+_e2e/*
+!_e2e/EXAMPLE-ground-truth.json
