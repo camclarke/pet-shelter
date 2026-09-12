@@ -44,6 +44,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { proseRegisterFindings } from '../src/lib/ai/spanish-register.ts';
 
 /** `--models cascade` means "run the real ladder", not "call a model named cascade". */
 const CASCADE = 'cascade';
@@ -264,6 +265,23 @@ function score(raw, review) {
         (raw.isLikelyPurebred ? ` ("${raw.purebredGuess}") — a wrong breed on a public listing ends with the animal returned` : ''),
     );
   }
+
+  // PROSE REGISTER. Added 2026-09-12, after a real production intake wrote
+  // "Permaneces echada de lado... Tu pelaje es muy abundante" into
+  // generalObservations: the model spoke TO the animal. Nothing above reads
+  // prose register, so a run could score perfectly while doing it.
+  //
+  // ⚠️ A word-list tripwire, not a parser (see spanish-register.ts). A PASS
+  // means none of the known second-person forms appeared, not that the prose
+  // is in third person, which is why the prose itself is printed per run.
+  // ⚠️ ALWAYS added, pass or fail, for the same fixed-denominator reason as
+  // the family check above.
+  const register = proseRegisterFindings(raw);
+  add(
+    'prose describes the animal in third person — addresses no one',
+    register.length === 0,
+    `second person in ${JSON.stringify(register)}`,
+  );
   return checks;
 }
 
@@ -360,6 +378,11 @@ async function main() {
     console.log(`  colour     : ${raw.colorPattern}`);
     console.log(`  coat       : ${raw.coatType}`);
     console.log(`  weight     : ${raw.weightKgMin}-${raw.weightKgMax} kg (conf ${raw.weightConfidence})`);
+    // Printed every run: the register check is a tripwire, and a person
+    // reading the actual sentences is the other half of it.
+    console.log(`  observes   : ${raw.generalObservations}`);
+    console.log(`  marks      : ${raw.distinguishingMarks}`);
+    console.log(`  notes      : ${raw.notes}`);
     report.push({ model, ms, passed, total: checks.length, checks, raw });
   }
 
