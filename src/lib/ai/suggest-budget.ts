@@ -55,21 +55,32 @@ export const HOSTING_EDGE_TIMEOUT_MS = 60_000;
  * cut off where it would previously have been delivered, and that is a real
  * regression for that band.
  *
- * It is still the right bet, on the two things that are measured. The
- * dominant failure here is a HANG, at roughly half of all calls (2026-08-30,
- * four consecutive production calls: two hung to the millisecond of their
- * budget, two answered in under 7s) — and a hang always consumes the entire
- * attempt, so the only thing that rescues it is a second attempt. Healthy
- * four-photo calls have measured 16719ms and ~24700ms, both under the clamp.
- * Trading an unobserved band for the failure that happens half the time is
- * the better side of that coin.
+ * ── ⚠️ THAT BAND IS NO LONGER UNOBSERVED. Measured 2026-09-12 ───────────────
+ * This block used to argue the trade was worth it because the cut-off band
+ * was hypothetical while the hang was real. Both halves of that have now been
+ * measured, and the conclusion has moved.
  *
- * ⚠️ But the margin on 24700ms is thin, and it is the number to watch. If
- * healthy four-photo calls start landing above ~25s, do NOT raise this
- * constant — that band is only reachable by shortening the retry, and the
- * retry is what covers the common case. The answer at that point is to stop
- * going through Hosting: call Cloud Run directly, where the limit is 300s, or
- * return a job id and poll.
+ * `npm run probe:suggest`, twelve four-photo samples on gemini-3.6-flash with
+ * the abort at 90s instead of 25s: 11 answered, 1 returned a 503, and **zero
+ * were dead sockets**. Healthy answers reached 34473ms and 40786ms — so
+ * roughly **18% of good four-photo answers are above the 25s clamp** and are
+ * being discarded after being built and billed.
+ *
+ * So the "hang" this budget was shaped around is not a hang. It is this
+ * distribution's tail, and a second attempt does not rescue it: it abandons a
+ * request that was going to answer and pays the latency again from cold.
+ *
+ * ⚠️ The prediction two paragraphs down came true, so follow it rather than
+ * re-deriving it: healthy four-photo calls DO now land above ~25s, and the
+ * answer is NOT to raise this constant. The arithmetic is unforgiving —
+ * a 40.8s answer plus any retry cannot fit under 60s, and the edge window
+ * starts before this module's timers do, while a 750KB photo set climbs a
+ * phone's uplink. One attempt long enough for the tail is the most this
+ * architecture can hold, and that means no retry at all for the 503 case.
+ *
+ * The fix is the delivery path: call Cloud Run directly, where the limit is
+ * 300s, or return a job id and poll. Until then this constant is the least
+ * bad compromise rather than a good one, and that is the honest description.
  *
  * ⚠️ Raising this to buy the model more room does not work. Past 60s the
  * answer cannot be delivered at all, so a longer budget only buys a more
@@ -96,9 +107,47 @@ export const SUGGEST_MAX_ATTEMPTS = 2;
  *   FAILED 25001ms  photo=229KB
  *
  * Read those numbers carefully. Photo size is NOT the variable — the largest
- * succeeded and the smallest failed. The failures sit on the abort to the
+ * succeeded and the smallest failed. Successes are 4.7-6.8s.
+ *
+ * ── ⚠️ CORRECTION, measured 2026-09-12 ──────────────────────────────────────
+ * This block used to conclude: "The failures sit on the abort to the
  * millisecond, which means the request never came back at all rather than
- * being slow: a hung connection, not a slow model. Successes are 4.7-6.8s.
+ * being slow: a hung connection, not a slow model."
+ *
+ * That is FALSE, and it was never observable from inside this clamp. The
+ * failures sit on the abort to the millisecond because THE ABORT IS WHAT ENDS
+ * THEM — it says nothing about whether an answer was on its way. The
+ * inference was unfalsifiable by construction, which is the whole reason
+ * `npm run probe:suggest` exists: it re-runs the real prompt, schema and
+ * photographs with our abort moved out to 90s, so the provider gets to
+ * finish.
+ *
+ * Twelve four-photo samples on gemini-3.6-flash at a 90s abort:
+ *
+ *     11 answered      11293 12062 12747 13149 15949 17678
+ *                      17754 18485 18857 34473 40786  ms
+ *      1 failed        503 "high demand" — arriving at 68933ms
+ *      0 dead sockets
+ *
+ * ZERO aborts in twelve. Every request eventually came back. So a "hang" is
+ * the TAIL OF A HEAVY LATENCY DISTRIBUTION, not a dead connection — and
+ * 2/11 healthy answers (~18%) landed above this 25s clamp, meaning production
+ * built, billed and discarded a correct answer twice in twelve calls.
+ *
+ * Two consequences, neither of which is "raise the number":
+ *
+ *   1. A same-model retry is a weaker remedy than it looks. It abandons a
+ *      request that was going to answer and then pays the full latency again
+ *      from cold. It is not useless — the 503 branch genuinely benefits — but
+ *      it is not the rescue the original reasoning claimed.
+ *   2. A 503 can arrive ANYWHERE in the distribution: 2868ms and 6408ms on
+ *      gemini-3.8-flash the same day, against 68933ms here. Past this clamp
+ *      we cannot tell an overload from a slow success, so the provider's own
+ *      diagnosis is destroyed — see shouldFallBackToWeakerModel.
+ *
+ * The real fix is the one SUGGEST_TOTAL_BUDGET_MS already names: take this
+ * call off Firebase Hosting. Nothing inside a 50s budget can deliver a 40.8s
+ * answer AND keep a retry.
  *
  * The earlier design passed ONE `AbortSignal.timeout(25_000)` to
  * generateObject alongside `maxRetries: 1`. That retry was unreachable: the
@@ -340,6 +389,38 @@ export function retryBackoffMsFor(err: unknown): number {
  *
  * So: a hang is retried where isRetryableFailure says so, and the ladder is
  * for failures that a second attempt on the same model cannot fix.
+ *
+ * ── ⚠️ BOTH BULLETS ABOVE ARE NOW KNOWN FALSE. Measured 2026-09-12 ──────────
+ * Left standing rather than rewritten, because the DECISION they justify is
+ * still in force and reversing it is the owner's call, not a comment edit.
+ * `npm run probe:suggest`, twelve four-photo samples on gemini-3.6-flash with
+ * the abort at 90s:
+ *
+ *   1. A hang is NOT a hung socket. Zero of twelve were dead — every request
+ *      came back. Two answered at 34473ms and 40786ms, i.e. correctly, past
+ *      the clamp; one returned a 503 at 68933ms. The "hung socket" reading
+ *      was an artefact of measuring from inside a 25s abort, where a slow
+ *      success and a dead connection are indistinguishable.
+ *
+ *   2. The budget CAN afford the next tier, because the arithmetic assumed
+ *      the tier below also needs ~25s. It does not. Flash-Lite on the very
+ *      same four photographs measured 8/8 successes in 4910-7197ms, with no
+ *      tail at all. After a 25s Flash timeout there are ~25s left, and Lite
+ *      needs about six of them.
+ *
+ * So a timeout falling through to Lite would turn today's total failure into
+ * a ~6s degraded answer, which is what plan §3 asks for — degrade rather than
+ * fail. The cost is Lite's documented age weakness (it read a facial mask as
+ * muzzle greying), against which `decideAge` already refuses low-confidence
+ * ranges and an admin reviews every field.
+ *
+ * ⚠️ NOT changed here, deliberately. It reverses an explicit 2026-09-10
+ * decision, it is a behaviour change to the busiest AI path, and it has had no
+ * browser verification. Read the 2026-09-12 log entry before acting on it.
+ *
+ * ⚠️ And it is NOT a licence to raise a budget constant. The tail reaches
+ * 40.8s and Firebase Hosting cuts at 60s counting from the client's first
+ * upload byte — see SUGGEST_TOTAL_BUDGET_MS.
  */
 export function shouldFallBackToWeakerModel(err: unknown): boolean {
   return isQuotaExhaustedFailure(err) || isOverloadedFailure(err);

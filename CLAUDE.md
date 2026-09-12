@@ -1701,6 +1701,183 @@ scanned chip resolves to a name and a phone call.
   **357/357** tests; clean build after `rm -rf .next`, every static route
   keeping `Revalidate 5m`. **No pet, draft, photo or Firestore write of any
   kind was created** — every check was local or read-only.
+- **2026-09-12** — **Two concerns from the first human-driven intake, both
+  MEASURED before anything was changed — and the measurement overturned the
+  second one's premise.** No prompt edit, no budget constant touched. The
+  headline: **a "hang" is not a dead socket. It is the tail of a heavy latency
+  distribution, and production has been discarding correct answers.**
+
+  ── **Concern A: the breed list had NOT narrowed** ──────────────────────────
+
+  The owner saw *"mestizo de pelo largo con rasgos de husky siberiano"* and no
+  *alaskan malamute*, and reported it as a #39 side effect. It is not.
+
+  `npm run eval:intake -- --run` scored **12/12**, identical to the
+  2026-09-10 baseline, with `names "alaskan malamute"` **PASSING**. The same
+  run shows exactly what was seen:
+
+  | field | value |
+  |---|---|
+  | `resemblesBreeds` | `["husky siberiano","malamute de alaska"]` — **both** |
+  | `visibleType` | "mestizo mediano de pelo largo con rasgos de husky siberiano" — **one** |
+
+  Across 12 further probe samples the structured field returned both breeds in
+  11 and one breed in 1, so single-breed answers happen but are the minority.
+  **The two fields simply differ in completeness, and the owner could only see
+  the prose one.**
+
+  **The root cause is a UI gap, not a reading.** The breed offer is gated
+  behind sex — `mixedBreed` takes a REQUIRED sex, because Spanish cannot
+  spell "mestizo" against "mestiza" without it — and the note explaining that
+  gate said only *"Elige primero el sexo…"*. So the two breeds sat normalised
+  in `draft` state with **nothing on screen**, and the only breed-ish text
+  visible was the model's prose. The app was right and illegible.
+
+  Fixed by making the note NAME them: `t.breedNeedsSexFirst(traits)` renders
+  *"Se parece a husky siberiano y malamute de alaska. Elige primero el sexo…"*.
+  "Se parece a" and never "es", because the whole breed design fails toward
+  mestizo and this note appears before a human has accepted anything.
+
+  **Deliberately NOT done: the prompt was not touched.** The ask restated
+  honestly was completeness of the resemblance list, and the list is already
+  complete. Editing the prompt would have risked the documented non-local
+  effect — a sibling stack lost 2/11 on an eval by deleting one sentence — to
+  fix a field that is not broken. No guard in `intake-prompt.test.ts` was
+  loosened.
+
+  ⚠️ **The eval CANNOT see this class of complaint, and that is worth
+  knowing.** Its `visibleType` check asks only whether the prose names a
+  breed rather than a family. "rasgos de husky siberiano" passes that while
+  naming one of two. Scoring prose completeness was not added, because
+  `resemblesBreeds` is what reaches an adopter and `visibleType` is a short
+  observation — but the gap is real and the next person should not assume 12/12
+  covers it.
+
+  ── **Concern B: the hang is SLOW, not DEAD** ──────────────────────────────
+
+  Every production failure has sat on OUR abort to the millisecond — 25009,
+  25001, 25005, 25072ms — so nobody had ever seen what the provider does at
+  40s or 90s. Built `npm run probe:suggest` to find out: it re-runs the real
+  prompt, the real Zod schema, the real provider and the real photographs with
+  the abort moved out to 90s. **Twelve four-photo samples on
+  `gemini-3.6-flash`:**
+
+  ```
+  11293  12062  12747  13149  15949  17678  17754  18485  18857   ok
+  34473  40786                                                    ok  <-- past the 25s clamp
+  68933                                                     503 "high demand"
+  ```
+
+  **ZERO dead sockets in twelve. Every single request came back.**
+
+  So the reasoning `suggest-budget.ts` has carried since 2026-08-30 —
+  *"the failures sit on the abort to the millisecond, which means the request
+  never came back at all rather than being slow: a hung connection, not a slow
+  model"* — **is false, and it was unfalsifiable by construction.** The
+  failures sit on the abort because the abort is what ends them. That is the
+  whole reason the probe had to exist: no instrument inside a 25s clamp can
+  distinguish a dead connection from a slow success.
+
+  **Consequence: ~18% of good four-photo answers (2 of 11) are above the 25s
+  clamp**, i.e. built, billed and thrown away. That is the band this file
+  predicted would need watching, and it arrived.
+
+  **The four-photo payload is NOT the cause**, which was the secondary
+  question. Flash-Lite on the **identical four photographs**: 8/8 in
+  4910-7197ms, no tail whatever. Lite at one photo: 8/8 in 2772-8672ms. So
+  four photos cost Lite about 1.9s of median and cost it no reliability at
+  all — the tail is **Flash-tier contention**, not payload, not photo size,
+  and not vision encoding.
+
+  **⚠️ A 503 can arrive anywhere in the distribution.** 68933ms here, against
+  **2868ms and 6408ms** on `gemini-3.8-flash` the same afternoon. So past the
+  clamp an overload and a slow success are indistinguishable, and production
+  records both as `TimeoutError` — destroying the provider's own diagnosis.
+  That matters because the two are handled OPPOSITELY:
+  `shouldFallBackToWeakerModel` advances the tier on an overload and
+  deliberately does not on a timeout. **A slow overload therefore reaches the
+  retry policy wearing the one label that cannot fall to another tier.**
+
+  **⚠️ And overload did NOT correlate across Flash tiers**, contradicting the
+  2026-09-10 note. `gemini-3.8-flash` was **4/4 overloaded** while
+  `gemini-3.6-flash` was 11/12 healthy, within the same hour. The cascade's
+  tier-specific value is real; that day's correlation was that day's weather.
+
+  **NOTHING was changed in response.** `SUGGEST_TOTAL_BUDGET_MS`,
+  `SUGGEST_ATTEMPT_TIMEOUT_MS_FLASH` and every other constant are untouched —
+  the diff to `suggest-budget.ts` is **provably comments-only**. Raising a
+  budget is still wrong, and now for a sharper reason than before: the tail
+  reaches 40.8s, Hosting cuts at 60s counting from the client's first upload
+  byte, so one attempt long enough for the tail leaves room for no retry at
+  all.
+
+  ── **⚠️ THE RECOMMENDATION, not taken: let a timeout fall to Lite** ────────
+
+  The 2026-09-10 decision that *"a hang deliberately does not advance the
+  tier"* rests on an arithmetic claim: *"the budget cannot afford both… a hang
+  consumes the whole 25s per-attempt clamp."* **That arithmetic assumed the
+  tier below also needs ~25s. It does not — Lite needs about six.** After a
+  25s Flash timeout roughly 25s remain, which is four times what Lite was
+  measured to want.
+
+  So a timeout falling through to Flash-Lite would convert today's outright
+  failure into a ~6s degraded answer, which is what plan §3 asks for. The cost
+  is Lite's documented age weakness (it read a facial mask as muzzle greying
+  and aged a young adult at 6-8 years), against which `decideAge` already
+  refuses low-confidence ranges and an admin reviews every field.
+
+  **Left for the owner** — it reverses an explicit decision, it changes the
+  busiest AI path, and it has had no browser verification. The real fix remains
+  the architectural one this file already names: take the call off Hosting.
+
+  ── **Smaller findings** ───────────────────────────────────────────────────
+
+  - **My own probe was wrong first, in the way this file keeps recording.** Its
+    verdict classified only SUCCESSES by latency, so the run whose single
+    failure was a 503 at 68933ms printed *"the provider was healthy, this says
+    nothing about the hang"* — when that was the entire finding. A third branch
+    now names a failure arriving above the clamp. ⚠️ That branch has **not
+    itself been exercised** against a fresh slow-503; it was written after the
+    sample that motivated it.
+  - **The break probe refused to start, correctly.** Its control needle
+    `'Ante cualquier duda, es mestizo.'` was NOT FOUND, because the prompt is
+    hard-wrapped at ~78 columns and the source reads `'Ante cualquier\nduda,
+    es mestizo.'` — the same trap `intake-prompt.test.ts` documents for its
+    own assertions. Had the probe not validated its parser against a
+    known-failing run first, it would have reported every break uncovered.
+    **6/6 breaks caught by name** once fixed, restores byte-identical.
+  - **A guard on the WIRING, not just the copy.** Nothing asserted the wizard
+    actually calls `breedNeedsSexFirst` — and PR #26 (2026-09-02) was exactly
+    that bug: `reviewSuggestion` computed `sex` and the UI threw it away,
+    with every test green. There is no component-test setup here and
+    `/admin/intake` needs a human password, so the test reads
+    `IntakeWizard.tsx` as source and asserts the call exists and the old
+    inline string is gone. Crude, and the only check available.
+  - **`SuggestionSchema` is now exported** from `intake-suggest.ts`, for the
+    same reason the prompt was moved out: a diagnostic that reconstructs the
+    schema measures a different request than production makes.
+  - **The probe is a deliberately UNMETERED call site**, which cuts against
+    playbook §4.2. The reason is that `recordAiUsage` writes Firestore and a
+    latency probe that pauses to write Firestore measures partly itself. It
+    prints its own spend instead. Acceptable only because it is dev-only and
+    opt-in behind `--run`.
+  - **`.env.local` has a `GOOGLE_GENERATIVE_AI_API_KEY` key now, and it is
+    EMPTY** (0 bytes) while `GEMINI_API_KEY` is 39. Consistent with this
+    file's standing correction that only the latter is read; noted so an empty
+    alias is not mistaken for a missing key.
+  - **HANDOFF.md's "Also live, and not mine" section was already stale** on
+    arrival: `master` was at `b379d33`, not `9e78eb6c`, because PR #40 had
+    merged the `next`/`sharp` fix. `npm audit` is **0 in both trees**.
+
+  Verified at the end: **364 tests** (357 before), typecheck clean, build clean
+  with every static route keeping `Revalidate 5m`, **0 vulnerabilities in both
+  trees**. Firestore unchanged where it matters — **`pets`, `areas` and
+  `adoptions` do not exist as collections at all**, 1 pre-existing
+  `petDraft` (the human's, holding the four real photos), 2 users. The only
+  write this session made is one `api_usage_daily` row tagged
+  `intake_suggest_eval` ($0.0368). **No pet, draft or photo was created**, and
+  the 34 probe requests are unmetered by design and touched no collection.
+
 ---
 
 ## Next session — start here
@@ -1712,7 +1889,38 @@ scanned chip resolves to a name and a phone call.
 > matching nothing and **every push would have stopped deploying, silently**.
 > Log entries below that say `main` were accurate when they were written.
 
-### ⚠️ Read these three first — 2026-09-10, item 1 resolved 2026-09-11
+### ⚠️ Read these FOUR first — 2026-09-10, updated 2026-09-12
+
+**0. A "HANG" ON PHOTO INTAKE IS NOT A DEAD SOCKET.** Measured 2026-09-12 with
+`npm run probe:suggest`, which re-runs the real prompt, schema and
+photographs with the abort at 90s instead of 25s. Twelve four-photo samples on
+`gemini-3.6-flash`: **eleven answered, one returned a 503 at 68933ms, and
+ZERO were dead sockets.** Two good answers landed at **34473ms and 40786ms**,
+past the 25s clamp — so roughly **18% of correct four-photo answers are being
+built, billed and discarded.**
+
+The reasoning in `suggest-budget.ts` that a hang is "a hung connection, not a
+slow model" is **false and was unfalsifiable from inside the clamp**: the
+failures sat on the abort because the abort is what ended them. The comments
+are corrected; **no constant was changed.**
+
+⚠️ **Still do NOT raise `SUGGEST_TOTAL_BUDGET_MS` or the per-attempt clamp.**
+The tail reaches 40.8s and Hosting cuts at 60s counting from the client's first
+upload byte, so an attempt long enough for the tail leaves room for no retry.
+The fix is the delivery path — off Hosting, or a job id and poll.
+
+⚠️ **The cheap half-fix, left for the owner:** the 2026-09-10 rule that a hang
+must not advance the tier rests on "the budget cannot afford both", which
+assumed the next tier also needs ~25s. **Flash-Lite needs ~6s** — measured
+8/8 in 4910-7197ms on the identical four photographs. After a 25s Flash
+timeout ~25s remain. Letting a timeout fall to Lite would turn today's
+outright failure into a degraded answer. It reverses an explicit decision and
+is unverified in a browser, so it is a decision, not a cleanup.
+
+**Payload is not the cause.** Lite handles the same four photos with no tail at
+all; the tail is Flash-tier contention. And **overload does not reliably
+correlate across Flash tiers** — `gemini-3.8-flash` was 4/4 overloaded within
+the hour that `gemini-3.6-flash` was 11/12 healthy.
 
 **1. ✅ RESOLVED 2026-09-11 — the two `next` criticals and the `sharp` high are
 patched.** `next` 16.2.12 → **16.3.5**, `sharp` override `^0.35.3` → **`^0.35.4`**;
