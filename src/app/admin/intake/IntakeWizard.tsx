@@ -1170,7 +1170,12 @@ export function IntakeWizard() {
                 draft.breed
                   ? undefined
                   : suggestion && suggestion.breed.kind === 'mixed' && !draft.sex
-                    ? 'Elige primero el sexo: la palabra cambia entre «mestizo» y «mestiza», y eso no se ve en una foto.'
+                    ? // NAMES the resemblances rather than only explaining the
+                      // gate. Until 2026-09-12 this said just "pick sex first",
+                      // so the two breeds the model had read sat in state with
+                      // nothing on screen — and were reported as a missed
+                      // reading. See t.breedNeedsSexFirst().
+                      t.breedNeedsSexFirst(resembles)
                     : undefined
               }
               offers={
