@@ -91,6 +91,26 @@ export interface Messages {
    */
   mixedBreedWithTraits(sex: PetSex, traits: readonly string[]): string;
 
+  /**
+   * Why the Raza field is still empty, and — the part that matters — WHAT is
+   * waiting behind the sex tap.
+   *
+   * ⚠️ It must NAME the resemblances, and that is a fix for a real reported
+   * problem rather than a nicety. The wizard cannot spell "mestizo" against
+   * "mestiza" until a human confirms the sex, so the breed offer is gated;
+   * the note that explained the gate said only "pick sex first" and never
+   * said what would appear. So on 2026-09-12 the owner read the one breed
+   * mentioned in the model's PROSE field (`visibleType`) and reported the
+   * model had missed the second breed — while `resemblesBreeds` held both,
+   * normalised and in state, invisible. Measured that day: the eval scored
+   * 12/12 with both breeds named, so nothing was wrong with the reading. The
+   * only thing wrong was that nobody could see it.
+   *
+   * Takes the traits ALREADY normalised by `normalizeResembles` (trimmed,
+   * de-duplicated, capped), so this only formats.
+   */
+  breedNeedsSexFirst(traits: readonly string[]): string;
+
   /** "3 meses", "1 año", "edad desconocida". */
   formatAge(ageMonths: number | null): string;
 
