@@ -1878,6 +1878,129 @@ scanned chip resolves to a name and a phone call.
   `intake_suggest_eval` ($0.0368). **No pet, draft or photo was created**, and
   the 34 probe requests are unmetered by design and touched no collection.
 
+- **2026-09-12** — **The model talked to the dog, and the prompt spoke the
+  voseo it forbade. The register instruction is fixed — but the defect did not
+  reproduce in 0 of 7 usable samples, so "it works" is NOT earned.** A real
+  production intake (the draft that became Lobita) wrote, into
+  `generalObservations`: *"**Permaneces** echada de lado… **Tu** pelaje es muy
+  abundante."* Admin-screen only — that field is never persisted and never
+  reaches the dossier — but it is broken Spanish to the person doing intake.
+
+  ── **Cause: supported, not reproduced** ────────────────────────────────────
+
+  **A production-only cause is ruled out.** `/api/intake/suggest` calls
+  `suggestFromPhoto(photos)` with default options, it is the only caller, it
+  sends slots in the fixture's order, and `intake-prompt.ts` is byte-identical
+  between the deployed build and the eval. Same request.
+
+  **The mechanism the task named is plausible and structural.** #31
+  (`c75e30c`) added *"Escribe SIEMPRE en español neutro, tratando de «tú»"* and
+  never said who «tú» is — while every free-text field DESCRIBES the animal and
+  addresses no one. And `generalObservations` was the one free-text field with
+  no example; colour, coat and notes all had third-person or nominal ones, and
+  on the same call they stayed impersonal.
+
+  **But it would not reproduce**, which is the honest headline. BEFORE, on the
+  unchanged prompt:
+
+  | tier | usable | register | original 12 checks |
+  |---|---|---|---|
+  | `gemini-3.6-flash` | 1 of 1 | clean | 12/12 |
+  | `gemini-3.8-flash` | **1 of 3** | clean | 11/12 (sex, its known weakness) |
+  | `gemini-3.7-flash` | **0 of 3** | — | all three double-hung to 50003ms |
+  | Flash-Lite | 5 of 5 | clean ×5 | 9, 9, 12, 9, 9 (sex, Lite's known weakness) |
+
+  **Zero second person in seven usable samples**, against one in one in
+  production. The defect is stochastic at a rate these samples cannot resolve,
+  so the fix below is justified by structure, and no after-run can prove it
+  removed anything.
+
+  ── **Found on the way: the prompt spoke voseo in six places** ─────────────
+
+  `Estimá` (twice), `Indicá`, `usalos`, `Sugerí`, `señalá` — in the PESO, EDAD,
+  TAMAÑO, NOMBRES and NOTAS blocks of a prompt whose first rule is *"Nada de
+  voseo"*. They entered on 2026-08-26 (`2041faf`) and 2026-08-30 (`a1cb7aa`)
+  and **were still present at #31's own commit**, so the 2026-09-03 entry's
+  "converted to neutral tuteo" was a miss, not a later regression. **Every test
+  in `intake-prompt.test.ts` folds accents**, so `estimá` read as `estima` and
+  nothing could see them. All six are tuteo now.
+
+  **And the one voseo guard that existed was blind to most of its own list.**
+  `!/\b(vos|sacá|poné|tenés|elegí)\b/u.test(USER_INSTRUCTION)` — measured, not
+  reasoned: against *"Por favor <word> la foto."* it matched `vos` and `tenés`
+  and **missed `sacá`, `poné` and `elegí`**. JavaScript's `\b` is ASCII-only
+  even under the `u` flag, so there is no boundary after a FINAL accented
+  vowel; `tenés` survived only because its accent is not the last letter.
+
+  ── **What changed** ───────────────────────────────────────────────────────
+
+  - **The rule.** *"Cada campo DESCRIBE al animal: escríbelo en tercera
+    persona, como una ficha, y no le hables a nadie, ni al animal ni a quien
+    lee."* The ambiguous «tú» clause is gone; *"español neutro"* and *"Nada de
+    voseo"* are untouched. OBSERVACIONES now says *"en tercera persona"* too.
+    Its counter-examples are **gender-free** («está de pie», not «está echada»)
+    because the only eval animal is female and a gendered example is a hint,
+    and they describe a pose and ears that animal does not have, so a copy
+    would show. **AFTER, 3.6 wrote "está descansando echada de lado" — accurate,
+    third person, not a copy.** Cost: +73 input tokens (5826 → 5899).
+  - **`src/lib/ai/spanish-register.ts`**, pure — `findSecondPerson`,
+    `findVoseo`, `stripQuoted`, `proseRegisterFindings`. Word-list
+    **tripwires, not a parser**: an empty result means none of the known forms,
+    never "this is third person". Letter-aware lookarounds, never `\b`, and
+    accent-sensitive, because "estas patas" is a demonstrative.
+  - **The eval's 13th check**, *"prose describes the animal in third person —
+    addresses no one"*, over **all six** prose fields, always added so the
+    denominator is fixed. It also prints observations, marks and notes every
+    run, because a tripwire needs a reader.
+  - **Tests:** 13 new for the detector, 5 new prompt tests, and the blind old
+    guard replaced with `findVoseo`. **382 total** (364 before).
+
+  ── **AFTER** ──────────────────────────────────────────────────────────────
+
+  | tier | register | original 12 checks |
+  |---|---|---|
+  | `gemini-3.6-flash` | clean | **12/12**, first attempt, 21592ms |
+  | Flash-Lite | clean ×5 | 8, 9, 12, 12, 10 |
+
+  **⚠️ Two Lite failures appeared that BEFORE never showed, and they are not
+  explained.** One run wrote `visibleType: "mestizo de pelo largo con rasgos
+  nórdicos"` (a family, which the eval rejects) and one returned
+  `resemblesBreeds: ["husky siberiano"]`, dropping malamute. Each is 1 of 5
+  against 0 of 5 — indistinguishable from noise at this n, and 3.6 dropped a
+  breed in 1 of 12 on the OLD prompt earlier the same day — but this is exactly
+  the non-local effect the prompt's own warning describes, and nothing in the
+  change touched the RAZA block. **Re-run Lite on a calm day before assuming it
+  is noise.** The production primary held 12/12.
+
+  ── **Smaller findings** ────────────────────────────────────────────────────
+
+  - **A test that could never fail.** *"quoted counter-examples are removed,
+    even across a line break"* first put the newline BETWEEN two quoted words
+    (`"sacá",\n"poné"`), where a newline-blind strip still pairs every quote.
+    The real prompt has a newline INSIDE one quote (`"mestizo\nmediano…"`),
+    which is the case that shifts every later pair. Caught while writing its
+    deliberate break, fixed before the probe ran.
+  - **Break probe 18/18 by name**, with the parser validated against a
+    known-failing control first — including P7, a voseo `USER_INSTRUCTION`
+    ending in an accented vowel, which the old guard would have missed.
+  - **`gemini-3.7-flash` hung 3 of 3 and `gemini-3.8-flash` 2 of 3**, on the
+    afternoon `gemini-3.6-flash` answered normally. Both Flash fallback tiers
+    were unreliable at once — relevant to the Lite-fallback decision recorded
+    in the entry above.
+  - **My own extraction probe broke on shell quoting**: `"$SP\\$f.txt"` escapes
+    the `$` of `$f`, so every path became a literal `$f.txt` and the probe
+    reported no such file. Redone in Node with forward-slash paths.
+  - **The rest of 3.6's quota was deliberately left alone**, because an eval
+    that spends the production model's last requests pushes that evening's
+    real intakes down the cascade.
+
+  **Claim: "the tests pass", and no second person across 6 AFTER runs.** NOT
+  "it works" for removing the defect, because BEFORE never reproduced it.
+  Typecheck clean, build clean with every static route keeping `Revalidate 5m`,
+  leak guard passes on the new prompt. **No pet, draft or photo was created** —
+  `pets` does not exist, the only draft is Lobita, the bucket still holds her 4
+  objects — and eval spend was 14 metered calls, $0.15.
+
 ---
 
 ## Next session — start here
