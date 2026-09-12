@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { INTAKE_SUGGEST_SYSTEM, SLOT_LABEL, USER_INSTRUCTION } from '../ai/intake-prompt';
+import { findVoseo, stripQuoted } from '../ai/spanish-register';
 
 /**
  * The prompt's non-negotiables, pinned.
@@ -228,5 +229,68 @@ test('the labels the prompt names are the labels the code sends', () => {
 
 test('the user instruction stays neutral and asks for nothing extra', () => {
   assert.ok(USER_INSTRUCTION.length > 0);
-  assert.ok(!/\b(vos|sacá|poné|tenés|elegí)\b/u.test(USER_INSTRUCTION), 'voseo in the instruction');
+  // ⚠️ This used to be `!/\b(vos|sacá|poné|tenés|elegí)\b/u.test(...)`, and it
+  // was blind to three of its five words — measured, not reasoned: against
+  // "Por favor <word> la foto." it matched "vos" and "tenés" and missed "sacá",
+  // "poné" and "elegí". JavaScript's `\b` is ASCII-only even under the `u`
+  // flag, so it finds no boundary after a FINAL accented vowel; "tenés" only
+  // survived because its accent is not the last letter. Found 2026-09-12 while
+  // building spanish-register.ts, whose lookarounds exist because of this trap.
+  assert.deepEqual(findVoseo(USER_INSTRUCTION), [], 'voseo in the instruction');
+});
+
+// ─── the 2026-09-12 register fix ─────────────────────────────────────────────
+
+/**
+ * ⚠️ Why these exist. A real production intake returned, for
+ * generalObservations, "Permaneces echada de lado… Tu pelaje es muy abundante"
+ * — the model talking TO the dog. The prompt told it to write "tratando de
+ * «tú»" without saying who «tú» was, and the one free-text field with no
+ * example is exactly where it drifted. The rule now says the fields DESCRIBE
+ * the animal and address no one.
+ *
+ * ⚠️ Like everything else in this file, these catch DELETIONS. Only
+ * `npm run eval:intake -- --run`, whose register check reads the model's
+ * actual prose, says the model has stopped.
+ */
+
+test('the model is told to describe the animal in third person, addressing no one', () => {
+  // BOTH halves. "tercera persona" alone does not forbid talking to the
+  // reader, and "no le hables a nadie" alone does not say what to write.
+  assert.ok(
+    PROMPT.includes('cada campo describe al animal: escribelo en tercera persona'),
+    'lost the instruction that the fields are third-person descriptions',
+  );
+  assert.ok(
+    PROMPT.includes('no le hables a nadie, ni al animal ni a quien lee'),
+    'lost the instruction not to address the animal or the reader',
+  );
+});
+
+test('the prompt no longer asks for «tú» without saying who is addressed', () => {
+  // The ambiguous clause itself. Putting it back is how the defect returns.
+  assert.ok(!PROMPT.includes('tratando de "tu"'), 'the ambiguous "tratando de tú" clause is back');
+});
+
+test('observations, the field that drifted, name third person explicitly', () => {
+  assert.ok(
+    PROMPT.includes('en generalobservations describe, en tercera persona'),
+    'the observations instruction no longer says third person — that is where production drifted',
+  );
+});
+
+test('the system prompt does not itself speak voseo', () => {
+  // ⚠️ Accent-sensitive, which is the whole point: every other assertion in
+  // this file folds accents, so "Estimá" read as "estima", and six voseo
+  // imperatives sat in a prompt whose first rule is "Nada de voseo" from
+  // 2026-08-26 until 2026-09-12. Quoted counter-examples are stripped first,
+  // because naming a forbidden form is not using it.
+  assert.deepEqual(findVoseo(stripQuoted(INTAKE_SUGGEST_SYSTEM)), []);
+});
+
+test('straight quotes in the prompt are balanced, so counter-examples strip cleanly', () => {
+  // stripQuoted pairs straight quotes left to right. One stray quote would
+  // shift every pair after it, strip real instructions, and let the voseo test
+  // above pass while hiding exactly the words it looks for.
+  assert.equal((INTAKE_SUGGEST_SYSTEM.match(/"/g) ?? []).length % 2, 0, 'an unpaired straight quote');
 });
