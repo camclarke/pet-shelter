@@ -83,7 +83,17 @@ export interface SlottedPhoto {
  * own comment, next to the guards that replaced the structural guarantee.
  * Read it there before touching sex anywhere in this pipeline.
  */
-const SuggestionSchema = z.object({
+/**
+ * Exported for the same reason `INTAKE_SUGGEST_SYSTEM` was moved out of this
+ * file: a diagnostic that reconstructs the schema is measuring a copy, and a
+ * structured-output call's latency and failure shape depend on the schema it
+ * was given. `scripts/` reads this under `--conditions=react-server`, which
+ * resolves the `server-only` import above to a no-op.
+ *
+ * ⚠️ Read-only for callers. Production's single use is the `generateObject`
+ * below; nothing else should build a request from it.
+ */
+export const SuggestionSchema = z.object({
   species: z.enum(['dog', 'cat', 'rabbit', 'other']).nullable(),
   speciesConfidence: z.enum(['high', 'medium', 'low']),
 

@@ -291,6 +291,24 @@ export const es: Messages = {
     return `${base} con rasgos de ${list}`;
   },
 
+  breedNeedsSexFirst: (traits) => {
+    // Why the gate exists. Kept second, because the admin already knows they
+    // have not chosen a sex — what they do not know is what it unlocks.
+    const why =
+      'Elige primero el sexo: la palabra cambia entre «mestizo» y «mestiza», y eso no se ve en una foto.';
+    if (traits.length === 0) return why;
+    // Same "y" join as mixedBreedWithTraits: Spanish joins a final item with
+    // "y", never a trailing comma.
+    const list =
+      traits.length === 1
+        ? traits[0]
+        : `${traits.slice(0, -1).join(', ')} y ${traits[traits.length - 1]}`;
+    // "Se parece a" and not "es": this is a resemblance the model read off a
+    // photograph, and the whole breed design fails toward mestizo. Wording it
+    // as a claim here would undo that one field before the admin ever taps it.
+    return `Se parece a ${list}. ${why}`;
+  },
+
   formatAge(ageMonths) {
     if (ageMonths === null) return 'edad desconocida';
     if (ageMonths < 12) return `${ageMonths} ${ageMonths === 1 ? 'mes' : 'meses'}`;
