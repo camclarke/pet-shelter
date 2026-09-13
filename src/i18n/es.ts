@@ -121,6 +121,10 @@ const APPLICATION_COPY: ApplicationCopy = {
   signInPrompt:
     'Para postular en línea necesitas una cuenta. Entra o crea una y vuelves directo a este formulario.',
   signInButton: 'Entrar o crear cuenta',
+  returnNotice: 'Cuando entres, vuelves directo al formulario de adopción.',
+  continueApplication: 'Volver al formulario de adopción',
+  loading: 'Cargando…',
+  retry: 'Intentar de nuevo',
   notAccepting: (petName) =>
     `${petName} no está recibiendo solicitudes en línea en este momento. Si quieres saber más, escríbenos por WhatsApp.`,
   alreadyApplied: 'Ya enviaste una solicitud para este animalito.',
@@ -194,6 +198,20 @@ const APPLICATION_COPY: ApplicationCopy = {
     'Firestore rechazó el cambio. Puede que alguien más la haya cambiado mientras tanto: recarga la página.',
   otherOpenTitle: 'Otras solicitudes abiertas para este animalito',
   applicationMissing: 'Esa solicitud no existe.',
+  backToPanel: '← Panel',
+  statusTitle: 'Estado',
+  decidedByOn: (who, date) => `Decidida por ${who} el ${date}.`,
+  withdrawnOn: (date) => `Retirada el ${date}.`,
+  emailLabel: 'Correo',
+  phoneLabel: 'Teléfono',
+  confirmRecordWithdrawal:
+    'Esto la cierra para siempre: la persona no va a poder volver a postular en línea para este animalito. ¿Registrar que la retiró?',
+  adminLoadFailed: 'No pudimos cargar las solicitudes. Revisa tu conexión e intenta de nuevo.',
+  permissionDenied:
+    'Firestore rechazó la lectura por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+  blockersTitle: 'No se puede aprobar',
+  warningsTitle: 'Antes de aprobar',
+  checking: 'Revisando…',
 };
 
 /**
