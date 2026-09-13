@@ -23,7 +23,13 @@
   "//eval:intake": "Score photo-assisted intake against a known animal in _e2e/. Calls the REAL suggestFromPhoto, so it measures production rather than a copy of it. Bare invocation is a DRY RUN that prints what it would spend; --run actually calls the model at 1 free-tier request per model. --conditions=react-server is what lets the `server-only` import resolve to a no-op outside Next; without it the import throws. Usage: npm run eval:intake  |  -- --run  |  -- --run --models a,b",
   "eval:intake": "node --import tsx --conditions=react-server --env-file-if-exists=.env.local scripts/eval-intake-suggest.mjs",
   "//probe:suggest": "Answer ONE question: when a four-photo intake 'hangs', is the socket dead or is the call slow and we abort too early? Every production failure sits on OUR 25s abort, so nobody has seen what the provider does at 90s. Measures latency and failure shape only — it does NOT score answers (that is eval:intake) and does NOT go through Firebase Hosting. Bare invocation is a DRY RUN. Usage: npm run probe:suggest  |  -- --run  |  -- --run --photos 1 --n 8  |  -- --run --model gemini-3.1-flash-lite --n 20",
-  "probe:suggest": "node --import tsx --conditions=react-server --env-file-if-exists=.env.local scripts/probe-suggest-latency.mjs"
+  "probe:suggest": "node --import tsx --conditions=react-server --env-file-if-exists=.env.local scripts/probe-suggest-latency.mjs",
+  "//cards:synthesize": "Draw synthetic Bolivian-style vaccination cards and their answer key into _e2e/cards/ (gitignored). SYNTHETIC cards are easier than real ones: scores on them are an UPPER BOUND. Usage: npm run cards:synthesize",
+  "cards:synthesize": "node scripts/make-synthetic-cards.mjs",
+  "//eval:cards": "Score vaccination-card extraction against the synthetic cards. Calls the REAL extractFromCard and reviewCardExtraction, so it measures what a reviewer would be shown. Bare invocation is a DRY RUN; --run spends one request per card x model x rep. Refuses to run if the answer key has leaked into the prompt. Usage: npm run eval:cards  |  -- --run --models gemini-3.1-flash-lite",
+  "eval:cards": "node --import tsx --conditions=react-server --env-file-if-exists=.env.local scripts/eval-card-extract.mjs",
+  "//probe:card-rules": "Evaluate the DEPLOYED Firestore and Storage rules against the card-extraction writes and reads, through the Firebase Rules test API. Releases nothing and writes nothing. Usage: GOOGLE_CLOUD_PROJECT=wawitas npm run probe:card-rules",
+  "probe:card-rules": "node scripts/probe-card-rules.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
