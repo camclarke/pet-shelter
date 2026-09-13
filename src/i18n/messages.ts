@@ -133,6 +133,114 @@ export interface TagMessages {
 import type { FieldEvidence, MedicalExtractionSource } from '@/lib/types';
 import type { CardField } from '@/lib/card-extraction';
 import type { CardExtractFailure } from '@/lib/card-extract-client';
+import type { ApplicationStatus } from '@/lib/types';
+import type {
+  ApplicationAnswerError,
+  ApprovalBlocker,
+  ApprovalWarning,
+} from '@/lib/applications';
+import type { ApplicationSection } from '@/config/shelter';
+
+/**
+ * The fixed wording of the online adoption application — plan §6. Plain strings
+ * where nothing inflects, functions where a name or a count goes in.
+ *
+ * ⚠️ Every line a visitor reads here must be TRUE about what happens next.
+ * Nothing in this feature sends an email or a message, nobody answers through
+ * the page, and an application does not reserve the animal. Copy that implies
+ * otherwise is a promise the shelter did not make.
+ */
+export interface ApplicationCopy {
+  // ── the dossier ──────────────────────────────────────────────────────────
+  /** The SECONDARY text link under the WhatsApp button. Never a button. */
+  readonly applyLink: string;
+
+  // ── the public form ─────────────────────────────────────────────────────
+  pageTitle(petName: string): string;
+  intro(petName: string): string;
+  readonly whatsappInstead: string;
+  privacy(shelterName: string): string;
+  readonly signInPrompt: string;
+  readonly signInButton: string;
+  /** Shown on /account when sign-in will return the visitor to a form. */
+  readonly returnNotice: string;
+  /** On /account, signed in, when a form is waiting to be returned to. */
+  readonly continueApplication: string;
+  readonly loading: string;
+  readonly retry: string;
+  notAccepting(petName: string): string;
+  readonly alreadyApplied: string;
+  readonly goToAccount: string;
+  readonly requiredMark: string;
+  readonly optionalMark: string;
+  readonly choosePlaceholder: string;
+  readonly fixErrors: string;
+  readonly submit: string;
+  readonly submitting: string;
+  readonly submitFailed: string;
+  readonly submitRefused: string;
+  readonly confirmationTitle: string;
+  confirmationSteps(petName: string, shelterName: string): string[];
+  backToPet(petName: string): string;
+
+  // ── /account ────────────────────────────────────────────────────────────
+  readonly mine: string;
+  readonly unknownPet: string;
+  readonly withdraw: string;
+  readonly withdrawQuestion: string;
+  readonly withdrawConfirm: string;
+  readonly keep: string;
+  readonly withdrawFailed: string;
+  readonly loadFailed: string;
+
+  // ── the admin queue ─────────────────────────────────────────────────────
+  readonly queueLink: string;
+  readonly queueTitle: string;
+  readonly queueIntro: string;
+  /** Null when the public form is on and its questions are the shelter's own. */
+  formStateNote(enabled: boolean, questionsAreDraft: boolean): string | null;
+  readonly filterLabel: string;
+  readonly filterOpen: string;
+  readonly filterAll: string;
+  readonly emptyQueue: string;
+  submittedOn(date: string): string;
+  readonly emailUnverifiedTag: string;
+  readonly backToQueue: string;
+  readonly internalRecord: string;
+  readonly applicantTitle: string;
+  readonly answersTitle: string;
+  readonly notAnswered: string;
+  retiredQuestion(id: string): string;
+  readonly notesTitle: string;
+  readonly notesHint: string;
+  readonly saveNotes: string;
+  readonly notesSaved: string;
+  readonly notesFailed: string;
+  readonly actionsTitle: string;
+  readonly noActions: string;
+  readonly approveTitle: string;
+  approveExplain(petName: string, applicant: string): string;
+  readonly approveConfirm: string;
+  readonly cancel: string;
+  approvedDone(petName: string): string;
+  readonly actionFailed: string;
+  readonly actionRefused: string;
+  readonly otherOpenTitle: string;
+  readonly applicationMissing: string;
+  readonly backToPanel: string;
+  readonly statusTitle: string;
+  decidedByOn(who: string, date: string): string;
+  withdrawnOn(date: string): string;
+  readonly emailLabel: string;
+  readonly phoneLabel: string;
+  /** Asked before an ADMIN records a withdrawal, because it cannot be undone. */
+  readonly confirmRecordWithdrawal: string;
+  readonly adminLoadFailed: string;
+  readonly permissionDenied: string;
+  readonly blockersTitle: string;
+  readonly warningsTitle: string;
+  readonly checking: string;
+}
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -392,6 +500,40 @@ export interface Messages {
 
   /** The soonest confirmed booster: "Lo próximo: Quíntuple, el 14 feb 2026." */
   nextDueSummary(name: string, dateText: string): string;
+
+  // ── adoption applications ─────────────────────────────────────────────────
+
+  /** "Sí" / "No", for a stored yes-or-no answer. */
+  yesNo(value: boolean): string;
+
+  /** The status as the SHELTER reads it: "Nueva", "Rechazada". */
+  applicationStatusLabel(status: ApplicationStatus): string;
+
+  /**
+   * The status as the APPLICANT reads it. Gentler where it matters —
+   * "No aprobada" rather than "Rechazada" — and never different in substance.
+   */
+  applicantStatusLabel(status: ApplicationStatus): string;
+
+  /** One honest line on what the status means for the applicant, and what to do. */
+  applicantStatusExplanation(status: ApplicationStatus): string;
+
+  /** The admin button that moves an application from one status to another. */
+  applicationActionLabel(from: ApplicationStatus, to: ApplicationStatus): string;
+
+  /** The plan §6 headings the form is grouped under. */
+  applicationSectionLabel(section: ApplicationSection): string;
+
+  /** Why one answer cannot be sent. Addressed to the applicant, as an instruction. */
+  applicationAnswerError(error: ApplicationAnswerError): string;
+
+  /** Why an approval cannot be recorded. Structural only — these BLOCK. */
+  approvalBlocker(blocker: ApprovalBlocker): string;
+
+  /** Something to know before approving that must NOT block it. */
+  approvalWarning(warning: ApprovalWarning, detail: { otherOpenCount: number }): string;
+
+  readonly applications: ApplicationCopy;
 }
 
 /**

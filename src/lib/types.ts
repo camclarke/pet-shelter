@@ -824,6 +824,81 @@ export interface Adoption {
   ownerUid: string;
   adoptedAt: Timestamp;
   approvedBy: string;
+  /**
+   * The online application this adoption came from, or null when it was
+   * agreed some other way — which today is most adoptions, because WhatsApp is
+   * the primary path and stays so (plan §6). `firestore.rules` checks this
+   * against the application being approved in the same batch.
+   */
+  applicationId: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// adoptionApplications/{petId}__{applicantUid} — the APPLICANT and ADMINS read
+//
+// The step before `adoptions/{petId}`: someone asking to adopt, with the
+// shelter's screening answers attached. Plan §2.4 and §6.
+//
+// ⚠️ Secondary by design. The WhatsApp button on the dossier is the conversion
+// and stays in front of this; an account is never required to reach it.
+//
+// ⚠️ PRIVATE PERSON'S DATA. Housing, household and a phone number. No field
+// here is ever public, no answer is ever logged, and nothing about the
+// application is copied into another document on approval.
+//
+// The document id is DETERMINISTIC — `{petId}__{applicantUid}` — and that id is
+// the duplicate guard. Rules cannot run a query, so "is there already an open
+// application?" checked in the browser would be advisory and racy (two tabs,
+// two creates). A fixed id turns the second create into an UPDATE, which the
+// rules only let an applicant use to withdraw. See `applicationIdFor()`.
+// ─────────────────────────────────────────────────────────────────────────────
+export type ApplicationStatus =
+  | 'submitted' // sent by the applicant; nobody has looked yet
+  | 'reviewing' // someone on the team is reading it
+  | 'interview' // the team wants to talk — in person or by WhatsApp
+  | 'approved' // the adoption is recorded: `adoptions/{petId}` exists
+  | 'rejected' // not approved; reconsiderable by an admin
+  | 'withdrawn'; // the applicant pulled out, or told the shelter to
+
+/** An answer as stored. Never null: an unanswered optional question is absent. */
+export type ApplicationAnswer = string | boolean | number;
+
+export interface AdoptionApplication {
+  id: string;
+  petId: string;
+  applicantUid: string;
+  /** Copied from the ID token by rule, so it cannot be typed as someone else's. */
+  applicantEmail: string;
+  /**
+   * Whether that address was verified at submission, also from the token.
+   * Recorded rather than required: a verification email lost to a spam folder
+   * must not stop a family applying. The admin sees it and decides.
+   */
+  applicantEmailVerified: boolean;
+  /** Keyed by question id — see `adoptionApplications` in `src/config/shelter.ts`. */
+  answers: Record<string, ApplicationAnswer>;
+  status: ApplicationStatus;
+  submittedAt: Timestamp;
+  updatedAt: Timestamp;
+  /** Set exactly when `status` is `withdrawn`. */
+  withdrawnAt: Timestamp | null;
+  /** Set exactly when `status` is `approved` or `rejected`. */
+  decidedAt: Timestamp | null;
+  /** The admin who approved or rejected. Null otherwise. */
+  decidedBy: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// adoptionApplications/{id}/internal/notes — ADMIN ONLY
+//
+// A separate DOCUMENT, never a field on the application, because rules protect
+// documents and not fields. An applicant who could read the shelter's private
+// assessment of them is a problem the first time someone is turned down.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface ApplicationInternalNotes {
+  text: string;
+  updatedAt: Timestamp;
+  updatedBy: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

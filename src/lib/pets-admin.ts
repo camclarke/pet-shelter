@@ -60,6 +60,7 @@ import {
   custodyKindForStatus,
   planReadmission,
   readChipMatches,
+  readmissionRevokesOwnership,
   type ChipMatch,
   type ChipVerdict,
   type ReadmissionInput,
@@ -672,6 +673,11 @@ export async function reopenPet(
   openCustody.docs.forEach((custodyDoc) => {
     batch.update(custodyDoc.ref, { endedAt: serverTimestamp() });
   });
+
+  // ── ownership: a returned animal no longer belongs to its former family ──
+  // Deleting a document that does not exist is a no-op. Why delete rather than
+  // archive: readmissionRevokesOwnership() in readmission.ts.
+  if (readmissionRevokesOwnership(plan.status)) batch.delete(doc(db, 'adoptions', pet.id));
 
   // ── the chain of responsibility ──────────────────────────────────────────
   const custodyRef = doc(collection(petRef, 'custody'));

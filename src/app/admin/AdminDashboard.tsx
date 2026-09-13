@@ -86,6 +86,9 @@ export function AdminDashboard() {
           <Link href="/admin/qr" className="btn btn--muted">
             {t.tag.sheetLink}
           </Link>
+          <Link href="/admin/applications" className="btn btn--muted">
+            {t.applications.queueLink}
+          </Link>
           <Link href="/admin/intake" className="btn btn--action">
             + Nuevo ingreso
           </Link>

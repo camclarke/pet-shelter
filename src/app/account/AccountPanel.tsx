@@ -5,12 +5,21 @@
  * `src/app`. The one thing that is NOT inline is the failure message: those
  * arrive as an `AuthError` from `src/lib/auth.ts` and are rendered through
  * `t.authError()`, because a lib module must never carry Spanish.
+ *
+ * ── Returning to an adoption application ──────────────────────────────────
+ * `/adopt/{slug}/apply` sends a signed-out visitor here with `?next=…`. After a
+ * SUCCESSFUL sign-in or sign-up they are sent back; after a failure nothing
+ * changes, so the enumeration protections below hold exactly as before — the
+ * redirect only ever follows an outcome the visitor already knows. `next` goes
+ * through `safeReturnPath`, an allowlist, so this cannot become an open
+ * redirect to a look-alike page.
  */
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import {
   AuthFailure,
@@ -20,8 +29,10 @@ import {
   signOut,
   signUp,
 } from '@/lib/auth';
+import { safeReturnPath } from '@/lib/return-path';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
+import { MyApplications } from './MyApplications';
 
 type Mode = 'signin' | 'signup' | 'reset';
 
@@ -46,6 +57,7 @@ const INTRO: Record<Mode, string> = {
 
 export function AccountPanel() {
   const { user, loading, isAdmin, refresh } = useAuth();
+  const router = useRouter();
 
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
@@ -53,6 +65,16 @@ export function AccountPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * Where to go after signing in, when a form sent the visitor here. Read from
+   * `window.location` in an effect rather than `useSearchParams`, which would
+   * force this statically-rendered page into a client-side bailout.
+   */
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    setReturnTo(safeReturnPath(new URLSearchParams(window.location.search).get('next')));
+  }, []);
 
   function switchTo(next: Mode) {
     setMode(next);
@@ -81,8 +103,10 @@ export function AccountPanel() {
     try {
       if (mode === 'signin') {
         await signIn(email.trim(), password);
+        if (returnTo) router.replace(returnTo);
       } else if (mode === 'signup') {
         await signUp(email.trim(), password);
+        if (returnTo) router.replace(returnTo);
       } else {
         await requestPasswordReset(email.trim());
         // Phrased as a condition, not a confirmation — see the enumeration
@@ -148,6 +172,14 @@ export function AccountPanel() {
           Sesión iniciada como <strong>{user.email}</strong>
         </p>
 
+        {returnTo && (
+          <p className="account-return">
+            <Link href={returnTo} className="btn btn--brand">
+              {t.applications.continueApplication}
+            </Link>
+          </p>
+        )}
+
         {!user.emailVerified && (
           <div className="auth__notice auth__notice--warn" role="status">
             <p>Todavía no verificas tu correo. Te enviamos un enlace cuando creaste la cuenta.</p>
@@ -177,6 +209,9 @@ export function AccountPanel() {
           de alimentación de cada animalito llegarán aquí.
         </p>
 
+        {/* Renders nothing for someone who has never applied online. */}
+        <MyApplications user={user} />
+
         <div className="auth__actions">
           {/* Only shown to admins, and only as a shortcut — /admin gates itself,
               and firestore.rules gates everything behind it. Hiding the link is
@@ -204,6 +239,11 @@ export function AccountPanel() {
     <div className="auth">
       <h1 className="t-title">{HEADING[mode]}</h1>
       <p className="auth__prose">{INTRO[mode]}</p>
+      {returnTo && mode !== 'reset' && (
+        <p className="auth__notice" role="status">
+          {t.applications.returnNotice}
+        </p>
+      )}
 
       <form className="auth__form" onSubmit={handleSubmit} noValidate>
         <label className="auth__field">
