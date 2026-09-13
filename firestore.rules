@@ -311,6 +311,204 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ═══ FOOD — build-order step 13, plan §12 ═══════════════════════════════
+    // Four collections, ADMIN-ONLY in both directions. A donation carries a
+    // donor's name; the pantry and the daily sheet are operational data with
+    // no reason to be readable by an adopter.
+    //
+    // What these rules add beyond isAdmin(), and why it is worth rules at all
+    // when only admins can write: an admin account is still a phone in a
+    // courtyard. The rules make the pantry's numbers impossible to REWRITE —
+    // the ledger is append-only and a donation's lines are frozen — and they
+    // make every write carry its own author and the server's clock. A wrong
+    // number is then corrected in the open rather than edited away.
+    //
+    // What they deliberately do NOT check: that a ledger entry's `sourceId`
+    // names a donation or batch that exists. That would be a get() per entry
+    // on every write, and the client writes both in one atomic batch.
+
+    function isFoodCategory(category) {
+      return category in ['meat', 'offal', 'bone', 'grain', 'vegetable', 'kibble', 'wet-food', 'other'];
+    }
+
+    // The account a write is attributed to must be the caller's own: its email
+    // when the token carries one, otherwise its uid. Mirrors `user.email ??
+    // user.uid` in the client.
+    function isCaller(value) {
+      return value == request.auth.uid || value == request.auth.token.get('email', null);
+    }
+
+    function optionalString(value, max) {
+      return value == null || (value is string && value.size() <= max);
+    }
+
+    // Ten minutes of slack for a phone's clock. The client refuses anything
+    // past five (CLOCK_SKEW_TOLERANCE_MS); this is the backstop, not the rule.
+    function notInFuture(time) {
+      return time is timestamp && time <= request.time + duration.value(10, 'm');
+    }
+
+    // The outcomes a cook batch records after the fact. Numbers are typed:
+    // grams and dogs are whole, ladles may be half, fill is a fraction.
+    function cookOutcomesValid(data) {
+      return (data.potFillLevel == null
+              || (data.potFillLevel is number && data.potFillLevel > 0 && data.potFillLevel <= 1))
+        && (data.cookedWeightG == null
+            || (data.cookedWeightG is int && data.cookedWeightG > 0 && data.cookedWeightG <= 2000000))
+        && (data.ladlesYielded == null
+            || (data.ladlesYielded is number && data.ladlesYielded > 0 && data.ladlesYielded <= 2000))
+        && (data.dogsServed == null
+            || (data.dogsServed is int && data.dogsServed > 0 && data.dogsServed <= 1000))
+        && optionalString(data.cookedBy, 80)
+        && optionalString(data.notes, 1000);
+    }
+
+    // ── foodDonations/{donationId} ─────────────────────────────────────────
+    // Created once, after a person has reviewed every line — saving IS the
+    // confirmation, so there is no unconfirmed donation for stock to leak
+    // from. The lines cannot be validated item by item here (rules cannot loop
+    // over a list); the NUMBERS that move stock live in the ledger below,
+    // where each one is validated on its own.
+    match /foodDonations/{donationId} {
+      allow read: if isAdmin();
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['donor', 'receivedAt', 'rawText', 'lines',
+             'source', 'extractedByModel', 'notes', 'recordedBy', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['donor', 'receivedAt', 'rawText', 'lines',
+             'source', 'extractedByModel', 'notes', 'recordedBy', 'createdAt', 'updatedAt'])
+        && optionalString(request.resource.data.donor, 120)
+        && notInFuture(request.resource.data.receivedAt)
+        && request.resource.data.rawText is string
+        && request.resource.data.rawText.size() <= 2000
+        && request.resource.data.lines is list
+        && request.resource.data.lines.size() >= 1
+        && request.resource.data.lines.size() <= 40
+        && request.resource.data.source in ['manual', 'llm-parsed']
+        && optionalString(request.resource.data.extractedByModel, 40)
+        && (request.resource.data.source == 'llm-parsed' || request.resource.data.extractedByModel == null)
+        && optionalString(request.resource.data.notes, 1000)
+        && isCaller(request.resource.data.recordedBy)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // Only the donor's name and the notes may change afterwards. The lines —
+      // and so the stock they produced — are frozen: a donation recorded wrong
+      // is answered by a correction in the ledger, where it is visible.
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['donor', 'notes', 'updatedAt'])
+        && optionalString(request.resource.data.donor, 120)
+        && optionalString(request.resource.data.notes, 1000)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // ── foodStock/{category}/stockEntries/{entryId} — THE LEDGER ───────────
+    // Stock is the sum of these, never a stored total. The category is in the
+    // PATH so a category's stock is an unfiltered sum() over one subcollection:
+    // measured 2026-09-12, the same sum filtered by a field on a flat
+    // collection demanded a composite index, and this shape needs none.
+    //
+    // Append-only. The sign follows the kind — a donation only adds, a cook or
+    // a discard only removes — and a correction must say why.
+    match /foodStock/{category}/stockEntries/{entryId} {
+      allow read: if isAdmin();
+
+      allow create: if isAdmin()
+        && isFoodCategory(category)
+        && request.resource.data.keys().hasOnly(['kind', 'category', 'label', 'deltaG',
+             'occurredAt', 'recordedAt', 'expiresAt', 'sourceId', 'note', 'recordedBy'])
+        && request.resource.data.keys().hasAll(['kind', 'category', 'label', 'deltaG',
+             'occurredAt', 'recordedAt', 'expiresAt', 'sourceId', 'note', 'recordedBy'])
+        && request.resource.data.category == category
+        && request.resource.data.kind in ['donation', 'cook', 'discard', 'correction']
+        && request.resource.data.deltaG is int
+        && request.resource.data.deltaG != 0
+        && math.abs(request.resource.data.deltaG) <= 2000000
+        && (request.resource.data.kind != 'donation' || request.resource.data.deltaG > 0)
+        && (!(request.resource.data.kind in ['cook', 'discard']) || request.resource.data.deltaG < 0)
+        && request.resource.data.label is string
+        && request.resource.data.label.size() > 0
+        && request.resource.data.label.size() <= 80
+        && notInFuture(request.resource.data.occurredAt)
+        && request.resource.data.recordedAt == request.time
+        && (request.resource.data.expiresAt == null || request.resource.data.expiresAt is timestamp)
+        && (request.resource.data.kind in ['discard', 'correction']
+            ? request.resource.data.sourceId == null
+            : (request.resource.data.sourceId is string
+               && request.resource.data.sourceId.size() > 0
+               && request.resource.data.sourceId.size() <= 128))
+        && optionalString(request.resource.data.note, 500)
+        && (request.resource.data.kind != 'correction'
+            || (request.resource.data.note is string && request.resource.data.note.size() > 0))
+        && isCaller(request.resource.data.recordedBy);
+
+      allow update, delete: if false;
+    }
+
+    // ── cookBatches/{batchId} ──────────────────────────────────────────────
+    match /cookBatches/{batchId} {
+      allow read: if isAdmin();
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['cookedAt', 'inputs', 'potFillLevel',
+             'cookedWeightG', 'ladlesYielded', 'dogsServed', 'cookedBy', 'notes', 'recordedBy',
+             'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['cookedAt', 'inputs', 'potFillLevel',
+             'cookedWeightG', 'ladlesYielded', 'dogsServed', 'cookedBy', 'notes', 'recordedBy',
+             'createdAt', 'updatedAt'])
+        && notInFuture(request.resource.data.cookedAt)
+        && request.resource.data.inputs is list
+        && request.resource.data.inputs.size() >= 1
+        && request.resource.data.inputs.size() <= 20
+        && cookOutcomesValid(request.resource.data)
+        && isCaller(request.resource.data.recordedBy)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // The outcomes arrive hours later — the pot is weighed after cooking and
+      // the ladles counted after serving. The INPUTS never change: each one is
+      // also a ledger entry that has already moved the stock.
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['potFillLevel', 'cookedWeightG', 'ladlesYielded', 'dogsServed',
+                       'cookedBy', 'notes', 'updatedAt'])
+        && cookOutcomesValid(request.resource.data)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // ── feedingLog/{YYYY-MM-DD} ────────────────────────────────────────────
+    // One document per day, edited through the day. Servings move no stock
+    // (cook batches do), so a day written by mistake may be deleted outright.
+    match /feedingLog/{date} {
+      allow read: if isAdmin();
+
+      allow create, update: if isAdmin()
+        && date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['date', 'batchIds', 'servings', 'dogsPresent',
+             'shortfallNote', 'updatedBy', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['date', 'batchIds', 'servings', 'dogsPresent',
+             'shortfallNote', 'updatedBy', 'updatedAt'])
+        && request.resource.data.date == date
+        && request.resource.data.batchIds is list
+        && request.resource.data.batchIds.size() <= 10
+        && request.resource.data.servings is list
+        && request.resource.data.servings.size() <= 200
+        && (request.resource.data.dogsPresent == null
+            || (request.resource.data.dogsPresent is int
+                && request.resource.data.dogsPresent >= 0
+                && request.resource.data.dogsPresent <= 1000))
+        && optionalString(request.resource.data.shortfallNote, 500)
+        && isCaller(request.resource.data.updatedBy)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if isAdmin();
+    }
+
     // ── default deny ───────────────────────────────────────────────────────
     // Anything not matched above is inaccessible. New collections must opt in
     // deliberately rather than inherit access by accident.

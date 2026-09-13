@@ -800,6 +800,199 @@ export interface Placement {
   note: string | null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FOOD — foodDonations, foodStockLedger, cookBatches, feedingLog. ADMIN only.
+//
+// Build-order step 13, plan §12. Four top-level collections, all admin-only in
+// both directions: a donation carries a donor's name, and the pantry and the
+// daily sheet are operational data with no reason to be readable by an
+// adopter.
+//
+// ═══ STOCK IS A LEDGER, NOT A NUMBER ════════════════════════════════════════
+// Plan §12.5 sketched `foodStock/{itemKey}` holding one mutable quantity per
+// item. Built instead as `foodStockLedger`: one IMMUTABLE document per movement
+// (a donation line in, a cook batch input out, a discard, a correction), and
+// stock is the SUM. Three reasons:
+//
+//   1. A mutable total can be rewritten by any admin with no trace, and a
+//      pantry that says 12 kg while the shelf holds 3 is exactly the "does
+//      tonight's pot feed every dog" question going wrong. The rules make a
+//      ledger entry create-only, so a correction is itself an entry, with a
+//      name and a date.
+//   2. Rules cannot loop over a list. Validating a donation's quantities inside
+//      an `items[]` array is impossible; validating one number on one entry is
+//      a line of rules.
+//   3. Two admins recording at once — one a donation, one a cook batch — would
+//      each read-modify-write the same total and one change would vanish. A
+//      sum of independent entries has no such race.
+//
+// The cost is a read per movement when summing, which Firestore's `sum()`
+// aggregation reduces to a handful of index-entry reads per category.
+//
+// Stock is kept by CATEGORY, not by food name. "arroz", "arroz blanco" and
+// "arroz grano largo" are one pile on the shelf; a name-keyed pantry splits it
+// into three rows, which is the duplicate-area problem from `areas.ts` arriving
+// through a pantry. The names survive on each entry for the record.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a donation IS, as the pot sees it. STORED values.
+ *
+ * `bone` is its own category rather than a flag on meat because a bag of
+ * espinazo is mostly bone, and the pantry should not report it as kilos of
+ * meat. A bone-in cut of meat stays `meat` and carries the `bones` hazard.
+ */
+export type FoodCategory =
+  | 'meat'
+  | 'offal' // menudencia, hígado, panza
+  | 'bone'
+  | 'grain' // arroz, fideo, avena, maíz
+  | 'vegetable'
+  | 'kibble' // croquetas
+  | 'wet-food' // latas, sobres de comida húmeda
+  | 'other';
+
+/**
+ * Something about a food that the shelter should look at before it reaches an
+ * animal. STORED on a donation line. Detected by deterministic word lists in
+ * `food-safety.ts`, never by the model.
+ */
+export type FoodHazard =
+  | 'allium' // cebolla, ajo, puerro, cebollín — haemolytic anaemia, cooking does not help
+  | 'chocolate'
+  | 'caffeine'
+  | 'grapes' // uvas y pasas
+  | 'xylitol'
+  | 'macadamia'
+  | 'alcohol'
+  | 'raw-dough'
+  | 'avocado'
+  | 'bones' // cooked bone splinters
+  | 'spoilage'; // moho, podrido
+
+export type ParseConfidence = 'high' | 'medium' | 'low';
+
+export interface FoodDonationLine {
+  /** As confirmed: "arroz", "hígado de res". */
+  food: string;
+  category: FoodCategory;
+  /** The quantity as written and confirmed, e.g. "3 bolsas de 5 kg". */
+  quantityText: string;
+  /**
+   * Grams, from `parseQuantityPhrase` or a mass typed off the scale. Null when
+   * no mass could be read — such a line is recorded and never stocked.
+   */
+  grams: number | null;
+  /** Whether this line produced a ledger entry. False for toxic or unweighed lines. */
+  inStock: boolean;
+  expiresAt: Timestamp | null;
+  hazards: FoodHazard[];
+  /** Which species this food is for, as far as the text says. Empty when unstated. */
+  species: Species[];
+  /** The fragment of the typed text the parser said this line came from. */
+  snippet: string | null;
+  /** The parser's own confidence. Null for a line typed by hand. */
+  confidence: ParseConfidence | null;
+}
+
+export interface FoodDonation {
+  id: string;
+  donor: string | null;
+  receivedAt: Timestamp;
+  /** What the admin typed, verbatim. The record the lines are checked against. */
+  rawText: string;
+  lines: FoodDonationLine[];
+  /**
+   * `llm-parsed` when a model proposed the lines, `manual` when a person typed
+   * them. Either way NOTHING is stored until a person confirms: saving IS the
+   * confirmation, and there is no unconfirmed donation document for stock to
+   * leak out of.
+   */
+  source: 'manual' | 'llm-parsed';
+  /** Model KEY, never the raw id. Null when typed by hand. */
+  extractedByModel: string | null;
+  notes: string | null;
+  recordedBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/**
+ * `donation` and `correction` may add; `cook` and `discard` only subtract.
+ * The rules enforce the sign.
+ */
+export type StockEntryKind = 'donation' | 'cook' | 'discard' | 'correction';
+
+export interface StockEntry {
+  id: string;
+  kind: StockEntryKind;
+  category: FoodCategory;
+  /** The food's name on this movement, for the record. Stock sums by category. */
+  label: string;
+  /** Signed, whole grams. Never zero. */
+  deltaG: number;
+  /** When it happened, as the admin says. */
+  occurredAt: Timestamp;
+  /** When it was written — the server's clock, enforced by the rules. */
+  recordedAt: Timestamp;
+  expiresAt: Timestamp | null;
+  /** The donation or cook batch this came from. Null for a discard or correction. */
+  sourceId: string | null;
+  note: string | null;
+  recordedBy: string;
+}
+
+export interface CookBatchInput {
+  category: FoodCategory;
+  label: string;
+  /** MEASURED raw grams that went into the pot. */
+  rawG: number;
+}
+
+export interface CookBatch {
+  id: string;
+  cookedAt: Timestamp;
+  /** Immutable once written: each one is also a `cook` entry in the ledger. */
+  inputs: CookBatchInput[];
+  /** How full the pot was, 0–1, by eye. The geometric half of a yield estimate. */
+  potFillLevel: number | null;
+  /**
+   * The OBSERVED outcomes, plan §12.2's calibration data. Nullable and
+   * editable after the fact: the pot is weighed after cooking and the ladles
+   * are counted after serving, hours after the inputs were written.
+   */
+  cookedWeightG: number | null;
+  ladlesYielded: number | null;
+  dogsServed: number | null;
+  /** Who cooked, free text — usually a volunteer with no account. */
+  cookedBy: string | null;
+  notes: string | null;
+  recordedBy: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface FeedingServing {
+  petId: string;
+  /** Snapshotted, like `Placement.areaName`: a renamed dog must not blur the day. */
+  petName: string;
+  /** Ladles served that day. Half ladles are real. */
+  ladles: number;
+  /** Why this dog's serving differs from usual, when it does. */
+  adjustedReason: string | null;
+}
+
+/** `feedingLog/{YYYY-MM-DD}` — one document per day, so a day is one read. */
+export interface FeedingLog {
+  date: string;
+  batchIds: string[];
+  servings: FeedingServing[];
+  dogsPresent: number | null;
+  shortfallNote: string | null;
+  updatedBy: string;
+  updatedAt: Timestamp;
+}
+
 /** Geographic bounds for the Cochabamba region, enforced in security rules. */
 export const COCHABAMBA_BOUNDS = {
   minLat: -17.75,

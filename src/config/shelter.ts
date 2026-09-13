@@ -55,6 +55,25 @@ export interface ShelterConfig {
     minLng: number;
     maxLng: number;
   };
+
+  /**
+   * The cooking pot and the serving ladle, MEASURED at your shelter.
+   *
+   * ⚠️ `null` until someone measures them, and null is a real value, not a
+   * placeholder to fill with a typical pot. While either is null the app shows
+   * NO yield or ladle estimate anywhere and says why (plan §12.2). A shelter
+   * forking this template must not inherit another shelter's pot silently —
+   * a wrong capacity produces a confident count of ladles for dogs that go
+   * unfed.
+   *
+   * To measure: fill the pot with water one known jug at a time for
+   * `potCapacityLitres`; fill the ladle level with water into a measuring jug
+   * for `ladleVolumeMl`.
+   */
+  kitchen: {
+    potCapacityLitres: number | null;
+    ladleVolumeMl: number | null;
+  };
 }
 
 export const SHELTER: ShelterConfig = {
@@ -83,5 +102,11 @@ export const SHELTER: ShelterConfig = {
     maxLat: -17.15,
     minLng: -66.45,
     maxLng: -65.85,
+  },
+
+  // The owner is providing these (plan §11 #6). Deliberately null until then.
+  kitchen: {
+    potCapacityLitres: null,
+    ladleVolumeMl: null,
   },
 };
