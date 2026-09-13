@@ -81,6 +81,11 @@ export function AdminDashboard() {
           <Link href="/admin/areas" className="btn btn--muted">
             Áreas
           </Link>
+          {/* The batch tag sheet starts HERE because this is the list of every
+              animal — see src/app/admin/qr/page.tsx. */}
+          <Link href="/admin/qr" className="btn btn--muted">
+            {t.tag.sheetLink}
+          </Link>
           <Link href="/admin/applications" className="btn btn--muted">
             {t.applications.queueLink}
           </Link>

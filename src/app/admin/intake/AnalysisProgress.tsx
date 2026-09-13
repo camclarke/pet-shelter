@@ -56,9 +56,20 @@ const PHASE_TEXT: Record<AnalysisPhase, string> = {
 export interface AnalysisProgressProps {
   /** How many photographs went in the request. Sets the attempt window. */
   photoCount: number;
+  /**
+   * The heading. Defaults to intake's. Vaccination-card reading passes its
+   * own, because it runs under the same budget and the same clock facts.
+   */
+  title?: string;
+  /** What is already safe, said after "No cierres esta pantalla —". */
+  savedNote?: string;
 }
 
-export function AnalysisProgress({ photoCount }: AnalysisProgressProps) {
+export function AnalysisProgress({
+  photoCount,
+  title = 'Mirando las fotos…',
+  savedNote = 'las fotos ya se guardaron y quedan aunque el análisis falle.',
+}: AnalysisProgressProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
 
   useEffect(() => {
@@ -78,7 +89,7 @@ export function AnalysisProgress({ photoCount }: AnalysisProgressProps) {
   return (
     <div className="analysing">
       <div className="analysing__head">
-        <strong>Mirando las fotos…</strong>
+        <strong>{title}</strong>
         <span className="t-data analysing__clock">
           {elapsedS}s de {totalS}s
         </span>
@@ -93,8 +104,7 @@ export function AnalysisProgress({ photoCount }: AnalysisProgressProps) {
       {/* Coarse, so a screen reader is not read a new number every second. */}
       <p className="auth__hint analysing__phase" role="status">
         {PHASE_TEXT[phase]}{' '}
-        <strong>No cierres esta pantalla</strong> — las fotos ya se guardaron y
-        quedan aunque el análisis falle.
+        <strong>No cierres esta pantalla</strong> — {savedNote}
       </p>
     </div>
   );

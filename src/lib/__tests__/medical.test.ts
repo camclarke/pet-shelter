@@ -15,6 +15,7 @@ import {
   validateMedicalDraft,
   type MedicalRecordDraft,
 } from '../medical';
+import { parseDateInput } from '../date-input';
 import { CLOCK_SKEW_TOLERANCE_MS } from '../placements';
 
 const DAY = 86_400_000;
@@ -67,6 +68,57 @@ test('a dose dated seconds ahead is NOT rejected — clocks drift', () => {
     NOW
   );
   assert.equal(errors.includes('performed-in-future'), false);
+});
+
+// ─── regression: a record dated TODAY must be saveable before noon ──────────
+//
+// `parseDateInput` stamps a picked `YYYY-MM-DD` at LOCAL NOON. The old
+// `performedAt > now + tolerance` check compared that noon stamp against an
+// INSTANT, so a shelter recording a vaccination given this morning was told
+// the date "hasn't arrived yet" until the clock caught up to noon. Built with
+// the LOCAL `Date` constructor throughout, never `Date.parse('...Z')`, so
+// this passes or fails the same way in any timezone — CI runs UTC and this
+// machine does not.
+
+function localTime(hour: number, minute: number): number {
+  return new Date(2026, 8, 15, hour, minute).getTime(); // 2026-09-15, fixed
+}
+
+test('a record dated today is accepted at 00:01, 09:00, 11:59 and 23:59', () => {
+  const performedAt = parseDateInput('2026-09-15').getTime();
+  for (const [hour, minute] of [[0, 1], [9, 0], [11, 59], [23, 59]] as const) {
+    const errors = validateMedicalDraft(draft({ performedAt }), localTime(hour, minute));
+    assert.equal(
+      errors.includes('performed-in-future'),
+      false,
+      `today at ${hour}:${minute} should be accepted`
+    );
+  }
+});
+
+test('a record dated tomorrow is still rejected at 09:00 and 23:00', () => {
+  const performedAt = parseDateInput('2026-09-16').getTime();
+  for (const [hour, minute] of [[9, 0], [23, 0]] as const) {
+    const errors = validateMedicalDraft(draft({ performedAt }), localTime(hour, minute));
+    assert.ok(
+      errors.includes('performed-in-future'),
+      `tomorrow at ${hour}:${minute} should still be rejected`
+    );
+  }
+});
+
+test('a record dated 3 days ahead is still rejected', () => {
+  const performedAt = parseDateInput('2026-09-18').getTime();
+  const errors = validateMedicalDraft(draft({ performedAt }), localTime(9, 0));
+  assert.ok(errors.includes('performed-in-future'));
+});
+
+test('the clock-skew allowance still works across midnight: 23:57 accepts tomorrow, 23:50 does not', () => {
+  const performedAt = parseDateInput('2026-09-16').getTime();
+  const near = validateMedicalDraft(draft({ performedAt }), localTime(23, 57));
+  assert.equal(near.includes('performed-in-future'), false);
+  const notYet = validateMedicalDraft(draft({ performedAt }), localTime(23, 50));
+  assert.ok(notYet.includes('performed-in-future'));
 });
 
 test('a due date before the dose is rejected', () => {
@@ -223,13 +275,19 @@ test('byMostRecent does not mutate its input', () => {
 
 test('nextDue picks the soonest and ignores records with no due date', () => {
   const soonest = nextDue([
-    { nextDueAt: null },
-    { nextDueAt: NOW + 300 * DAY },
-    { nextDueAt: NOW + 30 * DAY },
+    { nextDueAt: null, confirmedBy: 'vet' },
+    { nextDueAt: NOW + 300 * DAY, confirmedBy: 'vet' },
+    { nextDueAt: NOW + 30 * DAY, confirmedBy: 'vet' },
   ]);
   assert.equal(soonest?.nextDueAt, NOW + 30 * DAY);
 });
 
 test('nextDue returns null when nothing is scheduled', () => {
-  assert.equal(nextDue([{ nextDueAt: null }, { nextDueAt: null }]), null);
+  assert.equal(
+    nextDue([
+      { nextDueAt: null, confirmedBy: 'vet' },
+      { nextDueAt: null, confirmedBy: 'vet' },
+    ]),
+    null
+  );
 });
