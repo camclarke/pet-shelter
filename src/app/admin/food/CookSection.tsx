@@ -6,7 +6,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
 import { formatDate, parseDateInput, todayInputValue } from '@/lib/date-input';
-import { listCookBatches, readStock, saveCookBatch, updateCookOutcome, type CookBatchView } from '@/lib/food-admin';
+import { listCookBatches, readStock, requestCookBatch, updateCookOutcome, type CookBatchView } from '@/lib/food-admin';
 import { hasToxicHazard } from '@/lib/food-safety';
 import {
   FOOD_CATEGORIES,
@@ -111,7 +111,13 @@ export function CookSection() {
     if (validateCookBatch(fresh).length > 0) return;
     setBusy(true);
     try {
-      await saveCookBatch(fresh, user);
+      // Created on the server, which re-runs validateCookBatch — the toxic gate
+      // included — because the rules deny a client create. See food-admin.ts.
+      const result = await requestCookBatch(user, fresh);
+      if (result.failure !== null) {
+        setError(result.failure === 'unauthorized' ? t.food.permissionDenied : t.food.saveFailed);
+        return;
+      }
       setInputs([emptyInput()]);
       setOutcome(emptyOutcome());
       setOpen(false);

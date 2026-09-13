@@ -140,7 +140,14 @@ const CASES = [
   // ── the ledger ────────────────────────────────────────────────────────────
   ['ledger: a donation ADDS stock', ALLOW, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry())],
   ['ledger: a donation cannot SUBTRACT', DENY, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry({ deltaG: -15000 }))],
-  ['ledger: a cook entry subtracts', ALLOW, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry({ kind: 'cook', deltaG: -5000, sourceId: 'batch-1' }))],
+  // Cook entries are written only by POST /api/food/cook-batch (Admin SDK), with the
+  // batch they came from, after the server has run the toxic gate.
+  ['ledger: a client cannot write a cook entry (server route only)', DENY, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry({ kind: 'cook', deltaG: -5000, sourceId: 'batch-1' }))],
+  ['ledger: a discard cannot ADD', DENY, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry({ kind: 'discard', deltaG: 2500, sourceId: null }))],
+  // isCaller(): a token with no email claim used to match recordedBy: null.
+  ['ledger: a token with NO email cannot attribute to null', DENY, req({ uid: 'nightprobe-s13-noemail', token: { admin: true } }, 'foodStock/grain/stockEntries/e1', 'create', entry({ recordedBy: null }))],
+  ['ledger: a token with NO email cannot attribute to an empty string', DENY, req({ uid: 'nightprobe-s13-noemail', token: { admin: true } }, 'foodStock/grain/stockEntries/e1', 'create', entry({ recordedBy: '' }))],
+  ['ledger: a token with NO email attributes by uid', ALLOW, req({ uid: 'nightprobe-s13-noemail', token: { admin: true } }, 'foodStock/grain/stockEntries/e1', 'create', entry({ recordedBy: 'nightprobe-s13-noemail' }))],
   ['ledger: a cook entry cannot ADD', DENY, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry({ kind: 'cook', deltaG: 5000, sourceId: 'batch-1' }))],
   ['ledger: a discard subtracts with no source', ALLOW, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry({ kind: 'discard', deltaG: -2500, sourceId: null }))],
   ['ledger: a discard naming a source is refused', DENY, req(ADMIN, 'foodStock/grain/stockEntries/e1', 'create', entry({ kind: 'discard', deltaG: -2500 }))],
@@ -162,9 +169,12 @@ const CASES = [
   ['ledger: the parent foodStock/{category} doc is not writable', DENY, req(ADMIN, 'foodStock/grain', 'create', { total: 5 })],
 
   // ── cook batches ──────────────────────────────────────────────────────────
-  ['cook: admin records a batch', ALLOW, req(ADMIN, 'cookBatches/b1', 'create', cook())],
-  ['cook: a batch with no inputs is refused', DENY, req(ADMIN, 'cookBatches/b1', 'create', cook({ inputs: [] }))],
-  ['cook: a pot filled to 150% is refused', DENY, req(ADMIN, 'cookBatches/b1', 'create', cook({ potFillLevel: 1.5 }))],
+  // Client create is denied for EVERY caller: cook batches are created only by
+  // POST /api/food/cook-batch, whose handler runs the toxic gate. Its allow branch
+  // (acknowledged → written) is tested in cook-batch-handler.test.ts.
+  ['cook: a client cannot create a batch, even an admin (server route only)', DENY, req(ADMIN, 'cookBatches/b1', 'create', cook())],
+  ['cook: client create with an UNACKNOWLEDGED toxic input is denied', DENY, req(ADMIN, 'cookBatches/b1', 'create', cook({ inputs: [{ category: 'vegetable', label: 'cebolla', rawG: 1000, toxicAcknowledged: false }] }))],
+  ['cook: a pot filled to 150% is refused (outcome update)', DENY, req(ADMIN, 'cookBatches/b1', 'update', cook({ potFillLevel: 1.5, createdAt: T_MINUS_1D })), cook({ createdAt: T_MINUS_1D, updatedAt: T_MINUS_1D })],
   ['cook: outcomes added later — half ladles allowed', ALLOW, req(ADMIN, 'cookBatches/b1', 'update', cook({ cookedWeightG: 31500, ladlesYielded: 120.5, dogsServed: 38, createdAt: T_MINUS_1D })), cook({ createdAt: T_MINUS_1D, updatedAt: T_MINUS_1D })],
   ['cook: zero ladles is not an outcome', DENY, req(ADMIN, 'cookBatches/b1', 'update', cook({ ladlesYielded: 0, createdAt: T_MINUS_1D })), cook({ createdAt: T_MINUS_1D, updatedAt: T_MINUS_1D })],
   ['cook: half a dog is not an outcome', DENY, req(ADMIN, 'cookBatches/b1', 'update', cook({ dogsServed: 3.5, createdAt: T_MINUS_1D })), cook({ createdAt: T_MINUS_1D, updatedAt: T_MINUS_1D })],

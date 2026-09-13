@@ -325,7 +325,9 @@ service cloud.firestore {
     //
     // What they deliberately do NOT check: that a ledger entry's `sourceId`
     // names a donation or batch that exists. That would be a get() per entry
-    // on every write, and the client writes both in one atomic batch.
+    // on every write, and each entry is written in one atomic batch with its
+    // source — by the client for a donation, by POST /api/food/cook-batch for a
+    // cook batch.
 
     function isFoodCategory(category) {
       return category in ['meat', 'offal', 'bone', 'grain', 'vegetable', 'kibble', 'wet-food', 'other'];
@@ -334,8 +336,15 @@ service cloud.firestore {
     // The account a write is attributed to must be the caller's own: its email
     // when the token carries one, otherwise its uid. Mirrors `user.email ??
     // user.uid` in the client.
+    //
+    // ⚠️ The value must be a NON-EMPTY STRING. The first version compared the
+    // value with `token.get('email', null)`, so for a token with no email claim
+    // a write carrying `recordedBy: null` matched null == null and was accepted
+    // as attributed. Found by the independent evaluation on 2026-09-13 with the
+    // Rules test API. The '' default cannot match a non-empty value.
     function isCaller(value) {
-      return value == request.auth.uid || value == request.auth.token.get('email', null);
+      return value is string && value.size() > 0
+        && (value == request.auth.uid || value == request.auth.token.get('email', ''));
     }
 
     function optionalString(value, max) {
@@ -411,8 +420,13 @@ service cloud.firestore {
     // measured 2026-09-12, the same sum filtered by a field on a flat
     // collection demanded a composite index, and this shape needs none.
     //
-    // Append-only. The sign follows the kind — a donation only adds, a cook or
-    // a discard only removes — and a correction must say why.
+    // Append-only. The sign follows the kind — a donation only adds, a discard
+    // only removes — and a correction must say why.
+    //
+    // ⚠️ A client may NOT write a `cook` entry. Those are written only by
+    // POST /api/food/cook-batch, in the same atomic Admin SDK batch as the cook
+    // batch they came from, after the server has run the toxic-ingredient gate.
+    // See cookBatches below.
     match /foodStock/{category}/stockEntries/{entryId} {
       allow read: if isAdmin();
 
@@ -423,12 +437,12 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['kind', 'category', 'label', 'deltaG',
              'occurredAt', 'recordedAt', 'expiresAt', 'sourceId', 'note', 'recordedBy'])
         && request.resource.data.category == category
-        && request.resource.data.kind in ['donation', 'cook', 'discard', 'correction']
+        && request.resource.data.kind in ['donation', 'discard', 'correction']
         && request.resource.data.deltaG is int
         && request.resource.data.deltaG != 0
         && math.abs(request.resource.data.deltaG) <= 2000000
         && (request.resource.data.kind != 'donation' || request.resource.data.deltaG > 0)
-        && (!(request.resource.data.kind in ['cook', 'discard']) || request.resource.data.deltaG < 0)
+        && (request.resource.data.kind != 'discard' || request.resource.data.deltaG < 0)
         && request.resource.data.label is string
         && request.resource.data.label.size() > 0
         && request.resource.data.label.size() <= 80
@@ -452,21 +466,28 @@ service cloud.firestore {
     match /cookBatches/{batchId} {
       allow read: if isAdmin();
 
-      allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly(['cookedAt', 'inputs', 'potFillLevel',
-             'cookedWeightG', 'ladlesYielded', 'dogsServed', 'cookedBy', 'notes', 'recordedBy',
-             'createdAt', 'updatedAt'])
-        && request.resource.data.keys().hasAll(['cookedAt', 'inputs', 'potFillLevel',
-             'cookedWeightG', 'ladlesYielded', 'dogsServed', 'cookedBy', 'notes', 'recordedBy',
-             'createdAt', 'updatedAt'])
-        && notInFuture(request.resource.data.cookedAt)
-        && request.resource.data.inputs is list
-        && request.resource.data.inputs.size() >= 1
-        && request.resource.data.inputs.size() <= 20
-        && cookOutcomesValid(request.resource.data)
-        && isCaller(request.resource.data.recordedBy)
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
+      // ⚠️ CLIENT CREATE IS DENIED for every caller, admins included. A cook
+      // batch is created only by POST /api/food/cook-batch, which verifies the
+      // ID token and the admin claim itself (checkRevoked) and runs the SAME
+      // pure validateCookBatch the screen runs — the toxic-ingredient
+      // acknowledgement included — before one Admin SDK batch writes the batch
+      // and its `cook` ledger entries.
+      //
+      // Why the gate is not enforced HERE (decided 2026-09-13, after the
+      // independent evaluation showed the previous create rule accepted an
+      // unacknowledged toxic input):
+      //   - toxicity is derived from the input's FREE-TEXT label by a word list
+      //     that folds accents, needs letter-aware boundaries and honours "sin
+      //     cebolla". Rules have no Unicode folding and ASCII regex boundaries,
+      //     so a copy here would disagree with the screen;
+      //   - inputs name a category, not a stock entry, so there is no stored
+      //     hazard flag for a get() to read;
+      //   - so a check here could only trust a toxic flag the client copied in,
+      //     which catches a UI bug but not a falsified flag. The server-side
+      //     validator catches both.
+      // Tested: cook-batch-handler.test.ts (both branches) and
+      // scripts/probe-food-rules.mjs (this denial).
+      allow create: if false;
 
       // The outcomes arrive hours later — the pot is weighed after cooking and
       // the ladles counted after serving. The INPUTS never change: each one is

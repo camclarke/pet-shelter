@@ -801,16 +801,20 @@ export interface Placement {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FOOD — foodDonations, foodStockLedger, cookBatches, feedingLog. ADMIN only.
+// FOOD — foodDonations, foodStock/{category}/stockEntries, cookBatches,
+// feedingLog. ADMIN only.
 //
-// Build-order step 13, plan §12. Four top-level collections, all admin-only in
-// both directions: a donation carries a donor's name, and the pantry and the
-// daily sheet are operational data with no reason to be readable by an
-// adopter.
+// Build-order step 13, plan §12. All admin-only in both directions: a donation
+// carries a donor's name, and the pantry and the daily sheet are operational
+// data with no reason to be readable by an adopter.
+//
+// ⚠️ A cook batch and its `cook` ledger entries are created ONLY by
+// POST /api/food/cook-batch, never by a client write — see the rule.
 //
 // ═══ STOCK IS A LEDGER, NOT A NUMBER ════════════════════════════════════════
 // Plan §12.5 sketched `foodStock/{itemKey}` holding one mutable quantity per
-// item. Built instead as `foodStockLedger`: one IMMUTABLE document per movement
+// item. Built instead as `foodStock/{category}/stockEntries/{entryId}`: one
+// IMMUTABLE document per movement
 // (a donation line in, a cook batch input out, a discard, a correction), and
 // stock is the SUM. Three reasons:
 //
