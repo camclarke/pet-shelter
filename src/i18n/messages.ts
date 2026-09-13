@@ -36,6 +36,212 @@ import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
+import type { TagTone } from '@/lib/qr-tokens';
+
+/**
+ * Everything a QR tag says: the public page a finder lands on, and the admin
+ * screens that issue, revoke and print tags. Build-order step 12, plan §7.
+ *
+ * ⚠️ The finder is a stranger with an animal in front of them. Every sentence
+ * on the public side must lead to one action — writing to the shelter — and
+ * must never promise to hand over a family's details: the shelter relays.
+ */
+export interface TagMessages {
+  // ── the public page ───────────────────────────────────────────────────────
+  /** The one question the page asks, verbatim from plan §7. */
+  readonly foundQuestion: string;
+  /** The WhatsApp button. */
+  readonly writeToShelter: string;
+  /** Tab title when the page does not name an animal. */
+  readonly genericTitle: string;
+  /** The loud first line for a lost animal. */
+  lostBanner(name: string, sex: PetSex): string;
+  /** One sentence under the name, by tone. Gender-agreeing. */
+  situation(tone: TagTone, name: string, sex: PetSex, shelterName: string): string;
+  /** Shown only when the pet document says it is chipped. */
+  microchipHint(sex: PetSex): string;
+  /**
+   * The pre-filled WhatsApp body. Carries the PRINTED code, so the shelter can
+   * look the tag up even if the name on the message is wrong or blank.
+   */
+  finderMessage(input: { name: string; sex: PetSex; formattedToken: string; tone: TagTone }): string;
+  /** Secondary link to the dossier, for an animal in adoption only. */
+  meetLink(name: string): string;
+  /** "WhatsApp 77903553" — the number as a fallback for a phone that cannot follow a link. */
+  phoneLine(display: string): string;
+  /** "Placa ABCDE-FGHJK" */
+  codeLine(formattedToken: string): string;
+  /** Shown to a signed-in admin only. */
+  readonly adminLink: string;
+
+  readonly inactiveTitle: string;
+  inactiveBody(shelterName: string): string;
+  inactiveMessage(formattedToken: string, shelterName: string): string;
+  readonly unknownTitle: string;
+  unknownBody(shelterName: string): string;
+  unknownMessage(shelterName: string): string;
+  /** Generic, for a page that cannot name the animal or its sex. */
+  readonly vetHint: string;
+
+  // ── admin ─────────────────────────────────────────────────────────────────
+  readonly panelTitle: string;
+  readonly loading: string;
+  readonly noneYet: string;
+  activeSince(formattedToken: string, date: string): string;
+  revokedOn(formattedToken: string, date: string): string;
+  /** A second tag that still works. Should never happen; shown rather than hidden if it does. */
+  alsoActive(formattedToken: string, date: string): string;
+  readonly backToRecord: string;
+  readonly backToPanel: string;
+  readonly issue: string;
+  readonly issuing: string;
+  readonly reissue: string;
+  readonly revoke: string;
+  readonly print: string;
+  readonly cancel: string;
+  revokeConfirm(formattedToken: string): string;
+  reissueConfirm(formattedToken: string): string;
+  readonly confirmRevoke: string;
+  readonly confirmReissue: string;
+  /** Plan §7's honest limitation. Belongs wherever a tag is issued or printed. */
+  readonly limitation: string;
+  readonly issueFailed: string;
+  readonly revokeFailed: string;
+  readonly loadFailed: string;
+  readonly permissionDenied: string;
+  readonly printTip: string;
+  readonly testTip: string;
+  printSize(millimetres: number): string;
+  qrAlt(name: string): string;
+  readonly noActiveTag: string;
+  printTitle(name: string): string;
+
+  readonly sheetTitle: string;
+  readonly sheetIntro: string;
+  readonly sheetEmpty: string;
+  /** The sheet lists a capped number of animals; say so when the cap bites. `total` null = count unknown. */
+  sheetTruncated(shown: number, total: number | null): string;
+  readonly sheetLink: string;
+  readonly noTag: string;
+  readonly selectAll: string;
+  readonly clearSelection: string;
+  issueMissing(count: number): string;
+  printSheet(count: number): string;
+  readonly nothingToPrint: string;
+}
+
+import type { FieldEvidence, MedicalExtractionSource } from '@/lib/types';
+import type { CardField } from '@/lib/card-extraction';
+import type { CardExtractFailure } from '@/lib/card-extract-client';
+import type { ApplicationStatus } from '@/lib/types';
+import type {
+  ApplicationAnswerError,
+  ApprovalBlocker,
+  ApprovalWarning,
+} from '@/lib/applications';
+import type { ApplicationSection } from '@/config/shelter';
+
+/**
+ * The fixed wording of the online adoption application — plan §6. Plain strings
+ * where nothing inflects, functions where a name or a count goes in.
+ *
+ * ⚠️ Every line a visitor reads here must be TRUE about what happens next.
+ * Nothing in this feature sends an email or a message, nobody answers through
+ * the page, and an application does not reserve the animal. Copy that implies
+ * otherwise is a promise the shelter did not make.
+ */
+export interface ApplicationCopy {
+  // ── the dossier ──────────────────────────────────────────────────────────
+  /** The SECONDARY text link under the WhatsApp button. Never a button. */
+  readonly applyLink: string;
+
+  // ── the public form ─────────────────────────────────────────────────────
+  pageTitle(petName: string): string;
+  intro(petName: string): string;
+  readonly whatsappInstead: string;
+  privacy(shelterName: string): string;
+  readonly signInPrompt: string;
+  readonly signInButton: string;
+  /** Shown on /account when sign-in will return the visitor to a form. */
+  readonly returnNotice: string;
+  /** On /account, signed in, when a form is waiting to be returned to. */
+  readonly continueApplication: string;
+  readonly loading: string;
+  readonly retry: string;
+  notAccepting(petName: string): string;
+  readonly alreadyApplied: string;
+  readonly goToAccount: string;
+  readonly requiredMark: string;
+  readonly optionalMark: string;
+  readonly choosePlaceholder: string;
+  readonly fixErrors: string;
+  readonly submit: string;
+  readonly submitting: string;
+  readonly submitFailed: string;
+  readonly submitRefused: string;
+  readonly confirmationTitle: string;
+  confirmationSteps(petName: string, shelterName: string): string[];
+  backToPet(petName: string): string;
+
+  // ── /account ────────────────────────────────────────────────────────────
+  readonly mine: string;
+  readonly unknownPet: string;
+  readonly withdraw: string;
+  readonly withdrawQuestion: string;
+  readonly withdrawConfirm: string;
+  readonly keep: string;
+  readonly withdrawFailed: string;
+  readonly loadFailed: string;
+
+  // ── the admin queue ─────────────────────────────────────────────────────
+  readonly queueLink: string;
+  readonly queueTitle: string;
+  readonly queueIntro: string;
+  /** Null when the public form is on and its questions are the shelter's own. */
+  formStateNote(enabled: boolean, questionsAreDraft: boolean): string | null;
+  readonly filterLabel: string;
+  readonly filterOpen: string;
+  readonly filterAll: string;
+  readonly emptyQueue: string;
+  submittedOn(date: string): string;
+  readonly emailUnverifiedTag: string;
+  readonly backToQueue: string;
+  readonly internalRecord: string;
+  readonly applicantTitle: string;
+  readonly answersTitle: string;
+  readonly notAnswered: string;
+  retiredQuestion(id: string): string;
+  readonly notesTitle: string;
+  readonly notesHint: string;
+  readonly saveNotes: string;
+  readonly notesSaved: string;
+  readonly notesFailed: string;
+  readonly actionsTitle: string;
+  readonly noActions: string;
+  readonly approveTitle: string;
+  approveExplain(petName: string, applicant: string): string;
+  readonly approveConfirm: string;
+  readonly cancel: string;
+  approvedDone(petName: string): string;
+  readonly actionFailed: string;
+  readonly actionRefused: string;
+  readonly otherOpenTitle: string;
+  readonly applicationMissing: string;
+  readonly backToPanel: string;
+  readonly statusTitle: string;
+  decidedByOn(who: string, date: string): string;
+  withdrawnOn(date: string): string;
+  readonly emailLabel: string;
+  readonly phoneLabel: string;
+  /** Asked before an ADMIN records a withdrawal, because it cannot be undone. */
+  readonly confirmRecordWithdrawal: string;
+  readonly adminLoadFailed: string;
+  readonly permissionDenied: string;
+  readonly blockersTitle: string;
+  readonly warningsTitle: string;
+  readonly checking: string;
+}
+
 import type { FoodCategory, FoodHazard } from '@/lib/types';
 import type { DonationError, DonationLineError, DonationLineWarning } from '@/lib/food-parse';
 import type {
@@ -375,6 +581,78 @@ export interface Messages {
   /** How long two animals shared a pen: "12 días juntos", "menos de un día". */
   contactDurationLabel(ms: number): string;
 
+  /** QR identity tags — the public page and the admin screens. */
+  readonly tag: TagMessages;
+
+  // ── the medical review gate, and reading a vaccination card (step 9) ──────
+
+  /** Fixed wording for the review gate and the card capture. */
+  readonly medicalReview: MedicalReviewCopy;
+
+  /** Where an extracted record came from: "Leído de una tarjeta de vacunación". */
+  extractionSourceLabel(source: MedicalExtractionSource | null): string;
+
+  /** A card field's name beside its evidence: "Fecha", "Lote". */
+  cardFieldLabel(field: CardField): string;
+
+  /**
+   * One line of evidence: what the model READ, how legible it said it was, and
+   * — when the field was left empty — why.
+   *
+   * ⚠️ Always phrased as a reading ("Leído: «12/03/25»"), never as the fact. The
+   * point of the line is that a person compares it with the card.
+   */
+  evidenceLine(evidence: FieldEvidence): string;
+
+  /** Why reading a card produced nothing. Says what is already safe. */
+  cardExtractFailure(failure: CardExtractFailure): string;
+
+  /** What reading a card did produce, and that none of it counts yet. */
+  cardExtractSummary(result: { written: number; droppedRows: number; notACard: boolean }): string;
+
+  /** "1 registro espera revisión", "3 registros esperan revisión". */
+  awaitingReviewCount(count: number): string;
+
+  /** "Confirmado por …" */
+  confirmedByLabel(by: string): string;
+
+  /** The soonest confirmed booster: "Lo próximo: Quíntuple, el 14 feb 2026." */
+  nextDueSummary(name: string, dateText: string): string;
+
+  // ── adoption applications ─────────────────────────────────────────────────
+
+  /** "Sí" / "No", for a stored yes-or-no answer. */
+  yesNo(value: boolean): string;
+
+  /** The status as the SHELTER reads it: "Nueva", "Rechazada". */
+  applicationStatusLabel(status: ApplicationStatus): string;
+
+  /**
+   * The status as the APPLICANT reads it. Gentler where it matters —
+   * "No aprobada" rather than "Rechazada" — and never different in substance.
+   */
+  applicantStatusLabel(status: ApplicationStatus): string;
+
+  /** One honest line on what the status means for the applicant, and what to do. */
+  applicantStatusExplanation(status: ApplicationStatus): string;
+
+  /** The admin button that moves an application from one status to another. */
+  applicationActionLabel(from: ApplicationStatus, to: ApplicationStatus): string;
+
+  /** The plan §6 headings the form is grouped under. */
+  applicationSectionLabel(section: ApplicationSection): string;
+
+  /** Why one answer cannot be sent. Addressed to the applicant, as an instruction. */
+  applicationAnswerError(error: ApplicationAnswerError): string;
+
+  /** Why an approval cannot be recorded. Structural only — these BLOCK. */
+  approvalBlocker(blocker: ApprovalBlocker): string;
+
+  /** Something to know before approving that must NOT block it. */
+  approvalWarning(warning: ApprovalWarning, detail: { otherOpenCount: number }): string;
+
+  readonly applications: ApplicationCopy;
+
   // ── food: donations, stock, the pot, rations — step 13 ────────────────────
 
   foodCategoryLabel(category: FoodCategory): string;
@@ -442,4 +720,49 @@ export interface Messages {
 
   /** A measured ratio from cook batches, always with its n. */
   measuredRatioText(measure: 'cooked-to-raw' | 'grams-per-ladle', ratio: MeasuredRatio | null): string;
+}
+
+/**
+ * Fixed strings for the review gate. An object rather than functions because
+ * nothing in it inflects — but still here, because the rule is "no user-facing
+ * words outside src/i18n", and the shelter's volunteers are users.
+ */
+export interface MedicalReviewCopy {
+  /** The badge on a record nobody has confirmed. */
+  readonly unconfirmedBadge: string;
+  /** Why an unconfirmed record shows no due-date or lapsed flags. */
+  readonly notCounted: string;
+  readonly confirm: string;
+  readonly correctAndConfirm: string;
+  readonly saveAndConfirm: string;
+  readonly discard: string;
+  /** In place of Confirm, when the record cannot be confirmed as it stands. */
+  readonly confirmNeedsEdit: string;
+  readonly showCard: string;
+  readonly hideCard: string;
+  readonly cardAlt: string;
+  readonly unknownKind: string;
+  readonly unknownName: string;
+  readonly unknownDate: string;
+  /** Above the form while a person corrects what a model read. */
+  readonly reviewingNotice: string;
+  readonly captureTitle: string;
+  readonly captureHint: string;
+  readonly captureTakePhoto: string;
+  readonly captureGallery: string;
+  readonly captureRetry: string;
+  readonly captureUploading: string;
+  readonly captureUploadFailed: string;
+  readonly captureUnreadable: string;
+  readonly captureReading: string;
+  /** Completes "No cierres esta pantalla — …". */
+  readonly captureSavedNote: string;
+  /** Heading of the readings nobody has confirmed yet. */
+  readonly candidatesTitle: string;
+  /** The readings could not be loaded; the confirmed history still shows. */
+  readonly candidatesUnavailable: string;
+  /** Another admin confirmed or discarded it first. */
+  readonly candidateGone: string;
+  readonly confirmFailed: string;
+  readonly discardFailed: string;
 }

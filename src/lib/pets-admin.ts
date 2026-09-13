@@ -60,6 +60,7 @@ import {
   custodyKindForStatus,
   planReadmission,
   readChipMatches,
+  readmissionRevokesOwnership,
   type ChipMatch,
   type ChipVerdict,
   type ReadmissionInput,
@@ -217,7 +218,13 @@ export class PhotoUnreadableError extends Error {
   }
 }
 
-export async function stripAndResize(file: File): Promise<Blob> {
+/**
+ * @param maxEdge Long edge in pixels. Animals use the 1600 default; a
+ *   vaccination card passes `CARD_PHOTO_MAX_EDGE`, because a lot number on a
+ *   sticker is a couple of millimetres tall. The EXIF guarantee is identical
+ *   at any size — it comes from the canvas re-encode, not from the scaling.
+ */
+export async function stripAndResize(file: File, maxEdge: number = MAX_EDGE): Promise<Blob> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -225,7 +232,7 @@ export async function stripAndResize(file: File): Promise<Blob> {
     throw new PhotoUnreadableError(cause);
   }
 
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
   const height = Math.round(bitmap.height * scale);
 
@@ -666,6 +673,11 @@ export async function reopenPet(
   openCustody.docs.forEach((custodyDoc) => {
     batch.update(custodyDoc.ref, { endedAt: serverTimestamp() });
   });
+
+  // ── ownership: a returned animal no longer belongs to its former family ──
+  // Deleting a document that does not exist is a no-op. Why delete rather than
+  // archive: readmissionRevokesOwnership() in readmission.ts.
+  if (readmissionRevokesOwnership(plan.status)) batch.delete(doc(db, 'adoptions', pet.id));
 
   // ── the chain of responsibility ──────────────────────────────────────────
   const custodyRef = doc(collection(petRef, 'custody'));

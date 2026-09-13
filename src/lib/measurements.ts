@@ -43,6 +43,7 @@
  */
 
 import type { MuscleCondition, Species } from './types';
+import { isDateAfterToday } from './date-input';
 import { CLOCK_SKEW_TOLERANCE_MS } from './placements';
 
 const DAY_MS = 86_400_000;
@@ -198,10 +199,13 @@ export type MeasurementError =
   | 'bcs-out-of-range';
 
 /**
- * ⚠️ Clock skew is real here. Firestore's clock measured 2.7 s AHEAD of the dev
- * machine on 2026-08-24, and a browser clock drifts by minutes. Without the
- * tolerance, a weight entered "today" would sometimes be told it is in the
- * future.
+ * ⚠️ Compares CALENDAR DAYS, not instants — see `isDateAfterToday` in
+ * `date-input.ts`. `parseDateInput` stamps a picked date at local noon, so an
+ * instant comparison told someone weighing an animal "today" it hadn't
+ * arrived yet for every save made before local noon. Clock skew is layered on
+ * top of that: Firestore's clock measured 2.7 s AHEAD of the dev machine on
+ * 2026-08-24, and a browser clock drifts by minutes, so
+ * `CLOCK_SKEW_TOLERANCE_MS` is added before the day comparison too.
  */
 export function validateMeasurementDraft(
   draft: MeasurementDraft,
@@ -232,7 +236,7 @@ export function validateMeasurementDraft(
 
   if (draft.measuredAt === null) {
     errors.push('measured-required');
-  } else if (draft.measuredAt > now + CLOCK_SKEW_TOLERANCE_MS) {
+  } else if (isDateAfterToday(draft.measuredAt, now, CLOCK_SKEW_TOLERANCE_MS)) {
     errors.push('measured-in-future');
   }
 

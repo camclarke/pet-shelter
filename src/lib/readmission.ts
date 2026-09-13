@@ -153,6 +153,9 @@ export interface ReadmissionPlan {
  * move when an animal comes back. `reopenPet()` appends a `CustodyEvent` and a
  * `ScanEvent` alongside, which is where the *fact of the re-admission* lives.
  * If this function ever grows a field that deletes something, that is the bug.
+ * Ending the former family's ownership is deliberately NOT a field here —
+ * readmission.test.ts pins these keys — so `reopenPet()` asks
+ * `readmissionRevokesOwnership()` directly.
  */
 export function planReadmission(pet: ChipMatch, input: ReadmissionInput): ReadmissionPlan {
   const typed = input.name.trim();
@@ -181,6 +184,37 @@ export function custodyKindForStatus(status: PetStatus): 'shelter' | 'foster' | 
   if (status === 'foster') return 'foster';
   if (status === 'adopted') return 'adopter';
   return 'shelter';
+}
+
+/**
+ * Whether a re-admission ends the previous family's ownership.
+ *
+ * `ownsPet()` in `firestore.rules` grants whoever `adoptions/{petId}.ownerUid`
+ * names read access to the animal's microchip, `location/current`, scans and
+ * custody chain. An animal that has come back is in the shelter's hands, so a
+ * family that returned it must stop passing that check — otherwise, if the
+ * animal is fostered again, they can read the NEW foster volunteer's address.
+ *
+ * ── Delete, not archive ───────────────────────────────────────────────────
+ * `reopenPet()` deletes `adoptions/{petId}` in the same batch that closes the
+ * open custody interval. Nothing is lost by deleting it:
+ *   - the custody record the approval opened (`kind: 'adopter'`, `holder`,
+ *     `holderUid`, `startedAt`) is closed with an `endedAt` by that same batch,
+ *     so WHO held the animal and WHEN stays in the chain of responsibility;
+ *   - the application stays `approved`, carrying `decidedAt` and `decidedBy`.
+ * An archive document would copy those facts into a third place, and would
+ * need a new collection and a new rule — a new place for a private person's
+ * uid to live. Ending the adoption with a field and changing `ownsPet()` to
+ * check it would also work, but it changes a DEPLOYED rule that the next
+ * approval would overwrite anyway, since the document is keyed by petId and
+ * holds only the CURRENT owner.
+ *
+ * A re-admission never sets `adopted` (`READMISSION_STATUSES` excludes it), so
+ * this is true for every status it can set. It is a function rather than a
+ * constant so that coupling is asserted in a test rather than assumed.
+ */
+export function readmissionRevokesOwnership(status: PetStatus): boolean {
+  return status !== 'adopted';
 }
 
 /**

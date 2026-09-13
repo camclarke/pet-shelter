@@ -118,6 +118,24 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // ── medical CANDIDATES — what a model read and nobody has confirmed ──
+      // Admins only, for every verb. Read, create, update and delete each
+      // require the admin claim and nothing else; no condition reads
+      // `request.resource`, so a delete cannot trip over a null payload.
+      //
+      // A NEW TIER, so a NEW DOCUMENT. `medical` above is readable by any
+      // signed-in account, and an unchecked model guess does not belong at
+      // that tier (step-9 evaluation, 2026-09-13). A candidate becomes a
+      // `medical` record only when an admin confirms it, which creates the
+      // record and deletes the candidate in one transaction.
+      //
+      // Written by `/api/medical/cards/extract` through the Admin SDK, which
+      // bypasses these rules; read, confirmed and discarded by an admin's
+      // browser, which is what this rule governs.
+      match /medicalCandidates/{candidateId} {
+        allow read, create, update, delete: if isAdmin();
+      }
+
       // ── care: feeding plan ───────────────────────────────────────────────
       // Travels with the animal so an adopter can avoid an abrupt diet change.
       match /care/{docId} {
@@ -273,10 +291,246 @@ service cloud.firestore {
     // Keyed by petId so ownsPet() resolves in a single get(). Establishes who
     // may read a pet's microchip, location, and scan history — so only an
     // admin may write it.
+    //
+    // Its first writer is the approval batch in the admin application queue
+    // (build-order step 14). What this rule permits is still exactly "an admin
+    // writes, the named owner reads": an applicant can never create one naming
+    // themselves, however their application is doing.
+    //
+    // ⚠️ Two consequences of ownsPet() to know before approving an adoption:
+    //   - it unlocks EVERYTHING already in the restricted tiers, not only what
+    //     is written from now on — a `location/current` recorded while the
+    //     animal was fostered, and the names of earlier custody holders;
+    //   - it is DELETED when an adopted animal is returned: reopenPet() removes
+    //     it in the re-admission batch (readmissionRevokesOwnership), so the
+    //     former family stops passing ownsPet(). `allow write` covers that
+    //     delete; the ended ownership stays on record in the closed custody
+    //     interval and the approved application.
     match /adoptions/{petId} {
       allow read: if isAdmin()
         || (signedIn() && resource.data.ownerUid == request.auth.uid);
       allow write: if isAdmin();
+    }
+
+    // ── adoptionApplications/{applicationId} ───────────────────────────────
+    // The optional online adoption application — plan §2.4 and §6. It holds a
+    // private person's housing, household and phone number, so it is readable
+    // by that person and by admins and by nobody else.
+    //
+    // What these rules permit, precisely:
+    //   - while applicationsEnabled() returns true — and only then — an
+    //     applicant CREATES only their own application, with the id
+    //     `{petId}__{their uid}`, for a pet whose status is `available`, with
+    //     status `submitted`, their token's email, answers inside the bounds
+    //     below, and every decision field null;
+    //   - an applicant GETS any id ending in their own uid — including one that
+    //     does not exist yet, which is how the form learns whether they already
+    //     applied — and LISTS only with a query constrained to their own uid;
+    //   - an applicant UPDATES only to withdraw an open application, changing
+    //     exactly `status`, `withdrawnAt` and `updatedAt`;
+    //   - an admin reads everything and moves the status along
+    //     applicationTransitions() without touching what the applicant wrote.
+    //     Approving is refused unless the SAME batch writes adoptions/{petId}
+    //     for this applicant and sets the pet to `adopted`;
+    //   - nobody deletes. An application is a record of what someone said.
+    //
+    // ⚠️ The DOCUMENT ID is the duplicate guard. Rules cannot run a query, so
+    // "one application per person per animal" is enforced by requiring the id
+    // `{petId}__{uid}`: a second submission addresses the same document, is
+    // evaluated as an UPDATE, and fails the withdraw-only branch.
+    //
+    // ⚠️ On a LIST these rules are evaluated against the query's CONSTRAINTS,
+    // not its results. An applicant's query must carry
+    // where('applicantUid', '==', uid) or it is rejected whole — the same trap
+    // as `media` above.
+    match /adoptionApplications/{applicationId} {
+
+      // The question ids in src/config/shelter.ts, `adoptionApplications`.
+      // THIS is the enforcing copy: an answer under any other key is refused.
+      // Replacing the draft questions means changing this list AND deploying
+      // the rules. A test fails if the two lists drift.
+      function applicationAnswerKeys() {
+        return ['fullName', 'whatsapp', 'zone', 'housingType', 'housingTenure',
+                'landlordAllows', 'outdoorSpace', 'adults', 'children',
+                'everyoneAgrees', 'otherPets', 'previousPets', 'hoursAlone',
+                'whyThisAnimal'];
+      }
+
+      function applicationKeys() {
+        return ['petId', 'applicantUid', 'applicantEmail', 'applicantEmailVerified',
+                'answers', 'status', 'submittedAt', 'updatedAt', 'withdrawnAt',
+                'decidedAt', 'decidedBy'];
+      }
+
+      // The bound on ANY answer. The rules cannot see a question's kind — that
+      // lives in shelter config — so this is the worst case, and the form's
+      // per-kind limits are stricter. Mirrors RULES_ANSWER_MAX_CHARS and
+      // RULES_ANSWER_MAX_COUNT in src/lib/applications.ts.
+      function validAnswer(v) {
+        return v is bool
+          || (v is int && v >= 0 && v <= 99)
+          || (v is string && v.size() <= 1500);
+      }
+
+      // An unanswered question is ABSENT, and arrives here as the default
+      // `true` from get(key, true), which passes. An explicit null, a map or a
+      // list under a known key does not.
+      function validAnswers(answers) {
+        return answers is map
+          && answers.keys().hasOnly(applicationAnswerKeys())
+          && validAnswer(answers.get('fullName', true))
+          && validAnswer(answers.get('whatsapp', true))
+          && validAnswer(answers.get('zone', true))
+          && validAnswer(answers.get('housingType', true))
+          && validAnswer(answers.get('housingTenure', true))
+          && validAnswer(answers.get('landlordAllows', true))
+          && validAnswer(answers.get('outdoorSpace', true))
+          && validAnswer(answers.get('adults', true))
+          && validAnswer(answers.get('children', true))
+          && validAnswer(answers.get('everyoneAgrees', true))
+          && validAnswer(answers.get('otherPets', true))
+          && validAnswer(answers.get('previousPets', true))
+          && validAnswer(answers.get('hoursAlone', true))
+          && validAnswer(answers.get('whyThisAnimal', true));
+      }
+
+      // adoptionApplications.enabled in src/config/shelter.ts. THIS is the
+      // enforcing copy: while it returns false no applicant can create an
+      // application by any route — not through the page, which 404s, and not
+      // through the SDK called directly from a browser console. Reading,
+      // withdrawing and the admin queue are unaffected. Switching the form on
+      // means changing this line AND deploying the rules; a test fails if it
+      // disagrees with the config.
+      function applicationsEnabled() {
+        return false;
+      }
+
+      // The id names the signed-in user as its applicant. A uid containing the
+      // separator cannot pass, and cannot apply online. Nor could a pet id
+      // containing `__`: create would accept it, but this split would then see
+      // three parts and refuse the applicant's own get. Firestore-generated pet
+      // ids are alphanumeric, so that only matters for a hand-authored id.
+      function ownApplicationId() {
+        return signedIn()
+          && applicationId.split('__').size() == 2
+          && applicationId.split('__')[1] == request.auth.uid;
+      }
+
+      // Only an animal on the wall takes applications. One document read, on
+      // create only.
+      function petAcceptsApplications(petId) {
+        return exists(/databases/$(database)/documents/pets/$(petId))
+          && get(/databases/$(database)/documents/pets/$(petId)).data.status == 'available';
+      }
+
+      // APPLICATION_STATUS_TRANSITIONS in src/lib/applications.ts. THIS is the
+      // enforcing copy for admins; a test fails if the two drift.
+      function applicationTransitions() {
+        return {
+          'submitted': ['reviewing', 'interview', 'rejected', 'withdrawn'],
+          'reviewing': ['interview', 'approved', 'rejected', 'withdrawn'],
+          'interview': ['reviewing', 'approved', 'rejected', 'withdrawn'],
+          'approved': [],
+          'rejected': ['reviewing'],
+          'withdrawn': []
+        };
+      }
+
+      // Approval and the adoption it creates are one batch, or neither happens.
+      //
+      // The first line reads the pet as it was BEFORE the batch (`get`, not
+      // `getAfter`): an animal that already belongs to a family cannot be
+      // approved for a second one. That is the one approval blocker enforced
+      // here as well as in the UI, because it is the one that silently moves
+      // who may read a microchip and a location — and two admins approving two
+      // families for the same animal at once would otherwise both succeed.
+      function approvalIsOneBatch() {
+        return get(/databases/$(database)/documents/pets/$(resource.data.petId)).data.status
+               != 'adopted'
+          && existsAfter(/databases/$(database)/documents/adoptions/$(resource.data.petId))
+          && getAfter(/databases/$(database)/documents/adoptions/$(resource.data.petId)).data.ownerUid
+               == resource.data.applicantUid
+          && getAfter(/databases/$(database)/documents/adoptions/$(resource.data.petId)).data.applicationId
+               == applicationId
+          && getAfter(/databases/$(database)/documents/pets/$(resource.data.petId)).data.status
+               == 'adopted';
+      }
+
+      function applicantWithdraws() {
+        return signedIn()
+          && resource.data.applicantUid == request.auth.uid
+          && resource.data.status in ['submitted', 'reviewing', 'interview']
+          && request.resource.data.status == 'withdrawn'
+          && request.resource.data.withdrawnAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'withdrawnAt', 'updatedAt']);
+      }
+
+      function adminMovesApplication() {
+        return isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'updatedAt', 'decidedAt', 'decidedBy', 'withdrawnAt'])
+          && request.resource.data.status in applicationTransitions()[resource.data.status]
+          && request.resource.data.updatedAt == request.time
+          && (request.resource.data.status in ['approved', 'rejected']
+                ? (request.resource.data.decidedAt == request.time
+                   && request.resource.data.decidedBy == request.auth.uid)
+                : (request.resource.data.decidedAt == null
+                   && request.resource.data.decidedBy == null))
+          && (request.resource.data.status == 'withdrawn'
+                ? request.resource.data.withdrawnAt == request.time
+                : request.resource.data.withdrawnAt == null)
+          && (request.resource.data.status != 'approved' || approvalIsOneBatch());
+      }
+
+      allow get: if isAdmin()
+        || (ownApplicationId()
+            && (resource == null || resource.data.applicantUid == request.auth.uid));
+
+      allow list: if isAdmin()
+        || (signedIn() && resource.data.applicantUid == request.auth.uid);
+
+      allow create: if applicationsEnabled()
+        && ownApplicationId()
+        && request.resource.data.keys().hasOnly(applicationKeys())
+        && request.resource.data.keys().hasAll(applicationKeys())
+        && request.resource.data.applicantUid == request.auth.uid
+        && request.resource.data.petId is string
+        && applicationId == request.resource.data.petId + '__' + request.auth.uid
+        && request.resource.data.applicantEmail == request.auth.token.email
+        && request.resource.data.applicantEmailVerified == request.auth.token.email_verified
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.submittedAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.withdrawnAt == null
+        && request.resource.data.decidedAt == null
+        && request.resource.data.decidedBy == null
+        && validAnswers(request.resource.data.answers)
+        && petAcceptsApplications(request.resource.data.petId);
+
+      allow update: if applicantWithdraws() || adminMovesApplication();
+
+      allow delete: if false;
+
+      // ── internal — the shelter's private notes on an applicant ───────────
+      // A separate DOCUMENT, never a field on the application: rules protect
+      // documents, not fields, and an applicant who could read the shelter's
+      // private assessment of them is a problem the first time someone is
+      // turned down. Admin-only in both directions, and no collection-group
+      // rule reaches it. Split so the payload checks never run on a delete,
+      // which is refused outright.
+      match /internal/{docId} {
+        allow read: if isAdmin();
+        allow create, update: if isAdmin()
+          && docId == 'notes'
+          && request.resource.data.keys().hasOnly(['text', 'updatedAt', 'updatedBy'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() <= 5000
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if false;
+      }
     }
 
     // ── areas/{areaId} ─────────────────────────────────────────────────────
@@ -309,6 +563,73 @@ service cloud.firestore {
     // sit at their final path. No move, no rewrite, no second URL.
     match /petDrafts/{draftId} {
       allow read, write: if isAdmin();
+    }
+
+    // ── qrTokens/{tokenId} ─────────────────────────────────────────────────
+    // A collar tag's printed code → the animal it belongs to. Plan §2.5, §7.
+    //
+    // `get` is public and `list` is NOT, and that split is the reason this
+    // block exists. A public `read` includes `list`, and `list` on this
+    // collection is a directory of every tagged animal's code — the
+    // enumeration a finder must never be able to perform. With `get` alone,
+    // learning a token requires already holding it: 10 Crockford base32
+    // characters are 50 bits, so guessing one is not a strategy.
+    //
+    // What `get` exposes is `petId`, `revokedAt`, `createdAt` and `createdBy`.
+    // The public page does not use it — `/id/[token]` resolves through the
+    // Admin SDK — so this lets a client do what the page already does and no
+    // more. `createdBy` is an admin's uid, which `users/{uid}` does not let a
+    // stranger resolve to anything.
+    //
+    // `list` is admin-only because the admin screens query by `petId` (one
+    // animal's tags) and by `revokedAt == null` (the batch print sheet).
+    //
+    // ⚠️ Never copy a token onto `pets/{petId}`. That document is public READ,
+    // which includes list, so a token field there would turn the adoption wall
+    // into exactly the directory this block refuses to be.
+    match /qrTokens/{tokenId} {
+      allow get: if true;
+      allow list: if isAdmin();
+
+      // Minted only by an admin, only in the exact shape the app writes, only
+      // for a pet that exists, and only unrevoked. The id alphabet is checked
+      // HERE, not only in the client, because a token is PRINTED: an id a
+      // finder could not type back from the tag is a tag that cannot work.
+      // The pattern is mirrored in src/lib/qr-tokens.ts; a test fails if the
+      // two copies drift.
+      //
+      // `hasAll` is REDUNDANT today, and measured to be: every key is also
+      // dereferenced by a check below it, and reading a missing key errors,
+      // which denies. A deliberate-break probe removed it and no test case
+      // changed outcome. It stays so the required shape remains explicit if one
+      // of those field checks is ever loosened.
+      allow create: if isAdmin()
+        && tokenId.matches('^[0-9A-HJKMNP-TV-Z]{10}$')
+        && request.resource.data.keys().hasOnly(['petId', 'revokedAt', 'createdAt', 'createdBy'])
+        && request.resource.data.keys().hasAll(['petId', 'revokedAt', 'createdAt', 'createdBy'])
+        && request.resource.data.petId is string
+        && request.resource.data.petId.size() > 0
+        && exists(/databases/$(database)/documents/pets/$(request.resource.data.petId))
+        && request.resource.data.revokedAt == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // Revoking is the ONLY update, and it is one-way. The diff may touch
+      // `revokedAt` and nothing else; the stored value must still be null, so
+      // a revoked token can be neither un-revoked nor re-revoked with a later
+      // date that would rewrite when it stopped working; and the new value
+      // must be the server's clock, not the caller's.
+      allow update: if isAdmin()
+        && resource.data.revokedAt == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revokedAt'])
+        && request.resource.data.revokedAt == request.time;
+
+      // Never, not even for an admin. A printed tag outlives its record:
+      // deleting the token would turn a revoked tag ("this tag is no longer
+      // active — call us") into an unknown one, and an id freed by a delete
+      // could be minted again for a DIFFERENT animal while the old tag is
+      // still on a collar somewhere.
+      allow delete: if false;
     }
 
     // ═══ FOOD — build-order step 13, plan §12 ═══════════════════════════════

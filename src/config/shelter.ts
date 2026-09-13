@@ -57,6 +57,12 @@ export interface ShelterConfig {
   };
 
   /**
+   * The optional online adoption application. See `ApplicationConfig`.
+   * WhatsApp stays the primary way to adopt whatever this says.
+   */
+  adoptionApplications: ApplicationConfig;
+
+  /**
    * The cooking pot and the serving ladle, MEASURED at your shelter.
    *
    * ⚠️ `null` until someone measures them, and null is a real value, not a
@@ -74,6 +80,87 @@ export interface ShelterConfig {
     potCapacityLitres: number | null;
     ladleVolumeMl: number | null;
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Online adoption application — plan §6, build-order step 14
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The headings plan §6 names, in the order the form shows them. */
+export type ApplicationSection =
+  | 'contact'
+  | 'housing'
+  | 'household'
+  | 'otherPets'
+  | 'experience'
+  | 'why';
+
+/**
+ * How a question is asked and stored.
+ *
+ * - `shortText` / `longText` / `phone` store a string
+ * - `choice` stores the option's English `value`, never its Spanish label
+ * - `yesNo` stores a boolean
+ * - `count` stores a whole number from 0 to the question's `max`
+ */
+export type ApplicationQuestionKind =
+  | 'shortText'
+  | 'longText'
+  | 'phone'
+  | 'choice'
+  | 'yesNo'
+  | 'count';
+
+export interface ApplicationQuestion {
+  /**
+   * The key the answer is stored under. English, stable, and MIRRORED in
+   * `firestore.rules` (`applicationAnswerKeys()`), which is the enforcing copy:
+   * the rules refuse any key not on that list. Change both together — a test
+   * fails if they drift.
+   */
+  id: string;
+  section: ApplicationSection;
+  /** Spanish, neutral tuteo. Shelter content, so it lives here rather than in i18n. */
+  label: string;
+  hint?: string;
+  kind: ApplicationQuestionKind;
+  required: boolean;
+  /** `choice` only. `value` is stored; `label` is shown. */
+  options?: readonly { value: string; label: string }[];
+  /** `count` only. At most 99, the bound the rules enforce. */
+  max?: number;
+  /**
+   * Marks the question whose answer names the applicant, or gives the number
+   * to reach them on. The admin queue shows these first, and the name becomes
+   * the holder on the custody record when an adoption is approved.
+   */
+  purpose?: 'applicantName' | 'applicantPhone';
+}
+
+export interface ApplicationConfig {
+  /**
+   * Whether the public ever sees the form: the "Postular en línea" link on a
+   * dossier and the `/adopt/{slug}/apply` page. The admin queue works either
+   * way.
+   *
+   * ⚠️ MIRRORED in `firestore.rules` as `applicationsEnabled()`, which is the
+   * enforcing copy: this flag only hides the page, while the rule is what stops
+   * an application being written straight through the SDK. Change both, then
+   * deploy the rules — a test fails if they disagree.
+   *
+   * ⚠️ FALSE until the shelter's REAL screening questions replace the draft
+   * below. Wawitas asks its own questions over WhatsApp today and nobody has
+   * written them down for us yet (plan §11 #3). Publishing invented questions
+   * as though the shelter asked them would be a lie told to every applicant.
+   */
+  enabled: boolean;
+  /**
+   * True while `questions` is the placeholder set. A test refuses
+   * `enabled: true` while this is still true, so flipping the switch without
+   * replacing the questions fails CI rather than reaching wawitas.org.
+   */
+  questionsAreDraft: boolean;
+  questions: readonly ApplicationQuestion[];
 }
 
 export const SHELTER: ShelterConfig = {
@@ -102,6 +189,157 @@ export const SHELTER: ShelterConfig = {
     maxLat: -17.15,
     minLng: -66.45,
     maxLng: -65.85,
+  },
+
+  adoptionApplications: {
+    // ⚠️ OFF. Flip only after replacing the DRAFT questions below with the ones
+    // Wawitas actually asks, setting `questionsAreDraft` to false, and changing
+    // `applicationsEnabled()` in firestore.rules to match — then deploy the rules.
+    enabled: false,
+    questionsAreDraft: true,
+
+    // ═══ DRAFT — NOT WAWITAS' QUESTIONS ═══════════════════════════════════════
+    // A placeholder covering the headings in plan §6 (housing, household, other
+    // pets, experience, why this animal), written 2026-09-12 without the
+    // shelter. Replace every entry with the shelter's own list. If an `id`
+    // changes, update `applicationAnswerKeys()` in firestore.rules and deploy
+    // the rules — the rules reject any key they do not list.
+    //
+    // Two choices here are deliberate and worth keeping in the real set: the
+    // form asks for a ZONE, never an address, because an application must not
+    // become a list of where strangers live; and nothing asks for an ID number.
+    questions: [
+      {
+        id: 'fullName',
+        section: 'contact',
+        label: 'Tu nombre completo',
+        kind: 'shortText',
+        required: true,
+        purpose: 'applicantName',
+      },
+      {
+        id: 'whatsapp',
+        section: 'contact',
+        label: 'Tu número de WhatsApp',
+        hint: 'Es por donde el equipo te va a escribir.',
+        kind: 'phone',
+        required: true,
+        purpose: 'applicantPhone',
+      },
+      {
+        id: 'zone',
+        section: 'contact',
+        label: '¿En qué zona o barrio vives?',
+        hint: 'Solo la zona. No necesitamos tu dirección.',
+        kind: 'shortText',
+        required: true,
+      },
+      {
+        id: 'housingType',
+        section: 'housing',
+        label: '¿Dónde vives?',
+        kind: 'choice',
+        required: true,
+        options: [
+          { value: 'house', label: 'Casa' },
+          { value: 'apartment', label: 'Departamento' },
+          { value: 'room', label: 'Cuarto' },
+          { value: 'other', label: 'Otro' },
+        ],
+      },
+      {
+        id: 'housingTenure',
+        section: 'housing',
+        label: 'La vivienda es…',
+        kind: 'choice',
+        required: true,
+        options: [
+          { value: 'owned', label: 'Propia' },
+          { value: 'rented', label: 'Alquilada' },
+          { value: 'anticretico', label: 'En anticrético' },
+          { value: 'family', label: 'De mi familia' },
+          { value: 'other', label: 'Otra situación' },
+        ],
+      },
+      {
+        id: 'landlordAllows',
+        section: 'housing',
+        label: 'Si la vivienda no es tuya, ¿el dueño permite animales?',
+        kind: 'choice',
+        required: false,
+        options: [
+          { value: 'yes', label: 'Sí' },
+          { value: 'no', label: 'No' },
+          { value: 'unsure', label: 'No lo sé' },
+        ],
+      },
+      {
+        id: 'outdoorSpace',
+        section: 'housing',
+        label: '¿Tiene patio o espacio al aire libre?',
+        kind: 'choice',
+        required: true,
+        options: [
+          { value: 'enclosed', label: 'Sí, cerrado' },
+          { value: 'open', label: 'Sí, pero sin cerrar' },
+          { value: 'none', label: 'No' },
+        ],
+      },
+      {
+        id: 'adults',
+        section: 'household',
+        label: '¿Cuántas personas adultas viven en la casa?',
+        kind: 'count',
+        required: true,
+        max: 30,
+      },
+      {
+        id: 'children',
+        section: 'household',
+        label: '¿Cuántos niños o niñas?',
+        hint: 'Pon 0 si no hay.',
+        kind: 'count',
+        required: true,
+        max: 30,
+      },
+      {
+        id: 'everyoneAgrees',
+        section: 'household',
+        label: '¿Todos en la casa están de acuerdo con adoptar?',
+        kind: 'yesNo',
+        required: true,
+      },
+      {
+        id: 'otherPets',
+        section: 'otherPets',
+        label: '¿Tienes otros animales?',
+        hint: 'Cuéntanos cuáles, qué edad tienen y si están esterilizados. Déjalo vacío si no tienes.',
+        kind: 'longText',
+        required: false,
+      },
+      {
+        id: 'previousPets',
+        section: 'experience',
+        label: '¿Tuviste perros o gatos antes? ¿Qué pasó con ellos?',
+        kind: 'longText',
+        required: true,
+      },
+      {
+        id: 'hoursAlone',
+        section: 'experience',
+        label: '¿Cuántas horas al día pasaría solo?',
+        kind: 'count',
+        required: true,
+        max: 24,
+      },
+      {
+        id: 'whyThisAnimal',
+        section: 'why',
+        label: '¿Por qué quieres adoptar a este animalito?',
+        kind: 'longText',
+        required: true,
+      },
+    ],
   },
 
   // The owner is providing these (plan §11 #6). Deliberately null until then.
