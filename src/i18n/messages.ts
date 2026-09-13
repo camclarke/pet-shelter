@@ -36,6 +36,99 @@ import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
+import type { TagTone } from '@/lib/qr-tokens';
+
+/**
+ * Everything a QR tag says: the public page a finder lands on, and the admin
+ * screens that issue, revoke and print tags. Build-order step 12, plan §7.
+ *
+ * ⚠️ The finder is a stranger with an animal in front of them. Every sentence
+ * on the public side must lead to one action — writing to the shelter — and
+ * must never promise to hand over a family's details: the shelter relays.
+ */
+export interface TagMessages {
+  // ── the public page ───────────────────────────────────────────────────────
+  /** The one question the page asks, verbatim from plan §7. */
+  readonly foundQuestion: string;
+  /** The WhatsApp button. */
+  readonly writeToShelter: string;
+  /** Tab title when the page does not name an animal. */
+  readonly genericTitle: string;
+  /** The loud first line for a lost animal. */
+  lostBanner(name: string, sex: PetSex): string;
+  /** One sentence under the name, by tone. Gender-agreeing. */
+  situation(tone: TagTone, name: string, sex: PetSex, shelterName: string): string;
+  /** Shown only when the pet document says it is chipped. */
+  microchipHint(sex: PetSex): string;
+  /**
+   * The pre-filled WhatsApp body. Carries the PRINTED code, so the shelter can
+   * look the tag up even if the name on the message is wrong or blank.
+   */
+  finderMessage(input: { name: string; sex: PetSex; formattedToken: string; tone: TagTone }): string;
+  /** Secondary link to the dossier, for an animal in adoption only. */
+  meetLink(name: string): string;
+  /** "WhatsApp 77903553" — the number as a fallback for a phone that cannot follow a link. */
+  phoneLine(display: string): string;
+  /** "Placa ABCDE-FGHJK" */
+  codeLine(formattedToken: string): string;
+  /** Shown to a signed-in admin only. */
+  readonly adminLink: string;
+
+  readonly inactiveTitle: string;
+  inactiveBody(shelterName: string): string;
+  inactiveMessage(formattedToken: string, shelterName: string): string;
+  readonly unknownTitle: string;
+  unknownBody(shelterName: string): string;
+  unknownMessage(shelterName: string): string;
+  /** Generic, for a page that cannot name the animal or its sex. */
+  readonly vetHint: string;
+
+  // ── admin ─────────────────────────────────────────────────────────────────
+  readonly panelTitle: string;
+  readonly loading: string;
+  readonly noneYet: string;
+  activeSince(formattedToken: string, date: string): string;
+  revokedOn(formattedToken: string, date: string): string;
+  /** A second tag that still works. Should never happen; shown rather than hidden if it does. */
+  alsoActive(formattedToken: string, date: string): string;
+  readonly backToRecord: string;
+  readonly backToPanel: string;
+  readonly issue: string;
+  readonly issuing: string;
+  readonly reissue: string;
+  readonly revoke: string;
+  readonly print: string;
+  readonly cancel: string;
+  revokeConfirm(formattedToken: string): string;
+  reissueConfirm(formattedToken: string): string;
+  readonly confirmRevoke: string;
+  readonly confirmReissue: string;
+  /** Plan §7's honest limitation. Belongs wherever a tag is issued or printed. */
+  readonly limitation: string;
+  readonly issueFailed: string;
+  readonly revokeFailed: string;
+  readonly loadFailed: string;
+  readonly permissionDenied: string;
+  readonly printTip: string;
+  readonly testTip: string;
+  printSize(millimetres: number): string;
+  qrAlt(name: string): string;
+  readonly noActiveTag: string;
+  printTitle(name: string): string;
+
+  readonly sheetTitle: string;
+  readonly sheetIntro: string;
+  readonly sheetEmpty: string;
+  /** The sheet lists a capped number of animals; say so when the cap bites. `total` null = count unknown. */
+  sheetTruncated(shown: number, total: number | null): string;
+  readonly sheetLink: string;
+  readonly noTag: string;
+  readonly selectAll: string;
+  readonly clearSelection: string;
+  issueMissing(count: number): string;
+  printSheet(count: number): string;
+  readonly nothingToPrint: string;
+}
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -257,4 +350,7 @@ export interface Messages {
 
   /** How long two animals shared a pen: "12 días juntos", "menos de un día". */
   contactDurationLabel(ms: number): string;
+
+  /** QR identity tags — the public page and the admin screens. */
+  readonly tag: TagMessages;
 }
