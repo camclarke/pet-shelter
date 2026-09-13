@@ -16,6 +16,7 @@
 import 'server-only';
 import { getAdminDb } from './firebase-admin';
 import { normalizeMicrochipCode } from './microchip';
+import { resolveTag, tokenRecordFrom, type TagView } from './qr-tokens';
 import type { Pet, PetDetail, PetSex, PetSize, PetStatus, Sighting, Species } from './types';
 
 export interface WallFilters {
@@ -118,4 +119,34 @@ export async function findPetByMicrochip(code: string): Promise<Pet | null> {
 
   const petSnap = await petRef.get();
   return petSnap.exists ? ({ id: petSnap.id, ...petSnap.data() } as Pet) : null;
+}
+
+/**
+ * Resolve a scanned QR tag to what the finder may see.
+ *
+ * The same stance as `findPetByMicrochip` above, for the finder who has a
+ * phone and no scanner — which is most finders. Plan §7.
+ *
+ * ⚠️ Reads exactly two documents, both top-level and both already public:
+ * `qrTokens/{token}` and `pets/{petId}`. Never a subcollection — not `detail`,
+ * not `identity`, not `location` — and a test reads this function's source and
+ * fails if it ever does. The decision itself (unknown / inactive / active, and
+ * the allowlist of pet fields) is `resolveTag` in `qr-tokens.ts`, which is pure
+ * and tested with the reads injected.
+ *
+ * Input that cannot be a token costs no read at all, so a crawler or a guesser
+ * hitting `/id/anything` spends the shelter nothing.
+ */
+export async function resolveQrTag(input: string): Promise<TagView> {
+  const db = getAdminDb();
+  return resolveTag(input, {
+    async getToken(token) {
+      const snap = await db.collection('qrTokens').doc(token).get();
+      return snap.exists ? tokenRecordFrom(snap.data()) : null;
+    },
+    async getPet(petId) {
+      const snap = await db.collection('pets').doc(petId).get();
+      return snap.exists ? ({ id: snap.id, ...snap.data() } as Pet) : null;
+    },
+  });
 }
