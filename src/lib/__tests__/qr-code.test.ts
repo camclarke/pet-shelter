@@ -167,6 +167,9 @@ test('the SVG is inert: no script, no event handler, no external reference', () 
   assert.doesNotMatch(svg, /<script/i);
   assert.doesNotMatch(svg, /\son\w+=/i);
   assert.doesNotMatch(svg, /href=/i);
+  // The route's CSP carries no `style-src`, so the SVG must not need one.
+  assert.doesNotMatch(svg, /\sstyle=/i);
+  assert.doesNotMatch(svg, /<style/i);
   assert.match(svg, /shape-rendering="crispedges"/);
 });
 

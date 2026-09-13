@@ -53,8 +53,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
       // PR #7 cache defect, and it has already happened here once.
       'Cache-Control': 'public, max-age=300, s-maxage=300',
       // An SVG is a document that can carry script. This one never does (a
-      // test checks), and these make that true even if it somehow did.
-      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      // test checks), and these make that true even if it somehow did. No
+      // `style-src`: the SVG colours with presentation attributes (`fill=`),
+      // never `style=` or `<style>`, and a test holds it to that.
+      'Content-Security-Policy': "default-src 'none'; sandbox",
       'X-Content-Type-Options': 'nosniff',
       'X-Robots-Tag': 'noindex',
     },

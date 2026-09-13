@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
+import { collection, getCountFromServer, getDocs, limit, orderBy, query } from 'firebase/firestore';
 
 import { useAuth } from '@/components/AuthProvider';
 import { QrTagCard } from '@/components/QrTagCard';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
 import { getFirebase } from '@/lib/firebase-client';
-import { activeTokenOf } from '@/lib/qr-tokens';
+import { QR_SHEET_PET_LIMIT, activeTokenOf, sheetTruncation, type SheetTruncation } from '@/lib/qr-tokens';
 import { issueQrToken, listActiveTokens, type QrTokenView } from '@/lib/qr-tokens-admin';
 import type { Pet } from '@/lib/types';
 
@@ -20,9 +20,13 @@ function failureMessage(caught: unknown, fallback: string): string {
 }
 
 export function QrSheetBuilder() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  // On the admin claim, not on being signed in — see the same line in
+  // QrTagPanel. The rules are the boundary; this keeps the view honest.
+  const canWrite = isAdmin && user !== null;
   const [pets, setPets] = useState<SheetPet[] | null>(null);
   const [tokens, setTokens] = useState<QrTokenView[] | null>(null);
+  const [truncation, setTruncation] = useState<SheetTruncation | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +36,19 @@ export function QrSheetBuilder() {
       const { db } = getFirebase();
       // Same query and the same cap as the admin dashboard, which is the page
       // this sheet is reached from — the two lists must show the same animals.
-      const [petSnap, active] = await Promise.all([
-        getDocs(query(collection(db, 'pets'), orderBy('createdAt', 'desc'), limit(50))),
+      // The count runs beside it so a capped list SAYS it is capped; a failed
+      // count degrades to "the cap was reached" rather than hiding the notice.
+      const [petSnap, active, total] = await Promise.all([
+        getDocs(query(collection(db, 'pets'), orderBy('createdAt', 'desc'), limit(QR_SHEET_PET_LIMIT))),
         listActiveTokens(),
+        getCountFromServer(collection(db, 'pets'))
+          .then((snap) => snap.data().count)
+          .catch((caught) => {
+            console.error('[admin/qr-sheet] could not count pets', caught);
+            return null;
+          }),
       ]);
+      setTruncation(sheetTruncation(petSnap.size, total));
       setPets(
         petSnap.docs
           .map((d) => ({ id: d.id, ...d.data() }) as Pet)
@@ -66,7 +79,7 @@ export function QrSheetBuilder() {
   }, [pets, tokens]);
 
   async function issueMissing() {
-    if (!user) return;
+    if (!user || !canWrite) return;
     setBusy(true);
     setError(null);
     try {
@@ -99,9 +112,10 @@ export function QrSheetBuilder() {
       pets={pets}
       activeByPet={activeByPet}
       selected={selected}
+      truncation={truncation}
       busy={busy}
       error={error}
-      canWrite={user !== null}
+      canWrite={canWrite}
       onToggle={toggle}
       onSelectAll={() => setSelected(new Set((pets ?? []).map((pet) => pet.id)))}
       onClear={() => setSelected(new Set())}
@@ -116,6 +130,7 @@ export function QrSheetView({
   pets,
   activeByPet,
   selected,
+  truncation = null,
   busy,
   error,
   canWrite,
@@ -128,6 +143,7 @@ export function QrSheetView({
   pets: SheetPet[] | null;
   activeByPet: ReadonlyMap<string, QrTokenView>;
   selected: ReadonlySet<string>;
+  truncation?: SheetTruncation | null;
   busy: boolean;
   error: string | null;
   canWrite: boolean;
@@ -162,6 +178,11 @@ export function QrSheetView({
 
       {pets === null && <p className="admin__sub no-print">{t.tag.loading}</p>}
       {pets?.length === 0 && !error && <p className="admin__sub no-print">{t.tag.sheetEmpty}</p>}
+      {truncation && (
+        <p className="auth__notice auth__notice--warn no-print" role="status">
+          {t.tag.sheetTruncated(truncation.shown, truncation.total)}
+        </p>
+      )}
 
       {pets && pets.length > 0 && (
         <section className="no-print">

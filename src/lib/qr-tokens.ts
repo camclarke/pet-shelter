@@ -330,6 +330,35 @@ export async function resolveTag(input: string, lookups: TagLookups): Promise<Ta
 }
 
 /**
+ * How many animals the batch print sheet lists: the same cap as the admin
+ * dashboard it is reached from, so the two lists show the same animals.
+ */
+export const QR_SHEET_PET_LIMIT = 50;
+
+export interface SheetTruncation {
+  shown: number;
+  /** null when the count itself could not be read. */
+  total: number | null;
+}
+
+/**
+ * Whether the sheet's list was cut off, so it can SAY so. A capped list with
+ * no notice hides the oldest animals with no clue why they are missing.
+ *
+ * With a count, it is truncated exactly when there are more pets than the cap.
+ * Without one (the count request failed), a page that came back full is
+ * treated as truncated — a possibly-unneeded notice beats a silent gap.
+ */
+export function sheetTruncation(
+  fetched: number,
+  total: number | null,
+  limit: number = QR_SHEET_PET_LIMIT,
+): SheetTruncation | null {
+  if (total !== null) return total > limit ? { shown: limit, total } : null;
+  return fetched >= limit ? { shown: limit, total: null } : null;
+}
+
+/**
  * Which of an animal's tokens is the live one. A pet should have at most one —
  * reissuing revokes the old one in the same transaction — but the rules cannot
  * enforce that, so the admin screen shows the newest active token and lists the

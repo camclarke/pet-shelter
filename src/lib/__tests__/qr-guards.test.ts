@@ -90,6 +90,31 @@ test('the QR image route reads nothing, so it cannot answer whether a token exis
   assert.deepEqual(imports, ['@/config/shelter', '@/lib/qr-code', '@/lib/qr-tokens']);
 });
 
+test('the QR image route sends a CSP with no style-src and no unsafe-inline', () => {
+  const route = read('src', 'app', 'api', 'qr', '[token]', 'route.ts');
+  assert.match(route, /'Content-Security-Policy': "default-src 'none'; sandbox",/);
+  assert.doesNotMatch(route, /unsafe-inline/);
+});
+
+// ─── write buttons follow the admin claim, not the sign-in ──────────────────
+
+test('the tag panel and the batch sheet enable writes on the ADMIN claim, not on being signed in', () => {
+  const panel = read('src', 'app', 'admin', 'pets', '[petId]', 'QrTagPanel.tsx');
+  const sheet = read('src', 'app', 'admin', 'qr', 'QrSheetBuilder.tsx');
+  for (const [name, source] of [['QrTagPanel', panel], ['QrSheetBuilder', sheet]] as const) {
+    assert.match(source, /const \{ user, isAdmin \} = useAuth\(\);/, name);
+    assert.match(source, /const canWrite = isAdmin && user !== null;/, name);
+    assert.match(source, /canWrite=\{canWrite\}/, name);
+    assert.doesNotMatch(source, /canWrite=\{user !== null\}/, name);
+  }
+  // Every write control in the views is disabled without it: issue, reissue,
+  // revoke and the revoke/reissue confirmation in the panel; issue-missing in
+  // the sheet.
+  const count = (source: string) => source.split('disabled={busy || !canWrite}').length - 1;
+  assert.equal(count(panel), 4);
+  assert.equal(count(sheet), 1);
+});
+
 // ─── printed size ────────────────────────────────────────────────────────────
 
 test('the printed symbol is at least 20 mm without its quiet zone, and the CSS prints that size', () => {
@@ -139,6 +164,8 @@ function everyTagString(): string[] {
     es.tag.issueMissing(3),
     es.tag.printSheet(1),
     es.tag.printSheet(3),
+    es.tag.sheetTruncated(50, 380),
+    es.tag.sheetTruncated(50, null),
   );
   return out;
 }
