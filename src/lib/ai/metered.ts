@@ -59,6 +59,10 @@ export const PROCESS_LABELS = {
    * surprises you.
    */
   intake_suggest_eval: 'Evaluación de sugerencias (banco de pruebas)',
+  /** Donation text → line items, on the Flash-Lite ladder. Plan §12.1. */
+  food_parse: 'Lectura de donaciones de comida',
+  /** `npm run eval:food-parse`, kept apart for the reason given above. */
+  food_parse_eval: 'Evaluación de lectura de donaciones (banco de pruebas)',
 } as const;
 
 export type AiProcess = keyof typeof PROCESS_LABELS;

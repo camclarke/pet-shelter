@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   cookBatchWarnings,
   cookedToRawRatio,
+  dayToInstant,
   feedingLogId,
   gramsPerLadle,
   isFeedingLogId,
@@ -234,6 +235,28 @@ test('calibrated: geometry corrected by what this pot actually served, rounded d
   assert.deepEqual(yieldEstimate({ potCapacityLitres: 60, ladleVolumeMl: 300 }, FIVE_BATCHES, null), {
     kind: 'no-fill-level',
   });
+});
+
+// ─── dates from a date field ─────────────────────────────────────────────────
+
+test('TODAY picked before noon becomes NOW, so it is not refused as the future', () => {
+  // The trap: a date field gives local midday. At 09:00 that is three hours
+  // ahead, past the five-minute skew the validators allow.
+  const nineAm = new Date(2026, 8, 12, 9, 0).getTime();
+  const todayMidday = new Date(2026, 8, 12, 12, 0).getTime();
+  assert.equal(dayToInstant(todayMidday, nineAm), nineAm);
+  assert.deepEqual(validateStockMovement(movement({ occurredAt: dayToInstant(todayMidday, nineAm) }), nineAm), []);
+  // Without the helper, the same form is refused.
+  assert.deepEqual(validateStockMovement(movement({ occurredAt: todayMidday }), nineAm), ['occurred-in-future']);
+});
+
+test('another day keeps its midday; a future day is still refused', () => {
+  const nineAm = new Date(2026, 8, 12, 9, 0).getTime();
+  const yesterday = new Date(2026, 8, 11, 12, 0).getTime();
+  const tomorrow = new Date(2026, 8, 13, 12, 0).getTime();
+  assert.equal(dayToInstant(yesterday, nineAm), yesterday);
+  assert.equal(dayToInstant(tomorrow, nineAm), tomorrow);
+  assert.deepEqual(validateStockMovement(movement({ occurredAt: dayToInstant(tomorrow, nineAm) }), nineAm), ['occurred-in-future']);
 });
 
 // ─── the day ─────────────────────────────────────────────────────────────────
