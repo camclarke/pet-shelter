@@ -62,7 +62,7 @@ export function ActiveTag({ view }: { view: ActiveView }) {
         {pet.hasMicrochip && <p className="dossier__chip-note">{t.tag.microchipHint(pet.sex)}</p>}
 
         {tone === 'available' && (
-          <p>
+          <p className="tag-page__meet">
             <Link href={`/adopt/${pet.slug}`} className="auth__link">
               {t.tag.meetLink(pet.name)}
             </Link>
