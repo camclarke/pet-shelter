@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
-import { formatDate, parseDateInput, todayInputValue } from '@/lib/date-input';
+import { dayToInstant, formatDate, parseDateInput, todayInputValue } from '@/lib/date-input';
 import { listCookBatches, readStock, requestCookBatch, updateCookOutcome, type CookBatchView } from '@/lib/food-admin';
 import { hasToxicHazard } from '@/lib/food-safety';
 import {
@@ -13,7 +13,6 @@ import {
   cookBatchWarnings,
   cookInputHazards,
   cookedToRawRatio,
-  dayToInstant,
   gramsPerLadle,
   validateCookBatch,
   validateCookOutcome,
