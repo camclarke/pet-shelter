@@ -49,13 +49,12 @@ import { SHELTER } from '@/config/shelter';
 import { getFirebase } from './firebase-client';
 import { STATUSES_INSIDE_FACILITY } from './arrival';
 import { DONATION_TEXT_MAX_CHARS, donationWrite, reviewDonation, type DonationDraft } from './food-parse';
+import { COOK_BATCH_FAILURE_HEADER } from './cook-batch-handler';
 import {
   FOOD_CATEGORIES,
-  cookInputGrams,
   cookOutcomeValues,
   isFeedingLogId,
   stockMovementDeltaG,
-  validateCookBatch,
   validateCookOutcome,
   validateStockMovement,
   type CookBatchDraft,
@@ -63,7 +62,6 @@ import {
   type StockMovementDraft,
 } from './food-stock';
 import type {
-  CookBatch,
   CookBatchInput,
   FeedingLog,
   FeedingServing,
@@ -80,10 +78,8 @@ type DonationWrite = Omit<FoodDonation, 'id' | 'createdAt' | 'updatedAt'> & {
   updatedAt: FieldValue;
 };
 type StockEntryWrite = Omit<StockEntry, 'id' | 'recordedAt'> & { recordedAt: FieldValue };
-type CookBatchWrite = Omit<CookBatch, 'id' | 'createdAt' | 'updatedAt'> & {
-  createdAt: FieldValue;
-  updatedAt: FieldValue;
-};
+// No CookBatchWrite here: cook batches are written by the server route, typed in
+// src/app/api/food/cook-batch/route.ts.
 type FeedingLogWrite = Omit<FeedingLog, 'updatedAt'> & { updatedAt: FieldValue };
 
 /** Mirrors `isCaller()` in the rules: email when the account has one, else uid. */
@@ -276,51 +272,41 @@ export async function recordStockMovement(draft: StockMovementDraft, user: User)
 // Cook batches
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The batch and one negative ledger entry per input, in ONE batch. */
-export async function saveCookBatch(draft: CookBatchDraft, user: User): Promise<string> {
-  const errors = validateCookBatch(draft);
-  if (errors.length > 0 || draft.cookedAt === null) {
-    throw new Error(`food-admin: invalid cook batch (${errors.map((e) => e.kind).join(', ')})`);
+export type CookBatchFailure = 'unauthorized' | 'invalid' | 'failed';
+
+/**
+ * Record a cook batch through POST /api/food/cook-batch.
+ *
+ * ⚠️ NOT a client Firestore write. `firestore.rules` denies client create of
+ * `cookBatches` and of `cook` ledger entries, because the toxic-ingredient
+ * acknowledgement can only be enforced by running `validateCookBatch` on the
+ * server — see `src/lib/cook-batch-handler.ts`. The screen still validates
+ * first, so a person sees the problem before anything is sent.
+ *
+ * Never throws: every failure resolves to a reason the screen can show.
+ */
+export async function requestCookBatch(
+  user: User,
+  draft: CookBatchDraft
+): Promise<{ id: string; failure: null } | { id: null; failure: CookBatchFailure }> {
+  try {
+    const token = await user.getIdToken();
+    const res = await fetch('/api/food/cook-batch', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { id: string };
+      return { id: json.id, failure: null };
+    }
+    if (res.status === 401 || res.status === 403) return { id: null, failure: 'unauthorized' };
+    const stamped = res.headers.get(COOK_BATCH_FAILURE_HEADER);
+    if (stamped !== null && (res.status === 400 || res.status === 422)) return { id: null, failure: 'invalid' };
+    return { id: null, failure: 'failed' };
+  } catch {
+    return { id: null, failure: 'failed' };
   }
-  const inputs: CookBatchInput[] = draft.inputs.map((input) => ({
-    category: input.category!,
-    label: input.label.trim().slice(0, 80),
-    rawG: cookInputGrams(input)!,
-  }));
-
-  const { db } = getFirebase();
-  const batch = writeBatch(db);
-  const batchRef = doc(collection(db, 'cookBatches'));
-  const author = authorOf(user);
-
-  const record: CookBatchWrite = {
-    cookedAt: Timestamp.fromMillis(draft.cookedAt),
-    inputs,
-    ...cookOutcomeValues(draft),
-    recordedBy: author,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-  batch.set(batchRef, record);
-
-  for (const input of inputs) {
-    const entry: StockEntryWrite = {
-      kind: 'cook',
-      category: input.category,
-      label: input.label,
-      deltaG: -input.rawG,
-      occurredAt: Timestamp.fromMillis(draft.cookedAt),
-      recordedAt: serverTimestamp(),
-      expiresAt: null,
-      sourceId: batchRef.id,
-      note: null,
-      recordedBy: author,
-    };
-    batch.set(doc(stockEntries(db, input.category)), entry);
-  }
-
-  await batch.commit();
-  return batchRef.id;
 }
 
 /**
