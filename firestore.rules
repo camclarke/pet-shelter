@@ -283,9 +283,11 @@ service cloud.firestore {
     //   - it unlocks EVERYTHING already in the restricted tiers, not only what
     //     is written from now on — a `location/current` recorded while the
     //     animal was fostered, and the names of earlier custody holders;
-    //   - nothing removes this document when an adopted animal is returned.
-    //     Re-admission (reopenPet) does not touch it, so the previous family
-    //     keeps passing ownsPet() until the next approval replaces it.
+    //   - it is DELETED when an adopted animal is returned: reopenPet() removes
+    //     it in the re-admission batch (readmissionRevokesOwnership), so the
+    //     former family stops passing ownsPet(). `allow write` covers that
+    //     delete; the ended ownership stays on record in the closed custody
+    //     interval and the approved application.
     match /adoptions/{petId} {
       allow read: if isAdmin()
         || (signedIn() && resource.data.ownerUid == request.auth.uid);
@@ -298,7 +300,8 @@ service cloud.firestore {
     // by that person and by admins and by nobody else.
     //
     // What these rules permit, precisely:
-    //   - an applicant CREATES only their own application, with the id
+    //   - while applicationsEnabled() returns true — and only then — an
+    //     applicant CREATES only their own application, with the id
     //     `{petId}__{their uid}`, for a pet whose status is `available`, with
     //     status `submitted`, their token's email, answers inside the bounds
     //     below, and every decision field null;
@@ -373,8 +376,22 @@ service cloud.firestore {
           && validAnswer(answers.get('whyThisAnimal', true));
       }
 
+      // adoptionApplications.enabled in src/config/shelter.ts. THIS is the
+      // enforcing copy: while it returns false no applicant can create an
+      // application by any route — not through the page, which 404s, and not
+      // through the SDK called directly from a browser console. Reading,
+      // withdrawing and the admin queue are unaffected. Switching the form on
+      // means changing this line AND deploying the rules; a test fails if it
+      // disagrees with the config.
+      function applicationsEnabled() {
+        return false;
+      }
+
       // The id names the signed-in user as its applicant. A uid containing the
-      // separator cannot pass, and cannot apply online.
+      // separator cannot pass, and cannot apply online. Nor could a pet id
+      // containing `__`: create would accept it, but this split would then see
+      // three parts and refuse the applicant's own get. Firestore-generated pet
+      // ids are alphanumeric, so that only matters for a hand-authored id.
       function ownApplicationId() {
         return signedIn()
           && applicationId.split('__').size() == 2
@@ -456,7 +473,8 @@ service cloud.firestore {
       allow list: if isAdmin()
         || (signedIn() && resource.data.applicantUid == request.auth.uid);
 
-      allow create: if ownApplicationId()
+      allow create: if applicationsEnabled()
+        && ownApplicationId()
         && request.resource.data.keys().hasOnly(applicationKeys())
         && request.resource.data.keys().hasAll(applicationKeys())
         && request.resource.data.applicantUid == request.auth.uid

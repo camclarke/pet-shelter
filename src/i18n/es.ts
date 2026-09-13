@@ -742,6 +742,8 @@ export const es: Messages = {
         return 'La persona no verificó su correo. Confirma sus datos por WhatsApp antes de aprobar.';
       case 'pet-not-on-wall':
         return 'Este animalito ya no figura como disponible en el muro. Si así lo decidieron, puedes aprobar igual.';
+      case 'location-will-be-visible':
+        return 'Este animalito tiene una ubicación registrada en su ficha, y al aprobar la nueva familia va a poder verla. Si puede ser la dirección de un hogar de tránsito, que la quiten antes de aprobar.';
     }
   },
 

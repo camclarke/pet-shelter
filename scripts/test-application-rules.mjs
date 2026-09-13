@@ -173,7 +173,33 @@ function update(who, before, after, mocks) {
 // The cases. Every DENY names what it is refusing.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Each case is [expectation, name, body, options]. `options.switch` picks the
+// ruleset variant: 'on' (the default) runs against a copy with
+// applicationsEnabled() forced true, 'off' against one forced false.
+//
+// ⚠️ Every ordinary create case runs with the switch ON. Run against the file
+// while it ships `false`, every create DENY would pass because the switch is
+// off, not because of the condition it names — the passing-for-the-wrong-reason
+// trap. Whether the FILE agrees with shelter.ts is the drift test's job.
+const OFF = { switch: 'off' };
+
 const cases = [
+  // ── the public switch: create is refused while applicationsEnabled() is false ─
+  ['DENY', 'switch off: applicant applies for an available pet', {
+    request: request(WHO.ana, 'create', APP_PATH, created()),
+    functionMocks: mockPet('available'),
+  }, OFF],
+  ['ALLOW', 'switch off: applicant still reads own application', {
+    request: request(WHO.ana, 'get', APP_PATH),
+    resource: { data: stored() },
+  }, OFF],
+  ['ALLOW', 'switch off: applicant still withdraws an open application', update(
+    WHO.ana, stored(), stored({ status: 'withdrawn', withdrawnAt: NOW, updatedAt: NOW }),
+  ), OFF],
+  ['ALLOW', 'switch off: admin still reviews an application', update(
+    WHO.admin, stored(), stored({ status: 'reviewing', updatedAt: NOW }),
+  ), OFF],
+
   // ── create ────────────────────────────────────────────────────────────────
   ['ALLOW', 'create: applicant applies for an available pet', {
     request: request(WHO.ana, 'create', APP_PATH, created()),
@@ -533,6 +559,46 @@ const cases = [
     request: request(WHO.admin, 'update', `/pets/${PET}`, { status: 'adopted' }),
     resource: { data: { status: 'available' } },
   }],
+
+  // ── re-admission ends ownership ──────────────────────────────────────────
+  // reopenPet() deletes adoptions/{petId} in its batch. The first case is that
+  // delete; the rest are the former owner afterwards, when exists() on the
+  // adoption answers false. (Mocked here. Against the DEPLOYED rules the same
+  // revocation was measured live: "after the adoption is removed: former owner
+  // reads the microchip" → DENY, probe-application-rules.mjs, 11/11.)
+  ['ALLOW', 'readmission: admin deletes adoptions/{petId} in the re-admission batch', {
+    request: request(WHO.admin, 'delete', `/adoptions/${PET}`),
+    resource: { data: { petId: PET, ownerUid: ANA, applicationId: APP } },
+  }],
+  ['DENY', 'readmission: the owner deletes their own adoption', {
+    request: request(WHO.ana, 'delete', `/adoptions/${PET}`),
+    resource: { data: { petId: PET, ownerUid: ANA, applicationId: APP } },
+  }],
+  ['ALLOW', 'readmission: BEFORE it, the owner reads location/current', {
+    request: request(WHO.ana, 'get', `/pets/${PET}/location/current`),
+    resource: { data: { address: 'x' } },
+    functionMocks: mockOwner(ANA),
+  }],
+  ['DENY', 'readmission: the FORMER OWNER reads the microchip after re-admission', {
+    request: request(WHO.ana, 'get', `/pets/${PET}/identity/microchip`),
+    resource: { data: { code: '068000000000001' } },
+    functionMocks: mockOwner(null),
+  }],
+  ['DENY', 'readmission: the former owner reads location/current after re-admission', {
+    request: request(WHO.ana, 'get', `/pets/${PET}/location/current`),
+    resource: { data: { address: 'x' } },
+    functionMocks: mockOwner(null),
+  }],
+  ['DENY', 'readmission: the former owner reads scans after re-admission', {
+    request: request(WHO.ana, 'get', `/pets/${PET}/scans/s1`),
+    resource: { data: { context: 'intake' } },
+    functionMocks: mockOwner(null),
+  }],
+  ['DENY', 'readmission: the former owner reads custody after re-admission', {
+    request: request(WHO.ana, 'get', `/pets/${PET}/custody/c1`),
+    resource: { data: { kind: 'adopter', holderUid: ANA } },
+    functionMocks: mockOwner(null),
+  }],
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -555,8 +621,28 @@ let passed = 0;
 console.log(`rules: ${rulesPath}`);
 console.log(`project: ${project} (projects.test — nothing is released)\n`);
 
-for (let i = 0; i < selected.length; i += CHUNK) {
-  const chunk = selected.slice(i, i + CHUNK);
+// Force applicationsEnabled() to a known value in a copy. Exactly one
+// definition must be found, or the variants would silently equal the file.
+const SWITCH_PATTERN = /function applicationsEnabled\(\) \{\s*return (?:true|false);\s*\}/g;
+function withSwitch(content, on) {
+  const found = content.match(SWITCH_PATTERN) ?? [];
+  if (found.length !== 1) {
+    console.error(`expected exactly one applicationsEnabled() in ${rulesPath}, found ${found.length}`);
+    process.exit(2);
+  }
+  return content.replace(SWITCH_PATTERN, `function applicationsEnabled() {\n        return ${on};\n      }`);
+}
+const VARIANTS = { on: withSwitch(source, true), off: withSwitch(source, false) };
+
+const work = [];
+for (const variant of ['on', 'off']) {
+  const inVariant = selected.filter(([, , , options]) => (options?.switch ?? 'on') === variant);
+  for (let i = 0; i < inVariant.length; i += CHUNK) {
+    work.push({ content: VARIANTS[variant], chunk: inVariant.slice(i, i + CHUNK) });
+  }
+}
+
+for (const { content, chunk } of work) {
   let data;
   try {
     const res = await client.request({
@@ -564,7 +650,7 @@ for (let i = 0; i < selected.length; i += CHUNK) {
       method: 'POST',
       headers: { 'x-goog-user-project': project },
       data: {
-        source: { files: [{ name: 'firestore.rules', content: source }] },
+        source: { files: [{ name: 'firestore.rules', content }] },
         testSuite: {
           testCases: chunk.map(([expectation, , body]) => ({ expectation, ...body })),
         },

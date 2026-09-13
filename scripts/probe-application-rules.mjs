@@ -340,6 +340,7 @@ try {
           },
           pet: { id: PET_ID, status: 'shelter' },
           otherApplications: [],
+          hasRecordedLocation: false,
           adminUid: uids.admin,
           holder: 'Nightprobe',
           newCustodyId: 'c-adopter',

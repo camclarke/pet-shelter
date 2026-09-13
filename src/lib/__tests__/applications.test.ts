@@ -361,6 +361,7 @@ function input(over: Partial<ApprovalInput> = {}): ApprovalInput {
     },
     pet: { id: 'pet1', status: 'available' },
     otherApplications: [],
+    hasRecordedLocation: false,
     adminUid: 'admin-1',
     holder: 'Ana Pérez',
     newCustodyId: 'cust-new',
@@ -428,6 +429,15 @@ test('an unverified email and an animal off the wall only WARN', () => {
   );
   assert.deepEqual(check.blockers, []);
   assert.deepEqual(check.warnings.sort(), ['email-unverified', 'pet-not-on-wall']);
+});
+
+test('a recorded location only WARNS, because approving hands it to the new owner', () => {
+  // It may be a foster volunteer's address (the project log concern #2) — or the
+  // adopter's own area, recorded on purpose. Only a human can tell.
+  const check = approvalCheck(input({ hasRecordedLocation: true }));
+  assert.deepEqual(check.blockers, []);
+  assert.deepEqual(check.warnings, ['location-will-be-visible']);
+  assert.deepEqual(approvalCheck(input()).warnings, []);
 });
 
 test('the approval batch writes the application, the adoption, custody, placements and status', () => {

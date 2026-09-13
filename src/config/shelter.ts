@@ -124,6 +124,11 @@ export interface ApplicationConfig {
    * dossier and the `/adopt/{slug}/apply` page. The admin queue works either
    * way.
    *
+   * ⚠️ MIRRORED in `firestore.rules` as `applicationsEnabled()`, which is the
+   * enforcing copy: this flag only hides the page, while the rule is what stops
+   * an application being written straight through the SDK. Change both, then
+   * deploy the rules — a test fails if they disagree.
+   *
    * ⚠️ FALSE until the shelter's REAL screening questions replace the draft
    * below. Wawitas asks its own questions over WhatsApp today and nobody has
    * written them down for us yet (plan §11 #3). Publishing invented questions
@@ -169,7 +174,8 @@ export const SHELTER: ShelterConfig = {
 
   adoptionApplications: {
     // ⚠️ OFF. Flip only after replacing the DRAFT questions below with the ones
-    // Wawitas actually asks, and setting `questionsAreDraft` to false.
+    // Wawitas actually asks, setting `questionsAreDraft` to false, and changing
+    // `applicationsEnabled()` in firestore.rules to match — then deploy the rules.
     enabled: false,
     questionsAreDraft: true,
 
