@@ -206,9 +206,11 @@ export interface CookInputDraft {
   toxicAcknowledged: boolean;
 }
 
-export interface CookBatchDraft {
-  cookedAt: number | null;
-  inputs: CookInputDraft[];
+/**
+ * The observed half of a batch, recorded after the fact: the pot is weighed
+ * after cooking and the ladles counted after serving.
+ */
+export interface CookOutcomeDraft {
   /** 0–1, from a select. Null when nobody looked. */
   potFillLevel: number | null;
   /** Measured net cooked weight, kilograms. Often filled in later. */
@@ -218,6 +220,11 @@ export interface CookBatchDraft {
   dogsServedText: string;
   cookedBy: string | null;
   notes: string | null;
+}
+
+export interface CookBatchDraft extends CookOutcomeDraft {
+  cookedAt: number | null;
+  inputs: CookInputDraft[];
 }
 
 export type CookBatchError =
@@ -289,6 +296,13 @@ export function validateCookBatch(
   });
   if (draft.inputs.length > MAX_INPUTS_PER_BATCH) errors.push({ kind: 'inputs-required' });
 
+  errors.push(...validateCookOutcome(draft));
+  return errors;
+}
+
+/** Validates only the observed half — what an edit after serving may change. */
+export function validateCookOutcome(draft: CookOutcomeDraft): CookBatchError[] {
+  const errors: CookBatchError[] = [];
   if (draft.potFillLevel !== null && !(draft.potFillLevel > 0 && draft.potFillLevel <= 1)) {
     errors.push({ kind: 'pot-fill-invalid' });
   }
@@ -303,6 +317,53 @@ export function validateCookBatch(
     errors.push({ kind: 'dogs-served-invalid' });
   }
   return errors;
+}
+
+/** The typed values a VALID outcome stores. Call `validateCookOutcome` first. */
+export function cookOutcomeValues(draft: CookOutcomeDraft): {
+  potFillLevel: number | null;
+  cookedWeightG: number | null;
+  ladlesYielded: number | null;
+  dogsServed: number | null;
+  cookedBy: string | null;
+  notes: string | null;
+} {
+  const cooked = parseKilogramsInput(draft.cookedKgText);
+  const ladles = parseDecimalInput(draft.ladlesText);
+  const dogs = parseDecimalInput(draft.dogsServedText);
+  return {
+    potFillLevel: draft.potFillLevel,
+    cookedWeightG: cooked.kind === 'ok' && cooked.grams > 0 ? cooked.grams : null,
+    ladlesYielded: ladles.kind === 'ok' && ladles.value > 0 ? ladles.value : null,
+    dogsServed: dogs.kind === 'ok' && Number.isInteger(dogs.value) && dogs.value > 0 ? dogs.value : null,
+    cookedBy: draft.cookedBy?.trim() || null,
+    notes: draft.notes?.trim() || null,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dates from a date field
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The instant to store for a day picked in a date field.
+ *
+ * ⚠️ `parseDateInput` returns LOCAL MIDDAY, which is right for protecting the
+ * calendar day across timezones and wrong for "today" before noon: 12:00 is
+ * then hours in the future, so every "not in the future" check — ours at five
+ * minutes, the rules' at ten — would refuse a donation recorded at 9 a.m.
+ * So today becomes `now`, and any other day keeps its midday. A day that is
+ * genuinely in the future keeps its midday too, and is refused as it should
+ * be.
+ */
+export function dayToInstant(dayMiddayMs: number, now: number = Date.now()): number {
+  const day = new Date(dayMiddayMs);
+  const today = new Date(now);
+  const sameDay =
+    day.getFullYear() === today.getFullYear() &&
+    day.getMonth() === today.getMonth() &&
+    day.getDate() === today.getDate();
+  return sameDay ? now : dayMiddayMs;
 }
 
 /**

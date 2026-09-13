@@ -180,6 +180,27 @@ export const SUGGEST_MODEL_LADDER: readonly string[] = [
   FLASH_LITE_MODEL,
 ];
 
+/**
+ * Donation parsing. ONE tier, Flash-Lite, and deliberately never a Flash tier.
+ *
+ * - The task is text in, short structure out: "3 bolsas de arroz de 5 kg"
+ *   split into foods with their words COPIED. Nothing to reason about, and
+ *   the arithmetic is deterministic code (plan §12.1).
+ * - Quota is per model, and the Flash buckets (20 a day each) serve photo
+ *   intake. A pantry log that spent them would push that evening's intakes
+ *   down the cascade. Flash-Lite has 500.
+ *
+ * ⚠️ A second Lite tier (`gemini-3.5-flash-lite`) would be the natural
+ * fallback — a separate daily bucket — and is NOT added, because it has no
+ * pricing row (`UNPRICED_BUT_AVAILABLE`), and the playbook rule is that a model
+ * gets its row before it gets traffic. A test enforces that every entry here is
+ * priced and is Lite-tier.
+ *
+ * Failure direction: OPEN. If the parser is down, the donation screen offers
+ * blank lines to type; nothing about stock depends on the model answering.
+ */
+export const FOOD_PARSE_MODEL_LADDER: readonly string[] = [FLASH_LITE_MODEL];
+
 /** Resolve a persisted key to the ID to call today. */
 export function modelIdFor(key: ModelKey): string {
   return MODELS[key].id;

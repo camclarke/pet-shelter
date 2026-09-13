@@ -1,0 +1,65 @@
+{
+  "//": "Ground truth for `npm run eval:food-parse`. SYNTHETIC donation texts written for the eval, not real donors or deliveries, which is why this file is committed rather than kept in _e2e/. Each case is ONE model request. `grams: null` means the text gives no mass and the line must not stock; `category` lists every defensible answer; `inStock` is the DEFAULT the review policy must choose (false for toxic or unweighable lines).",
+  "cases": [
+    {
+      "id": "task-example",
+      "text": "3 bolsas de arroz de 5 kg, 2 kg de hígado, un saco de croquetas de 15 kilos",
+      "expect": [
+        { "food": "arroz", "category": ["grain"], "grams": 15000, "inStock": true },
+        { "food": "higado", "category": ["offal"], "grams": 2000, "inStock": true },
+        { "food": "croquetas", "category": ["kibble"], "grams": 15000, "inStock": true }
+      ]
+    },
+    {
+      "id": "onion-in-box",
+      "text": "Doña Julia trajo una caja de verduras, 2 kilos de cebolla y medio kilo de zanahoria",
+      "expect": [
+        { "food": "verdura", "category": ["vegetable"], "grams": null, "inStock": true },
+        { "food": "cebolla", "category": ["vegetable"], "grams": 2000, "inStock": false },
+        { "food": "zanahoria", "category": ["vegetable"], "grams": 500, "inStock": true }
+      ]
+    },
+    {
+      "id": "market-units",
+      "text": "Del mercado Calatayud: un quintal de arroz, 2 arrobas de papa y 3 libras de corazón de res",
+      "expect": [
+        { "food": "arroz", "category": ["grain"], "grams": 46000, "inStock": true },
+        { "food": "papa", "category": ["vegetable"], "grams": 23000, "inStock": true },
+        { "food": "corazon", "category": ["offal", "meat"], "grams": 1380, "inStock": true }
+      ]
+    },
+    {
+      "id": "bones-and-dates",
+      "text": "5 kg de espinazo de cerdo y 4 latas de atún de 170 g que vencen el 15/10/2026",
+      "expect": [
+        { "food": "espinazo", "category": ["bone"], "grams": 5000, "inStock": true },
+        { "food": "atun", "category": ["wet-food", "meat", "other"], "grams": 680, "inStock": true, "expiry": "2026-10-15" }
+      ]
+    },
+    {
+      "id": "decimal-comma",
+      "text": "2,5 kg de carne molida y 1,5 kg de hígado de pollo",
+      "expect": [
+        { "food": "carne", "category": ["meat"], "grams": 2500, "inStock": true },
+        { "food": "higado", "category": ["offal"], "grams": 1500, "inStock": true }
+      ]
+    },
+    {
+      "id": "non-food-and-grapes",
+      "text": "Trajeron 2 mantas, un collar y 1 kg de uvas, más 3 kg de pollo",
+      "expect": [
+        { "food": "uva", "category": ["vegetable", "other"], "grams": 1000, "inStock": false },
+        { "food": "pollo", "category": ["meat"], "grams": 3000, "inStock": true }
+      ]
+    },
+    {
+      "id": "spoken-and-pieces",
+      "text": "kilo y medio de quinua, 6 presas de pollo y una bolsa de avena de 800 gr",
+      "expect": [
+        { "food": "quinua", "category": ["grain"], "grams": 1500, "inStock": true },
+        { "food": "pollo", "category": ["meat"], "grams": null, "inStock": true },
+        { "food": "avena", "category": ["grain"], "grams": 800, "inStock": true }
+      ]
+    }
+  ]
+}
