@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   cookBatchWarnings,
@@ -218,6 +220,17 @@ test('GUARD: the shipped shelter config has no pot measurements, so no estimate 
   assert.equal(SHELTER.kitchen.potCapacityLitres, null);
   assert.equal(SHELTER.kitchen.ladleVolumeMl, null);
   assert.equal(yieldEstimate(SHELTER.kitchen, FIVE_BATCHES, 0.8).kind, 'no-kitchen-constants');
+});
+
+test('WIRING: the cook screen gets its ladle estimate only through yieldEstimate(SHELTER.kitchen, …)', () => {
+  // The screen sits behind AdminGate, so no browser can drive it tonight. This
+  // reads the source: the guard above is worthless if the screen computes
+  // ladles some other way, or reads the constants directly.
+  const source = readFileSync(join(process.cwd(), 'src', 'app', 'admin', 'food', 'CookSection.tsx'), 'utf8');
+  assert.match(source, /t\.yieldEstimateText\(yieldEstimate\(SHELTER\.kitchen, calibration, null\)\)/);
+  assert.match(source, /t\.yieldEstimateText\(yieldEstimate\(SHELTER\.kitchen, calibration, outcome\.potFillLevel\)\)/);
+  assert.equal(/potCapacityLitres|ladleVolumeMl/.test(source), false);
+  assert.equal(/yieldEstimateText\(\{/.test(source), false);
 });
 
 test('with measurements but fewer than five batches, it is still calibrating', () => {

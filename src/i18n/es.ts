@@ -24,6 +24,13 @@ import { MS_PER_DAY, type Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
+import type { FoodCategory, FoodHazard } from '@/lib/types';
+import type { DonationError, DonationLineError } from '@/lib/food-parse';
+import type { StockMovementError } from '@/lib/food-stock';
+import type { EnergyStage } from '@/lib/rations';
+import type { FoodParseFailure } from '@/lib/food-parse-client';
+import type { FoodCopy } from './messages';
+import type { StockEntryKind } from '@/lib/types';
 
 /**
  * How much breed copy an adoption-wall card can carry. MEASURED, not guessed.
@@ -313,6 +320,249 @@ const PLACEMENT_WARNING: Record<PlacementWarning, string> = {
   'area-inactive': 'Esta área está marcada como fuera de servicio.',
 };
 
+// ── food ────────────────────────────────────────────────────────────────────
+
+const FOOD_CATEGORY: Record<FoodCategory, string> = {
+  meat: 'Carne',
+  offal: 'Menudencia',
+  bone: 'Hueso',
+  grain: 'Cereales y granos',
+  vegetable: 'Verduras',
+  kibble: 'Croquetas',
+  'wet-food': 'Comida húmeda',
+  other: 'Otros',
+};
+
+const FOOD_HAZARD: Record<FoodHazard, string> = {
+  allium: 'Cebolla, ajo o puerro',
+  chocolate: 'Chocolate',
+  caffeine: 'Café o cafeína',
+  grapes: 'Uvas o pasas',
+  xylitol: 'Xilitol',
+  macadamia: 'Nuez de macadamia',
+  alcohol: 'Alcohol',
+  'raw-dough': 'Masa cruda',
+  avocado: 'Palta',
+  bones: 'Hueso',
+  spoilage: 'Moho o mal estado',
+};
+
+/**
+ * ⚠️ Each one says what the hazard does, in one sentence, and stops. None
+ * says what to feed instead — plan §12.4 keeps nutritional advice out of this
+ * system — and none refuses anything.
+ */
+const FOOD_HAZARD_ADVICE: Record<FoodHazard, string> = {
+  allium: 'Es tóxico para perros y gatos aunque esté cocido: daña los glóbulos rojos.',
+  chocolate: 'Es tóxico para perros y gatos.',
+  caffeine: 'La cafeína es tóxica para perros y gatos.',
+  grapes: 'En perros pueden dañar los riñones, incluso en poca cantidad.',
+  xylitol: 'Es muy tóxico para perros, aun en cantidades pequeñas.',
+  macadamia: 'Es tóxica para perros.',
+  alcohol: 'Es tóxico para perros y gatos.',
+  'raw-dough': 'La masa cruda sigue fermentando en el estómago.',
+  avocado: 'En perros y gatos puede causar malestar digestivo; en conejos es tóxica.',
+  bones: 'Hay que deshuesar antes de servir: el hueso cocido se astilla.',
+  spoilage: 'La comida con moho puede tener toxinas, y cocinarla no la vuelve segura.',
+};
+
+/** Grams per market unit, as `food-quantity.ts` converts them, for the note. */
+const TRADITIONAL_UNIT_NOTE: Record<'libra' | 'arroba' | 'quintal', string> = {
+  libra: '1 libra = 460 g',
+  arroba: '1 arroba = 11,5 kg',
+  quintal: '1 quintal = 46 kg',
+};
+
+const DONATION_ERROR: Record<DonationError, string> = {
+  'received-required': 'Falta la fecha en que llegó la donación.',
+  'received-in-future': 'Esa fecha todavía no llegó. Revisa el día.',
+  'lines-required': 'Agrega al menos un alimento.',
+  'too-many-lines': 'Son demasiadas líneas para una donación. Divídela en dos.',
+  'text-too-long': 'El texto es muy largo. Usa como máximo 2000 caracteres.',
+  'lines-invalid': 'Revisa las líneas marcadas antes de guardar.',
+};
+
+const DONATION_LINE_ERROR: Record<DonationLineError, string> = {
+  'food-required': 'Escribe qué alimento es.',
+  'category-required': 'Elige una categoría para que sume al stock.',
+  'mass-required':
+    'Sin peso no se puede sumar al stock. Pésalo y anota los kilos, o marca que no suma al stock.',
+  'quantity-required': 'Anota la cantidad, por ejemplo «2 kg» o «3 bolsas de 5 kg».',
+  'quantity-unreadable':
+    'No se entiende la cantidad. Escríbela así: «2 kg», «medio kilo» o «3 bolsas de 5 kg».',
+  'quantity-ambiguous':
+    'Hay más de una cantidad en esta línea. Deja una sola cantidad por alimento y agrega otra línea para el resto.',
+  'quantity-too-precise':
+    'Usa como máximo dos decimales. Con tres no se sabe si «1.500» es un kilo y medio o mil quinientos.',
+  'quantity-not-positive': 'La cantidad tiene que ser mayor que cero.',
+  'quantity-too-heavy': 'Más de dos toneladas en una sola línea no parece posible. Revisa la cantidad.',
+};
+
+const STOCK_MOVEMENT_ERROR: Record<StockMovementError, string> = {
+  'category-required': 'Elige la categoría.',
+  'label-required': 'Escribe qué es, por ejemplo «arroz con gorgojo».',
+  'quantity-required': 'Anota los kilos.',
+  'quantity-invalid': 'Los kilos tienen que ser un número, por ejemplo 2,5.',
+  'quantity-too-precise':
+    'Usa como máximo dos decimales. Con tres no se sabe si «1.500» es un kilo y medio o mil quinientos.',
+  'quantity-not-positive': 'Los kilos tienen que ser más que cero.',
+  'quantity-too-heavy': 'Más de dos toneladas no parece posible. Revisa la cantidad.',
+  'occurred-required': 'Falta la fecha.',
+  'occurred-in-future': 'Esa fecha todavía no llegó. Revisa el día.',
+  'correction-reason-required':
+    'Una corrección necesita un motivo, por ejemplo «conteo del sábado». Es lo único que explica el cambio.',
+};
+
+const ENERGY_STAGE: Record<EnergyStage, string> = {
+  'puppy-early': 'cachorro de menos de 4 meses',
+  'puppy-late': 'cachorro de 4 a 12 meses',
+  'adult-dog': 'perro adulto',
+  kitten: 'gatito',
+  'adult-cat': 'gato adulto',
+};
+
+const FOOD_PARSE_FAILURE: Record<FoodParseFailure, string> = {
+  'not-configured': 'La lectura automática no está configurada. Agrega las líneas a mano.',
+  unauthorized: 'Tu sesión no tiene permiso para esto. Cierra sesión y vuelve a entrar.',
+  'text-rejected': 'El texto está vacío o es demasiado largo.',
+  timeout: 'La lectura automática tardó demasiado. Intenta de nuevo, o agrega las líneas a mano.',
+  failed: 'No pudimos leer el texto automáticamente. Agrega las líneas a mano.',
+};
+
+const STOCK_ENTRY_KIND: Record<StockEntryKind, string> = {
+  donation: 'Donación',
+  cook: 'Olla',
+  discard: 'Descarte',
+  correction: 'Corrección',
+};
+
+const FOOD_COPY: FoodCopy = {
+  navLabel: 'Comida',
+  title: 'Comida del refugio',
+  sub: 'Donaciones, despensa, la olla y las raciones del día.',
+  backToPanel: 'Volver al panel',
+  tabDonation: 'Donación',
+  tabStock: 'Despensa',
+  tabCook: 'Olla',
+  tabRations: 'Raciones',
+  loading: 'Cargando…',
+  loadFailed: 'No pudimos cargar esta sección. Revisa tu conexión e inténtalo de nuevo.',
+  permissionDenied:
+    'Firestore rechazó la lectura por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+  saveFailed: 'No pudimos guardar. Revisa tu conexión e inténtalo de nuevo.',
+  cancel: 'Cancelar',
+  remove: 'Quitar',
+  chooseCategory: 'Elegir…',
+
+  donationTextLabel: 'Qué llegó',
+  donationTextHint:
+    'Escríbelo como lo dirías, por ejemplo «3 bolsas de arroz de 5 kg, 2 kg de hígado». Puedes leerlo automáticamente o agregar las líneas a mano.',
+  parseButton: 'Leer el texto',
+  parsing: 'Leyendo…',
+  addLine: 'Agregar línea',
+  receivedLabel: 'Fecha en que llegó',
+  donorLabel: 'Quién la trajo (opcional)',
+  notesLabel: 'Nota (opcional)',
+  lineFood: 'Alimento',
+  lineCategory: 'Categoría',
+  lineQuantity: 'Cantidad',
+  lineMassKg: 'Kilos en la balanza (opcional)',
+  lineExpiry: 'Vence (opcional)',
+  lineInStock: 'Suma al stock de la olla',
+  fromText: 'Del texto:',
+  missingHazardsTitle: 'El texto menciona algo que ninguna línea recoge:',
+  reviewNote: 'Revisa cada línea antes de guardar. Nada cambia la despensa hasta que guardes.',
+  saveDonation: 'Guardar donación',
+  savedDonation: 'Donación guardada.',
+  recentDonations: 'Últimas donaciones',
+  noDonations: 'Todavía no hay donaciones registradas.',
+  parsedByModel: 'Leída automáticamente y revisada',
+  typedByHand: 'Anotada a mano',
+
+  stockTitle: 'Lo que hay en la despensa',
+  stockHint:
+    'Es la suma de todo lo que entró y salió. Si no coincide con el estante, registra una corrección con su motivo.',
+  stockEmpty: 'nada anotado',
+  stockNegative: 'Figura en negativo: puede faltar anotar una donación.',
+  movementOpen: 'Registrar descarte o corrección',
+  movementKind: 'Tipo',
+  directionLabel: 'Cambio',
+  directionAdd: 'Suma a la despensa',
+  directionRemove: 'Resta de la despensa',
+  movementLabel: 'Qué es',
+  movementKg: 'Kilos',
+  movementDate: 'Fecha',
+  movementNote: 'Motivo',
+  saveMovement: 'Guardar movimiento',
+
+  cookOpen: 'Registrar una olla',
+  cookHint: 'Pesa lo que entra crudo. El peso cocido y los cucharones se pueden anotar después.',
+  cookedAtLabel: 'Fecha',
+  inputsTitle: 'Ingredientes, en crudo',
+  inputLabel: 'Qué es',
+  inputKg: 'Kilos crudos',
+  addInput: 'Agregar ingrediente',
+  toxicAck: 'Lo revisé y va igual a la olla',
+  potFillLabel: 'Hasta dónde se llenó la olla',
+  notLooked: 'Sin mirar',
+  cookedKgLabel: 'Peso cocido, en kilos (opcional)',
+  ladlesLabel: 'Cucharones servidos (opcional)',
+  dogsServedLabel: 'Perros servidos (opcional)',
+  cookedByLabel: 'Quién cocinó (opcional)',
+  saveCook: 'Guardar olla',
+  recentBatches: 'Ollas anteriores',
+  noBatches: 'Todavía no hay ollas registradas.',
+  editOutcome: 'Anotar resultado',
+  saveOutcome: 'Guardar resultado',
+  calibrationTitle: 'Lo que midieron las ollas',
+  yieldTitle: 'Cucharones que rinde',
+
+  rationsTitle: 'Raciones de hoy',
+  rationsHint:
+    'Al lado de cada animalito, lo que sugiere el estándar veterinario (energía en reposo = 70 × kg elevado a 0,75, por un factor de etapa de vida). Es una referencia: no cambia ninguna ración por sí solo.',
+  noAnimals: 'No hay animalitos en el refugio ahora.',
+  ladlesToday: 'Cucharones hoy',
+  adjustedReason: 'Por qué distinto (opcional)',
+  dogsPresentLabel: 'Perros presentes (opcional)',
+  dogsPresentInvalid: 'Los perros presentes tienen que ser un número entero.',
+  shortfallLabel: 'Si faltó comida, anótalo (opcional)',
+  saveDay: 'Guardar el día',
+  savedDay: 'Día guardado.',
+  sharesTitle: 'Cómo se reparte la olla',
+  sharesHint:
+    'Compara la parte de la olla que recibe cada perro con los cucharones anotados y la parte que le toca según el estándar. No depende de qué haya en la olla, porque todos comen de la misma.',
+  sharesNeedTwo:
+    'Para comparar hacen falta al menos dos perros con peso medido y cucharones anotados.',
+  notFromPot: 'No come de la olla: el valor es solo de referencia.',
+  servingInvalid: 'Usa cucharones enteros o medios, hasta 20.',
+  measurementsFailed: 'No pudimos leer su peso. No se muestra ninguna ración.',
+};
+
+function percent(share: number): string {
+  return `${Math.round(share * 100)} %`;
+}
+
+function ratioNumber(value: number): string {
+  return value.toLocaleString('es-BO', { maximumFractionDigits: 2 });
+}
+
+/** "cebolla, ajo o puerro y uvas o pasas" — hazard labels joined for a sentence. */
+function hazardList(hazards: readonly FoodHazard[]): string {
+  const labels = hazards.map((h) => FOOD_HAZARD[h]);
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
+}
+
+function hazardAdvice(hazards: readonly FoodHazard[]): string {
+  return hazards.map((h) => FOOD_HAZARD_ADVICE[h]).join(' ');
+}
+
+function gramsText(grams: number): string {
+  const sign = grams < 0 ? '−' : '';
+  const abs = Math.abs(grams);
+  return abs < 1000 ? `${sign}${abs} g` : `${sign}${kgNumber(abs / 1000)} kg`;
+}
+
 const PATHOGEN: Record<Pathogen, string> = {
   parvovirus: 'Parvovirus',
   moquillo: 'Moquillo (distemper)',
@@ -508,5 +758,162 @@ export const es: Messages = {
     if (days < 1) return 'menos de un día juntos';
     const whole = Math.floor(days);
     return `${whole} ${whole === 1 ? 'día' : 'días'} juntos`;
+  },
+
+  foodCategoryLabel: (category) => FOOD_CATEGORY[category],
+
+  foodHazardLabel: (hazard) => FOOD_HAZARD[hazard],
+
+  foodHazardAdvice: (hazard) => FOOD_HAZARD_ADVICE[hazard],
+
+  formatGrams: (grams) => gramsText(grams),
+
+  donationError: (error) => DONATION_ERROR[error],
+
+  donationLineError: (error) => DONATION_LINE_ERROR[error],
+
+  donationLineWarning(warning) {
+    switch (warning.kind) {
+      case 'toxic-excluded':
+        return `${hazardList(warning.hazards)}: queda anotado pero NO suma al stock de la olla. ${hazardAdvice(warning.hazards)} Si la lectura se equivocó, márcalo para sumarlo.`;
+      case 'toxic-included':
+        return `Marcaste esta línea para sumar al stock aunque tiene ${hazardList(warning.hazards).toLowerCase()}. ${hazardAdvice(warning.hazards)}`;
+      case 'caution':
+        return hazardAdvice(warning.hazards);
+      case 'traditional-unit':
+        return warning.unit === 'libra' || warning.unit === 'arroba' || warning.unit === 'quintal'
+          ? `Convertido a kilos con la medida del mercado: ${TRADITIONAL_UNIT_NOTE[warning.unit]}.`
+          : 'Convertido a kilos.';
+      case 'unusually-heavy':
+        return `Son ${gramsText(warning.grams)} en una sola línea. Revisa que la cantidad esté bien.`;
+      case 'expired':
+        return 'Ya estaba vencido cuando llegó.';
+      case 'expires-soon':
+        return 'Vence en los próximos 3 días.';
+      case 'expiry-no-year':
+        return `Dice «${warning.text}» pero sin año. Elige la fecha para no adivinarla.`;
+      case 'species-unstated':
+        return 'No dice si es para perro o para gato. La comida de perro no cubre lo que necesita un gato.';
+      case 'not-in-text':
+        return 'Esta línea no aparece en el texto que escribiste. Revísala antes de sumarla al stock.';
+      case 'low-confidence':
+        return 'La lectura automática no está segura de esta línea.';
+      case 'not-stocked':
+        return 'Queda anotada, pero no suma al stock.';
+    }
+  },
+
+  stockMovementError: (error) => STOCK_MOVEMENT_ERROR[error],
+
+  cookBatchError(error) {
+    switch (error.kind) {
+      case 'cooked-required':
+        return 'Falta la fecha de la cocción.';
+      case 'cooked-in-future':
+        return 'Esa fecha todavía no llegó. Revisa el día.';
+      case 'inputs-required':
+        return 'Anota entre 1 y 20 ingredientes.';
+      case 'input-category-required':
+        return `Ingrediente ${error.index + 1}: elige la categoría.`;
+      case 'input-label-required':
+        return `Ingrediente ${error.index + 1}: escribe qué es.`;
+      case 'input-quantity':
+        return `Ingrediente ${error.index + 1}: ${STOCK_MOVEMENT_ERROR[error.error]}`;
+      case 'input-toxic-unacknowledged':
+        return `Ingrediente ${error.index + 1}: ${hazardList(error.hazards)}. ${hazardAdvice(error.hazards)} Para guardar, confirma que lo revisaste.`;
+      case 'pot-fill-invalid':
+        return 'El nivel de la olla no es válido.';
+      case 'cooked-weight-invalid':
+        return 'El peso cocido tiene que ser un número de kilos, por ejemplo 31,5.';
+      case 'ladles-invalid':
+        return 'Los cucharones tienen que ser un número mayor que cero; se permiten medios.';
+      case 'dogs-served-invalid':
+        return 'Los perros servidos tienen que ser un número entero mayor que cero.';
+    }
+  },
+
+  cookBatchWarning(warning) {
+    if (warning.kind === 'input-caution') {
+      return `Ingrediente ${warning.index + 1}: ${hazardAdvice(warning.hazards)}`;
+    }
+    return `Ingrediente ${warning.index + 1}: el stock anotado de ${FOOD_CATEGORY[warning.category].toLowerCase()} es ${gramsText(warning.stockGrams)}. Si hay más en la despensa, puede faltar anotar una donación.`;
+  },
+
+  yieldEstimateText(estimate) {
+    switch (estimate.kind) {
+      case 'no-kitchen-constants':
+        return 'No se muestra cuántos cucharones rinde la olla: todavía no están medidas la olla ni el cucharón del refugio, y sin esas medidas cualquier número sería inventado.';
+      case 'no-fill-level':
+        return 'Elige hasta dónde se llenó la olla para estimar los cucharones.';
+      case 'calibrating':
+        return `Aún calibrando: hacen falta ${estimate.needed} cocciones con el nivel de la olla y los cucharones contados, y hay ${estimate.n}.`;
+      case 'ok':
+        return `Rinde unos ${estimate.ladles} cucharones, según ${estimate.n} cocciones medidas.`;
+    }
+  },
+
+  energyStageLabel: (stage) => ENERGY_STAGE[stage],
+
+  bodyConditionSuggestionText(suggestion) {
+    const when = suggestion.days <= 0 ? 'hoy' : suggestion.days === 1 ? 'ayer' : `hace ${suggestion.days} días`;
+    return suggestion.kind === 'reduce-and-rescore'
+      ? `Sugerencia: condición corporal ${suggestion.bcs} (evaluada ${when}). Se podría reducir un poco la ración y volver a evaluar en unas 4 semanas.`
+      : `Sugerencia: condición corporal ${suggestion.bcs} (evaluada ${when}). Antes de aumentar la ración, conviene que el veterinario descarte parásitos o enfermedad.`;
+  },
+
+  foodParseFailure: (failure) => FOOD_PARSE_FAILURE[failure],
+
+  food: FOOD_COPY,
+
+  stockEntryKindLabel: (kind) => STOCK_ENTRY_KIND[kind],
+
+  formatKcal: (kcal) => `${Math.round(kcal).toLocaleString('es-BO')} kcal`,
+
+  potFillLabel: (level) => percent(level),
+
+  rationSummary(result) {
+    switch (result.kind) {
+      case 'not-applicable':
+        return 'El cálculo de energía no aplica a esta especie.';
+      case 'no-weight':
+        // Never a kilocalorie figure here — see the note in messages.ts.
+        return result.estimate
+          ? `Falta pesar. Las fotos de ingreso estimaron ${this.formatKgRange(result.estimate.minKg, result.estimate.maxKg)}, pero esa estimación no se usa para calcular raciones.`
+          : 'Falta pesar: sin un peso medido no se calcula ninguna ración.';
+      case 'implausible-weight':
+        return `El último peso anotado (${this.formatKg(result.weight.kg)}) no es posible. Corrígelo en su ficha.`;
+      case 'age-unknown':
+        return `Peso ${this.formatKg(result.weight.kg)}, ${this.daysAgoLabel(result.weightDays)}. Energía en reposo ${this.formatKcal(result.rerKcal)} al día. Sin edad no se puede elegir el factor de etapa de vida.`;
+      case 'ok': {
+        const range =
+          Math.round(result.merMinKcal) === Math.round(result.merMaxKcal)
+            ? this.formatKcal(result.merMinKcal)
+            : `${Math.round(result.merMinKcal).toLocaleString('es-BO')}–${this.formatKcal(result.merMaxKcal)}`;
+        const stages = result.stages.map((stage) => ENERGY_STAGE[stage]).join(' o ');
+        const stale = result.staleForGrowth
+          ? ' Está creciendo y el peso tiene más de 30 días: conviene volver a pesarlo.'
+          : '';
+        return `Peso ${this.formatKg(result.weight.kg)}, ${this.daysAgoLabel(result.weightDays)}. El estándar sugiere ${range} al día (${stages}).${stale}`;
+      }
+    }
+  },
+
+  potShareText(row) {
+    const base = `Según el estándar le toca ${percent(row.standardShare)} de la olla; con lo anotado recibe ${percent(row.recordedShare)}.`;
+    if (row.divergence === 'under') return `${base} Recibe bastante menos de lo que sugiere el estándar.`;
+    if (row.divergence === 'over') return `${base} Recibe bastante más de lo que sugiere el estándar.`;
+    return base;
+  },
+
+  measuredRatioText(measure, ratio) {
+    const name = measure === 'cooked-to-raw' ? 'Peso cocido entre peso crudo' : 'Gramos por cucharón';
+    if (ratio === null) {
+      return measure === 'cooked-to-raw'
+        ? `${name}: todavía no hay ollas con los dos pesos anotados.`
+        : `${name}: todavía no hay ollas con el peso cocido y los cucharones anotados.`;
+    }
+    const n = `${ratio.n} ${ratio.n === 1 ? 'olla' : 'ollas'}`;
+    const spread = ratio.n > 1 ? ` (entre ${ratioNumber(ratio.min)} y ${ratioNumber(ratio.max)})` : '';
+    return `${name}: ${ratioNumber(ratio.median)}${spread}, medido en ${n}.`;
   },
 };
