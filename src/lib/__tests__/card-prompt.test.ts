@@ -67,6 +67,16 @@ test('the closing fence is still there', () => {
   assert.ok(has('no opines sobre la salud del animal'));
 });
 
+test('the model is told not to add rows, infer vaccines or complete missing data', () => {
+  // The middle of the closing fence is the anti-hallucination rule for an OCR
+  // task prone to producing a plausible extra row. The step-9 evaluation's
+  // break-probe deleted it with every test green (2026-09-13); the fence test
+  // above only checks the paragraph's first and last sentences.
+  assert.ok(has('No agregues filas que no estén escritas'));
+  assert.ok(has('no deduzcas vacunas que "deberían" estar'));
+  assert.ok(has('no completes datos que falten'));
+});
+
 test('every field the code reads is named in the prompt', () => {
   // A field the prompt never mentions is a field the model fills by guessing
   // what the key means.

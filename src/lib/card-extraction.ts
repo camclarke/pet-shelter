@@ -37,6 +37,7 @@
 
 import type { FieldEvidence, MedicalRecordKind, WithheldReason } from './types';
 import { medicalDraftDefaults, type MedicalRecordDraft } from './medical';
+import type { CandidateFields } from './medical-candidates';
 import { CLOCK_SKEW_TOLERANCE_MS } from './placements';
 import { evidenceVerdict, sanitizeConfidence, type EvidenceThresholds } from './review-gate';
 
@@ -446,53 +447,26 @@ export interface CandidateMeta {
 }
 
 /**
- * Every stored field of an unconfirmed candidate, dates in epoch ms.
+ * The document the `index`-th card candidate is written as, at
+ * `pets/{petId}/medicalCandidates/{candidateIdFor(sourceDocument, index)}`.
  *
- * The server writer converts the dates and adds `extractedAt`; its write type is
- * derived from `MedicalRecord`, so a field added there without being added here
- * fails the typecheck rather than producing a document without it.
+ * ⚠️ There is no `confirmedBy`, `confirmedAt` or `source` here AT ALL, and
+ * that is the point: a candidate is unconfirmed by WHERE it is, in an
+ * admin-only collection, not by a value someone could set. The only way into
+ * `medical` is `planConfirmation()` — see `medical-candidates.ts`.
  */
-export interface CandidateRecordFields {
-  kind: MedicalRecordKind | null;
-  name: string;
-  performedAt: number | null;
-  nextDueAt: number | null;
-  validFrom: null;
-  validUntil: null;
-  veterinarian: string | null;
-  clinic: string | null;
-  batch: string | null;
-  manufacturer: string | null;
-  notes: null;
-  codes: string[];
-  source: 'llm-extracted';
-  confirmedBy: null;
-  confirmedAt: null;
-  sourceDocument: string;
-  extractedByModel: string;
-  extractedFrom: 'vaccination-card';
-  extractionEvidence: Record<CardField, FieldEvidence>;
-  recordedBy: string;
-}
-
-/**
- * The document a candidate is written as.
- *
- * ⚠️ `confirmedBy: null` and `confirmedAt: null` are LITERAL TYPES here, not
- * just values. A future edit that tried to confirm a candidate at write time —
- * "the model was very sure" — fails the typecheck. Confirmation is a person's
- * act and happens only through `confirmMedicalRecord` or an edit.
- */
-export function candidateRecordFields(
+export function cardCandidateFields(
   candidate: CardCandidate,
+  index: number,
   meta: CandidateMeta,
-): CandidateRecordFields {
+): CandidateFields {
   const { draft } = candidate;
   return {
     kind: draft.kind,
     name: draft.name,
     performedAt: draft.performedAt,
     nextDueAt: draft.nextDueAt,
+    // Never extracted from a card — see CARD_FIELDS.
     validFrom: null,
     validUntil: null,
     veterinarian: draft.veterinarian,
@@ -500,14 +474,11 @@ export function candidateRecordFields(
     batch: draft.batch,
     manufacturer: draft.manufacturer,
     notes: null,
-    codes: [],
-    source: 'llm-extracted',
-    confirmedBy: null,
-    confirmedAt: null,
     sourceDocument: meta.sourceDocument,
     extractedByModel: meta.modelKey,
     extractedFrom: 'vaccination-card',
     extractionEvidence: candidate.evidence,
+    sourceIndex: index,
     recordedBy: meta.recordedBy,
   };
 }

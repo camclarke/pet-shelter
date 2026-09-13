@@ -607,22 +607,10 @@ export interface FieldEvidence {
 
 export interface MedicalRecord {
   id: string;
-  /**
-   * ⚠️ Null ONLY on an unconfirmed, model-extracted candidate whose kind could
-   * not be read with confidence. Confirming requires `validateMedicalDraft` to
-   * pass, which requires a kind, so a confirmed record always carries one.
-   */
-  kind: MedicalRecordKind | null;
-  /** e.g. "Rabia", "Quintuple", "Ivermectina". Empty on a candidate whose name was withheld. */
+  kind: MedicalRecordKind;
+  /** e.g. "Rabia", "Quintuple", "Ivermectina". */
   name: string;
-  /**
-   * ⚠️ Null ONLY on an unconfirmed candidate whose date could not be read with
-   * confidence. Plan §4.3: never invent a date — a hallucinated vaccination
-   * date is a health decision made on fabricated data, and for rabies it
-   * carries legal consequences. The review gate keeps such a record out of
-   * everything that computes, and confirming requires a date.
-   */
-  performedAt: Timestamp | null;
+  performedAt: Timestamp;
   /** When the next dose or check is due, where applicable. */
   nextDueAt: Timestamp | null;
 
@@ -676,8 +664,11 @@ export interface MedicalRecord {
    * string. See `isConfirmed()` in `review-gate.ts`, which deliberately does not
    * look at `source`.
    *
-   * A manual record is stamped with its author at creation. A model-extracted
-   * one is written with null and stays null until a person confirms it.
+   * Every writer stamps it: a typed record with its author at creation, a
+   * model's reading with the person who confirmed it. A reading nobody has
+   * confirmed is NOT a `MedicalRecord` at all — it is a `MedicalCandidate` in
+   * the admin-only `medicalCandidates` (step-9 evaluation, 2026-09-13). The
+   * gate stays inside the computing functions as defence in depth.
    */
   confirmedBy: string | null;
   /** When `confirmedBy` was stamped. Null while unconfirmed. */
@@ -713,6 +704,49 @@ export interface MedicalRecord {
    */
   extractionEvidence: Record<string, FieldEvidence> | null;
 
+  recordedBy: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pets/{petId}/medicalCandidates/{candidateId} — ADMIN ONLY, every verb
+//
+// What a model read — a vaccination card (step 9), a consult (step 11) — that
+// nobody has confirmed. A NEW TIER, so a NEW DOCUMENT: `medical` is readable by
+// any signed-in account, and an unchecked model guess does not belong at that
+// tier (step-9 evaluation, 2026-09-13). Confirming creates the `MedicalRecord`
+// and deletes this document in one transaction — see
+// `src/lib/medical-candidates.ts`.
+//
+// The id is deterministic, `{source file stem}-{sourceIndex}`, so a repeated or
+// concurrent extraction of the same source collides instead of duplicating.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface MedicalCandidate {
+  id: string;
+  /** Null when the model could not read it with confidence. */
+  kind: MedicalRecordKind | null;
+  /** Empty when the name was withheld. */
+  name: string;
+  /** Null when the date was not read. Never invented — plan §4.3. */
+  performedAt: Timestamp | null;
+  nextDueAt: Timestamp | null;
+  validFrom: Timestamp | null;
+  validUntil: Timestamp | null;
+  veterinarian: string | null;
+  clinic: string | null;
+  batch: string | null;
+  manufacturer: string | null;
+  notes: string | null;
+  /** The Storage PATH of what was read. Admin-only, never a URL. */
+  sourceDocument: string;
+  /** The stable model KEY, never the raw id. Plan §4.4. */
+  extractedByModel: string;
+  extractedAt: Timestamp;
+  extractedFrom: MedicalExtractionSource;
+  /** What the model read for each field. Copied onto the record on confirmation. */
+  extractionEvidence: Record<string, FieldEvidence>;
+  /** Position among what the source yielded; with the file stem, the document id. */
+  sourceIndex: number;
+  /** The admin who asked for the extraction. */
   recordedBy: string;
 }
 

@@ -5,7 +5,7 @@ import {
   CARD_FIELDS,
   cardPhotoPath,
   cardThresholdsFor,
-  candidateRecordFields,
+  cardCandidateFields,
   isCardPhotoPathFor,
   parseCardDate,
   parseCardExtractRequest,
@@ -328,26 +328,37 @@ test('every field carries evidence, used or not', () => {
 
 // ─── the stored candidate is UNCONFIRMED ─────────────────────────────────────
 
-test('a candidate is written unconfirmed, marked extracted, and keeps its card', () => {
+test('a candidate carries its card and provenance, and no confirmation field at all', () => {
   const { candidates } = reviewOne(row());
-  const fields = candidateRecordFields(candidates[0] as CardCandidate, {
+  const fields = cardCandidateFields(candidates[0] as CardCandidate, 2, {
     modelKey: 'flash-lite',
     sourceDocument: 'medical/p1/card-0123abcd.jpg',
     recordedBy: 'admin@example.com',
   });
-  assert.equal(fields.source, 'llm-extracted');
-  assert.equal(fields.confirmedBy, null);
-  assert.equal(fields.confirmedAt, null);
+  // Unconfirmed by WHERE it is written, not by a value: there is nothing to set.
+  assert.equal('confirmedBy' in fields, false);
+  assert.equal('confirmedAt' in fields, false);
+  assert.equal('source' in fields, false);
   assert.equal(fields.extractedFrom, 'vaccination-card');
   assert.equal(fields.extractedByModel, 'flash-lite');
   assert.equal(fields.sourceDocument, 'medical/p1/card-0123abcd.jpg');
   assert.equal(fields.recordedBy, 'admin@example.com');
-  assert.deepEqual(fields.codes, []);
+  assert.equal(fields.sourceIndex, 2);
   // Never extracted from a card, so never set by one.
   assert.equal(fields.validFrom, null);
   assert.equal(fields.validUntil, null);
   assert.equal(fields.notes, null);
-  assert.equal(fields.extractionEvidence.performedAt.snippet, '14/02/2025');
+  assert.equal(fields.extractionEvidence.performedAt?.snippet, '14/02/2025');
+});
+
+test('a photo id shorter than 8 characters is refused, and 8 is accepted', () => {
+  // The lower bound of PHOTO_ID. The step-9 evaluation loosened it to {1,64}
+  // with every test green, because every fixture id was 8 or longer.
+  assert.throws(() => cardPhotoPath('abc123', '0f8e2c1'));
+  assert.doesNotThrow(() => cardPhotoPath('abc123', '0f8e2c1a'));
+  assert.equal(isCardPhotoPathFor('medical/abc123/card-0f8e2c1.jpg', 'abc123'), false);
+  assert.equal(isCardPhotoPathFor('medical/abc123/card-0f8e2c1a.jpg', 'abc123'), true);
+  assert.equal(isCardPhotoPathFor('medical/abc123/card-.jpg', 'abc123'), false);
 });
 
 // ─── where the card lives ────────────────────────────────────────────────────

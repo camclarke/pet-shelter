@@ -48,7 +48,8 @@ export interface CardExtractSuccess {
   /** The model said the image is not a vaccination or deworming card. */
   notACard: boolean;
   modelKey: string;
-  recordIds: string[];
+  /** The candidate ids written, all awaiting review in `medicalCandidates`. */
+  candidateIds: string[];
 }
 
 /** What the panel needs to say. Coarser than the route's codes on purpose. */
