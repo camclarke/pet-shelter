@@ -64,9 +64,62 @@ import {
   applicationIdFor,
   buildApplicationCreate,
   buildApprovalWrites,
+  isServerTime,
   withdrawalPatch,
 } from '../src/lib/applications.ts';
-import { applyWriteOps, resolveServerTime } from '../src/lib/server-time.ts';
+
+// ── Why this probe does NOT import src/lib/server-time.ts ────────────────────
+// The app resolves SERVER_TIME markers with resolveServerTime/applyWriteOps
+// from server-time.ts. Under `node --import tsx` that module cannot be shared
+// with this .mjs file. package.json has no "type", and tsx ends up with TWO
+// instances of `applications.ts` and of `firebase/firestore`: one reached from
+// this ESM file, and one through server-time.ts's extensionless
+// `./applications` import, which resolves through the CommonJS path. The
+// mechanism is inferred; the two instances are measured.
+//
+// Measured 2026-09-13, on the first live run of the applications section: the
+// probe's SERVER_TIME came back from resolveServerTime unresolved, and the two
+// firebase/firestore builds were different objects. The deployed rules then
+// correctly DENIED an `updatedAt` that arrived as the map {serverTime: true},
+// and the approval batch failed `invalid-argument` because doc() rejected a
+// foreign Firestore instance — three false failures that read exactly like
+// broken admin rules. The Next.js bundle has one module graph and is not
+// affected.
+//
+// So these are the same two functions, bound to THIS file's module instances.
+// Keep them in step with server-time.ts. The guard below refuses to run if the
+// markers ever stop resolving again.
+function resolveServerTime(data) {
+  const out = {};
+  for (const [key, value] of Object.entries(data)) {
+    out[key] = isServerTime(value) ? serverTimestamp() : value;
+  }
+  return out;
+}
+
+function applyWriteOps(db, batch, writes) {
+  for (const write of writes) {
+    const [first, ...rest] = write.path;
+    if (!first || rest.length % 2 !== 1) {
+      throw new Error(`applyWriteOps: ${write.path.join('/')} is not a document path`);
+    }
+    const ref = doc(db, first, ...rest);
+    const data = resolveServerTime(write.data);
+    if (write.op === 'update') batch.update(ref, data);
+    else batch.set(ref, data, { merge: write.merge });
+  }
+}
+
+{
+  const resolved = resolveServerTime({ ...adminStatusPatch('submitted', 'reviewing', 'guard') }).updatedAt;
+  if (isServerTime(resolved) || resolved?.constructor === Object) {
+    console.error(
+      'SERVER_TIME markers are not resolving to serverTimestamp(): every ALLOW write in this probe ' +
+        'would come back as a false DENY. Refusing to run. See the comment above resolveServerTime.',
+    );
+    process.exit(2);
+  }
+}
 
 const args = process.argv.slice(2);
 const RUN = args.includes('--run');

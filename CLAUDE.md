@@ -45,7 +45,7 @@ scanned chip resolves to a name and a phone call.
 | Billing | ✅ **`billingEnabled: true`** — `01AC67-128A11-DCD80D`, personal free trial. **Blaze plan via the trial. Expires 2026-11-11 exactly** (read off the Firebase console: 85 days, $300.00 remaining, as of 2026-08-17). Upgrade before then or services stop |
 | ADC | ✅ Verified reaching `wawitas`. One global file, **two identities** — see the switch ritual below |
 | Firestore | ✅ **Live** — `(default)`, `us-east1`, PITR on, daily + weekly backups, delete protection |
-| **Firestore rules** | ✅ **DEPLOYED, AND PROVEN ENFORCING 2026-08-23** — 22/22 assertions from a real client SDK, on both the allow *and* deny branches, including the privilege-escalation one. The five-day-old caveat that they "compiled and released, which is not the same as being correct" is now retired. See the log |
+| **Firestore rules** | ✅ **DEPLOYED, AND PROVEN ENFORCING 2026-08-23** — 22/22 assertions from a real client SDK, on both the allow *and* deny branches, including the privilege-escalation one. The five-day-old caveat that they "compiled and released, which is not the same as being correct" is now retired. See the log. **Redeployed 2026-09-13** from `master` `c687795` in ONE release — ruleset `4b3cdb65`, 46774 bytes LF-normalised, read back identical — adding `qrTokens`, `medicalCandidates`, `adoptionApplications` and the four food collections. The previous release was ruleset `3b4ee1f5` (2026-08-23, 16744 bytes). No index change |
 | Firestore indexes | ✅ **Deployed** — 10 composite + the `identity.code` collection-group field override that `findPetByMicrochip()` needs |
 | **Firebase project** | ✅ **ADDED 2026-08-16** — `projects/wawitas`, ACTIVE. Was never added until this session. **Google Analytics deliberately declined.** Imported into Terraform (`google_firebase_project.default`) |
 | Storage rules | ✅ **DEPLOYED, PROVEN ENFORCING, and FIXED 2026-08-23** — `pets/**` used a single `allow write`, which covers delete, while the condition dereferenced `request.resource` (null on delete): an admin could upload a photo and **never delete one**. Now `create, update` and `delete` are separate.  — the only rules in this project that have been. Same bucket, same upload: `pets/**` reads 200, `medical/**` reads **403**. Deployed by `npm run deploy:storage-rules`, **not** the Firebase CLI, which cannot do it — see the row below and `scripts/release-storage-rules.mjs` |
@@ -71,13 +71,16 @@ scanned chip resolves to a name and a phone call.
 | **AI foundations (step 8)** | ✅ **MERGED + DEPLOYED 2026-08-26** (PR #15, `ee2e1df`) — `src/lib/ai/`: provider, model ids with the key/id split, a bill-derived `pricing.mjs`, and `recordAiUsage` wired at the FIRST call site. ✅ **A `GEMINI_API_KEY` now exists** in `.env.local` (gitignored, untracked) and all three model ids are **verified live** via `npm run ai:probe`. ⛔ Still **no call has ever gone through the APP path** — `api_usage_daily` is 0 |
 | **Photo-assisted intake** | ✅ **MERGED + DEPLOYED + SERVING 2026-08-26** (PR #15) — but **INERT**: no API key, so `/api/intake/suggest` answers 503 and the manual form runs unchanged. Photo at step 1 → species + age prefilled, breed/size/names offered. Pure policy in `src/lib/intake-suggestion.ts` (38 tests, all break-verified). **`sex` is absent from the schema by construction** |
 | **First API route in the project** | ✅ `/api/intake/suggest`, deployed 2026-08-26. ⚠️ **A new surface class: it sits OUTSIDE `firestore.rules`**, so it verifies the ID token and admin claim itself. Auth boundary proven in production — 401/401/405 |
-| LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
+| **Vaccination-card extraction + review gate (step 9)** | ✅ **MERGED + DEPLOYED 2026-09-13** (PR #45, `d49f4e1`), **rules deployed** — a model's reading is a **candidate** in the admin-only `pets/{petId}/medicalCandidates`, never an unconfirmed record inside `medical`. `confirmMedicalRecord()` validates and moves one into `medical` in a single transaction; candidate ids are deterministic and create-only, so a repeated extraction of one card is refused. `POST /api/medical/cards/extract` answers 401/405 in production. Card probe **27/27 against the live ruleset**. Flash-Lite eval on synthetic cards: 0 wrong, 0 invented dates. ⛔ **No admin has photographed a real card**, the confirm transaction has never run against Firestore, and `gemini-3.8-flash` is unmeasured on cards |
 | **Medical records (step 7)** | ✅ **MERGED + DEPLOYED + SERVING 2026-08-27** (PR #16, `365cbd0`) — `MedicalPanel.tsx`, `src/lib/medical.ts` (27 tests), `medical-admin.ts`. The **first writer `pets/{petId}/medical` has ever had**. Rules and both indexes were written 2026-08-02/08-16 and had never had a caller. ⛔ **No human has saved a record** — it is behind `AdminGate` |
 | **Weight + body condition (step 10)** | ✅ **MERGED + DEPLOYED + SERVING 2026-09-12** (PR #43, `3ee9750`) — `MeasurementPanel.tsx`, `src/lib/measurements.ts` (32 tests), `measurements-admin.ts`. The **first writer `pets/{petId}/measurements` has ever had**; **no rules or index change**. Built on the owner's answer to plan §11 #7: a scale exists, animals are weighed when sick or at a vet visit, the vet scores BCS. **Nothing is copied onto `Pet`** (reverses plan §2.7). Steps 11 and 13 read a weight through `latestWeight()` only. ⛔ **No human has saved a measurement** — behind `AdminGate`, and no pet exists |
 | **Voice dictation — model layer (step 11)** | ✅ **MERGED + DEPLOYED 2026-08-27** (PR #16) — `src/lib/dictation.ts` (29 tests), `src/lib/ai/dictate.ts`. Transcript + **two independent extractors that each read the AUDIO**. ⛔ **No model has heard one second of audio**, and there is **no review UI** |
-| LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
+| LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages. The review UI is **deliberately deferred** (2026-09-13) until a real vaccination card has gone through step 9's review screen, which it must reuse: `medicalCandidates` and `confirmMedicalRecord()` |
 | Arrival pipeline + shelter areas | ⬜ Planned, plan §13. Placement intervals for outbreak tracing, not a current-area field |
-| Food: donations → pot → rations | ⬜ Planned, plan §12. LLM parses, **deterministic code does the arithmetic** |
+| **Food: donations → pot → rations (step 13)** | ✅ **MERGED + DEPLOYED 2026-09-13** (PR #47, `c687795`), **rules deployed** — `/admin/food`: donation text → `POST /api/food/parse` (Flash-Lite, a person confirms), an **append-only ledger** at `foodStock/{category}/stockEntries` (no index needed, measured), deterministic toxic-food word lists, and **cook batches created only by `POST /api/food/cook-batch`**, which runs the toxic-ingredient gate server-side (client create is denied). Rations from `RER = 70 × kg^0.75` via `latestWeight()`, never the photo estimate. **No ladle estimate until the pot and ladle are measured** — `SHELTER.kitchen` is `null`. Food probe **60/60 against the live ruleset**. ⛔ No admin has driven it; the cook-batch route has never been called with a real admin token |
+| **QR identity tags (step 12)** | ✅ **MERGED + DEPLOYED 2026-09-13** (PR #48, `09192ee`), **rules deployed** — `qrTokens` (public `get`, admin-only `list`, one-way revoke, no delete); public `/id/[token]` (public tier only, `force-dynamic`, WhatsApp CTA); print pages `/admin/pets/[petId]/qr` and `/admin/qr`. `/api/qr/[token]` **reads nothing**: it answers 200 with the same kind of SVG for ANY well-formed token, existing or not, so it cannot be used to test guesses — a 200 for an unknown token is correct, measured in production. QR probe **28/28**. ⛔ No tag has been issued, printed or scanned |
+| **Adoption applications + review queue (step 14)** | ✅ **MERGED + DEPLOYED 2026-09-13, SWITCHED OFF** (PR #46, `019edf1`), **rules deployed** — `/adopt/[slug]/apply` returns **404 in production**, because `adoptionApplications.enabled` is `false` in `shelter.ts` **and** `applicationsEnabled()` returns `false` in `firestore.rules`; the screening questions are a DRAFT. `/admin/applications` is live. Approval is one `writeBatch` the rules pair with `adoptions/{petId}`; re-admission now deletes `adoptions/{petId}`. **Live client-SDK probe 30/30 on the deployed rules, including the full approval batch** — after the probe harness itself was fixed (see the log). WhatsApp stays the primary CTA |
+| **Records dated today** | ✅ **FIXED + DEPLOYED 2026-09-13** (PR #49, `944bdd2`) — a medical record or weighing dated today was refused as "in the future" until local noon, because `parseDateInput` stamps noon and both validators compared instants. `isDateAfterToday()` compares local calendar days. ⛔ Not yet driven in a browser before noon |
 | Social syndication | ⏸ **Deferred 2026-08-16 at the user's direction.** Facebook + Instagram only when resumed; X and TikTok are *out* |
 
 ### Progress log
@@ -2169,6 +2172,134 @@ scanned chip resolves to a name and a phone call.
   showed 0 documents in the `measurements` collection group, that the probe pet
   id never existed, and no `users/{uid}` for the deleted probe account.
 
+- **2026-09-13** — **Merged and deployed steps 9, 12, 13 and 14 plus the
+  before-noon date fix, and released their rules in one deploy. All five PRs
+  had been built overnight in separate worktrees. The live admin-side probe
+  then failed 3 of 30, and the failure was the probe: it had two copies of the
+  Firebase SDK.** The order was #49 → #48 → #45 → #46 → #47, one at a time, and
+  each deploy was verified before the next merge.
+
+  ── **How the merges were made safe** ──────────────────────────────────────
+
+  An overnight integration branch had already merged all five in that order,
+  with tests green after each (414 → 859). Its merge commits form a straight
+  line whose second parents are exactly the PR heads, so every real merge had a
+  known-good target. For each PR:
+  1. merge `master` into the branch;
+  2. resolve conflicts by checking out the integration commit's version of the
+     conflicted files;
+  3. **refuse to commit unless the whole tree equals that integration commit.**
+
+  Every one did. After every GitHub merge, `master`'s tree also equalled the
+  matching integration commit. The conflicts were exactly the forecast ones:
+  1, 3, 5 and 8 files, all textual. That turns "eight conflicts resolved by
+  eye" into "a tree byte-identical to one that passed 859 tests and 212 rules
+  cases".
+
+  | PR | merge | new in production |
+  |---|---|---|
+  | #49 | `944bdd2` | a record dated today saves before noon |
+  | #48 | `09192ee` | `/id/[token]`, `/api/qr/[token]`, `/admin/qr` |
+  | #45 | `d49f4e1` | `POST /api/medical/cards/extract` |
+  | #46 | `019edf1` | `/admin/applications`; `/adopt/[slug]/apply` answers 404 (switched off) |
+  | #47 | `c687795` | `/admin/food`, `POST /api/food/parse`, `POST /api/food/cook-batch` |
+
+  After each deploy, all three held:
+  - the Cloud Run tag equalled `origin/master`;
+  - 9 routes returned 200 on both hosts;
+  - every API route answered 401 without a token and 405 to GET.
+
+  **One of my own expectations was wrong, not the code.** `/api/qr/ABCDEFGHJK`
+  returned 200 where I had assumed 404. The route reads nothing and answers
+  identically for any well-formed token, precisely so it cannot confirm that a
+  token exists. Only a malformed token gets 404.
+
+  ── **Rules** ──────────────────────────────────────────────────────────────
+
+  `firebase deploy --only firestore:rules` ran from `master` at `c687795`,
+  after confirming the CLI was on the personal account.
+  - **Released:** ruleset `4b3cdb65`, **46774 bytes LF-normalised, read back
+    identical**.
+  - **Previous release:** `3b4ee1f5` (2026-08-23, 16744 bytes). It was read
+    back first and matched the pre-session file, which proved the readback
+    script before its answer was trusted.
+  - No index deploy, and no `storage.rules` change.
+
+  | probe | result |
+  |---|---|
+  | `rules:test:qr` | 28/28 |
+  | `probe:card-rules` | 26/27, then **27/27**. The one miss was the planned sign that the deploy landed, and that case is now flipped to ALLOW |
+  | `probe:food-rules` | 60/60 |
+  | `probe-application-rules.mjs --run` (live client SDK, no `--with-available-pet`) | 27/30, then **30/30** after the harness fix below |
+
+  ── **The probe was broken, not the rules** ────────────────────────────────
+
+  The first-ever live run of the applications section failed three admin
+  cases:
+  - submitted → reviewing was DENIED;
+  - the full approval batch failed with `invalid-argument`;
+  - the approved applicant's microchip read failed, which follows from the
+    batch.
+
+  The real admin screen sends exactly those writes, so this read like a broken
+  adoption queue. It was the harness. `package.json` has no `"type"`, and under
+  `node --import tsx` the `.mjs` probe ended up with **two instances** of
+  `applications.ts` and of `firebase/firestore`. One was reached directly; the
+  other came through `server-time.ts`'s extensionless `./applications` import.
+  The mechanism is inferred; the two instances are measured. A zero-write
+  script showed:
+  - the probe's `SERVER_TIME` marker came back from `resolveServerTime`
+    **unresolved**;
+  - the CJS and ESM `firebase/firestore` builds were **different objects**.
+
+  So `updatedAt` reached Firestore as the map `{serverTime: true}`, and the
+  rules correctly refused it. And `doc()` rejected a foreign Firestore
+  instance, which is the `invalid-argument`. The Rules test API had passed the
+  same cases because it hand-builds JSON and never calls those helpers. The
+  Next.js bundle has one module graph and is not affected.
+
+  **The fix.** The probe now binds the two helpers to its own module instances,
+  and it **refuses to run** if a marker survives resolution. The guard was
+  break-probed: a copy with the old import exits 2 and explains why. **The
+  adoption admin path is now proven live on the deployed rules**, not only on
+  the test API: status moves, the approval batch the rules pair with
+  `adoptions/{petId}`, and the ownership that approval grants.
+
+  ── **Production after the last merge** ────────────────────────────────────
+
+  The bundle check has a positive control: `identitytoolkit` must match on
+  `/account`, or a clean result proves nothing.
+  - **The homepage is still 8 chunks / 579 KB, with no Firebase SDK.**
+  - `GEMINI_API_KEY`, `generativelanguage` and `createGoogleGenerativeAI` are
+    absent from all 10 routes checked.
+  - New sizes: `/admin/pets/{id}` 14 chunks / 1414 KB (was 1346; card capture
+    and the tag panel), `/admin/food` 14 / 1398, `/admin/applications` 13 /
+    1363, `/admin/qr` 12 / 1322.
+
+  **Read back afterwards**, with root collections enumerated rather than
+  listed from memory:
+  - no `pets` and no `adoptionApplications` collection;
+  - 0 documents in every pet subcollection group;
+  - 2 `petDrafts`, 3 `users`, 14 `api_usage_daily` rows;
+  - 10 bucket objects, all photos of the two drafts.
+
+  **Auth holds 3 accounts, and all are admins:** the two known ones, plus
+  `sandra.milena.brinez.alvarez@gmail.com`. That account was created
+  2026-09-13 00:20 UTC by a separate session and was not reviewed here; it
+  explains step 10's "3 accounts, 2 users" note. No Gemini call was made this
+  session.
+
+  **Cleanup.** The five worktrees under `C:\code\nightshift\` are removed, and
+  the five merged branches are deleted locally and on GitHub. The local
+  `integration/2026-09-13` ref is kept: its merge commits are not ancestors of
+  `master`, although its tree is identical.
+
+  ⛔ **Not verified:**
+  - No admin has driven any new screen, photographed a card, issued or scanned
+    a tag, recorded a cook batch, or saved a record before noon.
+  - #45 moved intake's retry loop into `retryWithinDeadline`, and no photo has
+    gone through the deployed intake since.
+
 ---
 
 ## Next session — start here
@@ -2179,6 +2310,45 @@ scanned chip resolves to a name and a phone call.
 > does NOT rewrite a workflow trigger, so `branches: [main]` would have gone on
 > matching nothing and **every push would have stopped deploying, silently**.
 > Log entries below that say `main` were accurate when they were written.
+
+### ✅ 2026-09-13 — steps 9, 12, 13 and 14 are live. What only a person can do now
+
+All five overnight PRs are merged, deployed and verified, and their rules are
+released. **Every new screen is live, and no person has driven any of them.**
+In order of value:
+
+1. **Publish the first real pet (step 3).** Every new feature needs one: a card
+   is photographed from `/admin/pets/{id}`, a tag is issued for a pet, and a
+   ration needs a weighed dog. The Lobita draft is waiting in `/admin/intake`.
+2. **A phone pass as a signed-in admin:**
+   - save a medical record dated today, before noon;
+   - photograph a real vaccination card, then confirm one row, correct one and
+     discard one;
+   - issue a QR tag, print it at 100% and scan it;
+   - open `/admin/food` and `/admin/applications`.
+3. **Owner decisions:**
+   - the real adoption screening questions, then flip `enabled` in
+     `shelter.ts` AND `applicationsEnabled()` in `firestore.rules`, and
+     redeploy the rules;
+   - pot litres and ladle millilitres for `SHELTER.kitchen`;
+   - whether kitchen volunteers need a narrower claim than `admin`;
+   - whether the public `get` on `qrTokens` may expose `createdBy`;
+   - whether the animal's name is printed on the tag.
+4. **Review the third admin.** `sandra.milena.brinez.alvarez@gmail.com` holds
+   the claim, granted by a session this one did not see.
+5. **Small cleanup PRs:**
+   - one `requireAdmin` helper for the four hand-rolled route checks;
+   - pick one of `isDateAfterToday` and `dayToInstant`;
+   - move `food-parse.ts` onto `retryWithinDeadline`.
+
+Step 11's review UI stays deferred until a real card has been through step 9's
+review screen.
+
+⚠️ **A `scripts/*.mjs` probe run under `node --import tsx` can hold two
+instances of a `src/lib` module and of the Firebase SDK.** Measured on
+2026-09-13, through `server-time.ts`. If a probe write that should succeed
+comes back DENY or `invalid-argument`, suspect the harness until proven
+otherwise.
 
 ### ⚠️ Read these FOUR first — 2026-09-10, updated 2026-09-12
 

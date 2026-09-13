@@ -153,7 +153,10 @@ const proposedFirestore = [
 ];
 
 const liveFirestore = [
-  fsCase('LIVE, NOT YET DEPLOYED: admin reads a candidate', 'DENY', CANDIDATE, { auth: ADMIN, method: 'get' }, CANDIDATE_DOC),
+  // Flipped 2026-09-13, when firestore.rules with `medicalCandidates` was
+  // released (ruleset 4b3cdb65). Before that deploy this case was DENY, and
+  // its failing was the planned sign that the deploy had landed.
+  fsCase('LIVE: admin reads a candidate', 'ALLOW', CANDIDATE, { auth: ADMIN, method: 'get' }, CANDIDATE_DOC),
   fsCase('LIVE medical unchanged: a signed-in NON-admin reads a record', 'ALLOW', RECORD, { auth: MEMBER, method: 'get' }, CONFIRMED_RECORD),
 ];
 
