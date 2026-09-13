@@ -480,3 +480,40 @@ export function medicalEditFields(draft: MedicalRecordDraft): MedicalEditFields 
     notes: draft.notes?.trim() || null,
   };
 }
+
+/** The stored fields a form draft is rebuilt from. */
+export interface DraftableRecord {
+  kind: MedicalRecordKind | null;
+  name: string;
+  performedAt: number | null;
+  nextDueAt: number | null;
+  validFrom: number | null;
+  validUntil: number | null;
+  veterinarian: string | null;
+  clinic: string | null;
+  batch: string | null;
+  manufacturer: string | null;
+  notes: string | null;
+}
+
+/**
+ * A stored record back into a form draft — to edit it, and to decide whether
+ * it can be confirmed as it stands: `canConfirmAsIs(validateMedicalDraft(
+ * draftFromRecord(record)))`. A candidate whose date or kind was withheld
+ * fails that, and goes through the edit path instead.
+ */
+export function draftFromRecord(record: DraftableRecord): MedicalRecordDraft {
+  return {
+    kind: record.kind,
+    name: record.name,
+    performedAt: record.performedAt,
+    nextDueAt: record.nextDueAt,
+    validFrom: record.validFrom,
+    validUntil: record.validUntil,
+    veterinarian: record.veterinarian,
+    clinic: record.clinic,
+    batch: record.batch,
+    manufacturer: record.manufacturer,
+    notes: record.notes,
+  };
+}

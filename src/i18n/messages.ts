@@ -36,6 +36,9 @@ import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
+import type { FieldEvidence, MedicalExtractionSource } from '@/lib/types';
+import type { CardField } from '@/lib/card-extraction';
+import type { CardExtractFailure } from '@/lib/card-extract-client';
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -257,4 +260,76 @@ export interface Messages {
 
   /** How long two animals shared a pen: "12 días juntos", "menos de un día". */
   contactDurationLabel(ms: number): string;
+
+  // ── the medical review gate, and reading a vaccination card (step 9) ──────
+
+  /** Fixed wording for the review gate and the card capture. */
+  readonly medicalReview: MedicalReviewCopy;
+
+  /** Where an extracted record came from: "Leído de una tarjeta de vacunación". */
+  extractionSourceLabel(source: MedicalExtractionSource | null): string;
+
+  /** A card field's name beside its evidence: "Fecha", "Lote". */
+  cardFieldLabel(field: CardField): string;
+
+  /**
+   * One line of evidence: what the model READ, how legible it said it was, and
+   * — when the field was left empty — why.
+   *
+   * ⚠️ Always phrased as a reading ("Leído: «12/03/25»"), never as the fact. The
+   * point of the line is that a person compares it with the card.
+   */
+  evidenceLine(evidence: FieldEvidence): string;
+
+  /** Why reading a card produced nothing. Says what is already safe. */
+  cardExtractFailure(failure: CardExtractFailure): string;
+
+  /** What reading a card did produce, and that none of it counts yet. */
+  cardExtractSummary(result: { written: number; droppedRows: number; notACard: boolean }): string;
+
+  /** "1 registro espera revisión", "3 registros esperan revisión". */
+  awaitingReviewCount(count: number): string;
+
+  /** "Confirmado por …" */
+  confirmedByLabel(by: string): string;
+
+  /** The soonest confirmed booster: "Lo próximo: Quíntuple, el 14 feb 2026." */
+  nextDueSummary(name: string, dateText: string): string;
+}
+
+/**
+ * Fixed strings for the review gate. An object rather than functions because
+ * nothing in it inflects — but still here, because the rule is "no user-facing
+ * words outside src/i18n", and the shelter's volunteers are users.
+ */
+export interface MedicalReviewCopy {
+  /** The badge on a record nobody has confirmed. */
+  readonly unconfirmedBadge: string;
+  /** Why an unconfirmed record shows no due-date or lapsed flags. */
+  readonly notCounted: string;
+  readonly confirm: string;
+  readonly correctAndConfirm: string;
+  readonly saveAndConfirm: string;
+  readonly discard: string;
+  /** In place of Confirm, when the record cannot be confirmed as it stands. */
+  readonly confirmNeedsEdit: string;
+  readonly showCard: string;
+  readonly hideCard: string;
+  readonly cardAlt: string;
+  readonly unknownKind: string;
+  readonly unknownName: string;
+  readonly unknownDate: string;
+  /** Above the form while a person corrects what a model read. */
+  readonly reviewingNotice: string;
+  readonly captureTitle: string;
+  readonly captureHint: string;
+  readonly captureTakePhoto: string;
+  readonly captureGallery: string;
+  readonly captureRetry: string;
+  readonly captureUploading: string;
+  readonly captureUploadFailed: string;
+  readonly captureUnreadable: string;
+  readonly captureReading: string;
+  /** Completes "No cierres esta pantalla — …". */
+  readonly captureSavedNote: string;
 }

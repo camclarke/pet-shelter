@@ -27,12 +27,14 @@ import {
   updateDoc,
   type FieldValue,
 } from 'firebase/firestore';
+import { ref, uploadBytes } from 'firebase/storage';
 import type { User } from 'firebase/auth';
 
 import { getFirebase } from './firebase-client';
 import type { FieldEvidence, MedicalExtractionSource, MedicalRecord } from './types';
 import { medicalEditFields, type MedicalEditFields, type MedicalRecordDraft } from './medical';
 import { readEvidence, reviewerLabel } from './review-gate';
+import { cardPhotoPath } from './card-extraction';
 
 /**
  * The exact shape written to `pets/{petId}/medical/{recordId}`.
@@ -241,6 +243,31 @@ export async function confirmMedicalRecord(
     doc(db, 'pets', petId, 'medical', recordId),
     stamp as Record<string, FieldValue | unknown>
   );
+}
+
+/**
+ * Store a card photo that has ALREADY been through `stripAndResize()`, and
+ * return its Storage path. Build-order step 9.
+ *
+ * ⚠️ Never a raw File. The EXIF/GPS guarantee lives in `stripAndResize()`, and
+ * a card photographed in a foster home carries that home's coordinates.
+ *
+ * ⚠️ NEVER calls `getDownloadURL()`. A download token bypasses
+ * `storage.rules` outright — measured 2026-09-03 on this very prefix,
+ * `medical/**`: 200 with `?token=`, 403 without — and a card carries the
+ * owner's name, address and phone. The bytes are read back through the
+ * Storage SDK with the admin's own ID token (`readPhotoObjectUrl` with an
+ * empty url), which the rules do govern.
+ *
+ * ⚠️ Known residual, the one `storage.rules` records for private pet photos:
+ * Firebase's upload endpoint mints a token by itself. It sits in object
+ * metadata, which the same admin-only rule gates, so it widens nothing.
+ */
+export async function uploadCardPhoto(petId: string, processed: Blob): Promise<string> {
+  const { storage } = getFirebase();
+  const path = cardPhotoPath(petId, crypto.randomUUID());
+  await uploadBytes(ref(storage, path), processed, { contentType: 'image/jpeg' });
+  return path;
 }
 
 /**
