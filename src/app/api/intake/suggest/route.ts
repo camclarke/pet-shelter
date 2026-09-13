@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { getAdminAuth } from '@/lib/firebase-admin';
+import { verifyAdminIdToken } from '@/lib/firebase-admin';
+import { requireAdmin } from '@/lib/require-admin';
 import { aiIsConfigured } from '@/lib/ai/google';
 import { suggestFromPhoto, type SlottedPhoto } from '@/lib/ai/intake-suggest';
 
@@ -87,27 +88,10 @@ function fail(error: string, status: number): NextResponse {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  // ── 1. authenticate ────────────────────────────────────────────────────────
-  const header = request.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!token) {
-    return fail('unauthenticated', 401);
-  }
-
-  let isAdmin = false;
-  try {
-    // checkRevoked: a revoked admin must lose access immediately here. The
-    // one-hour custom-claim lag that AdminGate papers over cuts BOTH ways, and
-    // on the spending path the safe side is the strict one.
-    const decoded = await getAdminAuth().verifyIdToken(token, true);
-    isAdmin = decoded.admin === true;
-  } catch {
-    return fail('unauthenticated', 401);
-  }
-
-  if (!isAdmin) {
-    return fail('forbidden', 403);
-  }
+  // ── 1. authenticate, before anything else — `require-admin.ts` verifies the
+  //       token with checkRevoked and requires the admin claim ────────────────
+  const auth = await requireAdmin(request, verifyAdminIdToken);
+  if (!auth.ok) return fail(auth.error, auth.status);
 
   // ── 2. is the feature even available ──────────────────────────────────────
   if (!aiIsConfigured()) {

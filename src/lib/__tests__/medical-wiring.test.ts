@@ -163,9 +163,10 @@ test('the card is stripped of EXIF before it is uploaded', () => {
 test('the route checks the admin claim before it checks configuration', () => {
   // A 503 "not configured" answered to an unauthenticated caller would tell
   // them whether the feature is switched on.
+  // checkRevoked lives inside requireAdmin and is pinned by require-admin.test.ts.
   const src = code(ROUTE);
-  const auth = src.indexOf('verifyIdToken(token, true)');
+  const auth = src.indexOf('requireAdmin(');
   const configured = src.indexOf('aiIsConfigured()');
-  assert.ok(auth >= 0, 'must verify with checkRevoked');
+  assert.ok(auth >= 0, 'must authenticate through requireAdmin');
   assert.ok(configured > auth, 'authentication must come first');
 });

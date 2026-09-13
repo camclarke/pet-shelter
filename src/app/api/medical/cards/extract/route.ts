@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { getAdminAuth } from '@/lib/firebase-admin';
+import { verifyAdminIdToken } from '@/lib/firebase-admin';
+import { requireAdmin } from '@/lib/require-admin';
 import { aiIsConfigured } from '@/lib/ai/google';
 import { extractFromCard } from '@/lib/ai/card-extract';
 import type { AiProcess } from '@/lib/ai/metered';
@@ -79,24 +80,11 @@ export async function POST(request: Request): Promise<Response> {
   const arrivedAt = Date.now();
 
   // ── 1. authenticate — BEFORE the configured-check, so an unauthenticated
-  //       caller learns nothing about whether the feature is switched on ──────
-  const header = request.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!token) return fail('unauthenticated', 401);
-
-  let isAdmin = false;
-  let reviewer = '';
-  try {
-    // checkRevoked: a revoked admin loses access immediately. The one-hour
-    // claim lag cuts both ways, and on a path that spends and writes medical
-    // data the strict side is the safe one.
-    const decoded = await getAdminAuth().verifyIdToken(token, true);
-    isAdmin = decoded.admin === true;
-    reviewer = decoded.email?.trim() || decoded.uid;
-  } catch {
-    return fail('unauthenticated', 401);
-  }
-  if (!isAdmin) return fail('forbidden', 403);
+  //       caller learns nothing about whether the feature is switched on.
+  //       `require-admin.ts` verifies with checkRevoked ────────────────────────
+  const auth = await requireAdmin(request, verifyAdminIdToken);
+  if (!auth.ok) return fail(auth.error, auth.status);
+  const reviewer = auth.email ?? auth.uid;
 
   // ── 2. is the feature available ───────────────────────────────────────────
   if (!aiIsConfigured()) return fail('ai-not-configured', 503);
