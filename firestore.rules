@@ -118,6 +118,24 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // ── medical CANDIDATES — what a model read and nobody has confirmed ──
+      // Admins only, for every verb. Read, create, update and delete each
+      // require the admin claim and nothing else; no condition reads
+      // `request.resource`, so a delete cannot trip over a null payload.
+      //
+      // A NEW TIER, so a NEW DOCUMENT. `medical` above is readable by any
+      // signed-in account, and an unchecked model guess does not belong at
+      // that tier (step-9 evaluation, 2026-09-13). A candidate becomes a
+      // `medical` record only when an admin confirms it, which creates the
+      // record and deletes the candidate in one transaction.
+      //
+      // Written by `/api/medical/cards/extract` through the Admin SDK, which
+      // bypasses these rules; read, confirmed and discarded by an admin's
+      // browser, which is what this rule governs.
+      match /medicalCandidates/{candidateId} {
+        allow read, create, update, delete: if isAdmin();
+      }
+
       // ── care: feeding plan ───────────────────────────────────────────────
       // Travels with the animal so an adopter can avoid an abrupt diet change.
       match /care/{docId} {
@@ -545,6 +563,73 @@ service cloud.firestore {
     // sit at their final path. No move, no rewrite, no second URL.
     match /petDrafts/{draftId} {
       allow read, write: if isAdmin();
+    }
+
+    // ── qrTokens/{tokenId} ─────────────────────────────────────────────────
+    // A collar tag's printed code → the animal it belongs to. Plan §2.5, §7.
+    //
+    // `get` is public and `list` is NOT, and that split is the reason this
+    // block exists. A public `read` includes `list`, and `list` on this
+    // collection is a directory of every tagged animal's code — the
+    // enumeration a finder must never be able to perform. With `get` alone,
+    // learning a token requires already holding it: 10 Crockford base32
+    // characters are 50 bits, so guessing one is not a strategy.
+    //
+    // What `get` exposes is `petId`, `revokedAt`, `createdAt` and `createdBy`.
+    // The public page does not use it — `/id/[token]` resolves through the
+    // Admin SDK — so this lets a client do what the page already does and no
+    // more. `createdBy` is an admin's uid, which `users/{uid}` does not let a
+    // stranger resolve to anything.
+    //
+    // `list` is admin-only because the admin screens query by `petId` (one
+    // animal's tags) and by `revokedAt == null` (the batch print sheet).
+    //
+    // ⚠️ Never copy a token onto `pets/{petId}`. That document is public READ,
+    // which includes list, so a token field there would turn the adoption wall
+    // into exactly the directory this block refuses to be.
+    match /qrTokens/{tokenId} {
+      allow get: if true;
+      allow list: if isAdmin();
+
+      // Minted only by an admin, only in the exact shape the app writes, only
+      // for a pet that exists, and only unrevoked. The id alphabet is checked
+      // HERE, not only in the client, because a token is PRINTED: an id a
+      // finder could not type back from the tag is a tag that cannot work.
+      // The pattern is mirrored in src/lib/qr-tokens.ts; a test fails if the
+      // two copies drift.
+      //
+      // `hasAll` is REDUNDANT today, and measured to be: every key is also
+      // dereferenced by a check below it, and reading a missing key errors,
+      // which denies. A deliberate-break probe removed it and no test case
+      // changed outcome. It stays so the required shape remains explicit if one
+      // of those field checks is ever loosened.
+      allow create: if isAdmin()
+        && tokenId.matches('^[0-9A-HJKMNP-TV-Z]{10}$')
+        && request.resource.data.keys().hasOnly(['petId', 'revokedAt', 'createdAt', 'createdBy'])
+        && request.resource.data.keys().hasAll(['petId', 'revokedAt', 'createdAt', 'createdBy'])
+        && request.resource.data.petId is string
+        && request.resource.data.petId.size() > 0
+        && exists(/databases/$(database)/documents/pets/$(request.resource.data.petId))
+        && request.resource.data.revokedAt == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // Revoking is the ONLY update, and it is one-way. The diff may touch
+      // `revokedAt` and nothing else; the stored value must still be null, so
+      // a revoked token can be neither un-revoked nor re-revoked with a later
+      // date that would rewrite when it stopped working; and the new value
+      // must be the server's clock, not the caller's.
+      allow update: if isAdmin()
+        && resource.data.revokedAt == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revokedAt'])
+        && request.resource.data.revokedAt == request.time;
+
+      // Never, not even for an admin. A printed tag outlives its record:
+      // deleting the token would turn a revoked tag ("this tag is no longer
+      // active — call us") into an unknown one, and an id freed by a delete
+      // could be minted again for a DIFFERENT animal while the old tag is
+      // still on a collar somewhere.
+      allow delete: if false;
     }
 
     // ── default deny ───────────────────────────────────────────────────────

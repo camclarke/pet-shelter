@@ -29,6 +29,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { formatDate, parseDateInput, todayInputValue } from '@/lib/date-input';
 import MedicalPanel from './MedicalPanel';
 import MeasurementPanel from './MeasurementPanel';
+import { QrTagPanel } from './QrTagPanel';
 import {
   placementWarnings,
   summarizeArea,
@@ -370,6 +371,9 @@ export function PetAdminPanel({ petId }: { petId: string }) {
         estimatedKgMin={pet?.weightIsEstimate ? (pet.weightKgMin ?? null) : null}
         estimatedKgMax={pet?.weightIsEstimate ? (pet.weightKgMax ?? null) : null}
       />
+
+      {/* ── the collar tag: build-order step 12 ─────────────────────────── */}
+      <QrTagPanel petId={petId} petName={pet?.name || 'Sin nombre'} />
 
       {/* ── the history ──────────────────────────────────────────────────── */}
       <section className="admin-list">
