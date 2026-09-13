@@ -36,6 +36,123 @@ import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
+import type { FoodCategory, FoodHazard } from '@/lib/types';
+import type { DonationError, DonationLineError, DonationLineWarning } from '@/lib/food-parse';
+import type {
+  CookBatchError,
+  CookBatchWarning,
+  StockMovementError,
+  YieldEstimate,
+} from '@/lib/food-stock';
+import type { BodyConditionSuggestion, EnergyStage } from '@/lib/rations';
+import type { FoodParseFailure } from '@/lib/food-parse-client';
+import type { MeasuredRatio } from '@/lib/food-stock';
+import type { PotShareRow, RationResult } from '@/lib/rations';
+import type { StockEntryKind } from '@/lib/types';
+
+/**
+ * Fixed labels for the food screens, `/admin/food`.
+ *
+ * A table of plain strings rather than functions, because none of these
+ * inflects: they label controls and sections, and never agree with an animal's
+ * sex. Kept here rather than inline in JSX so the food screens add nothing to
+ * the page-level-copy exception CLAUDE.md records.
+ */
+export interface FoodCopy {
+  readonly navLabel: string;
+  readonly title: string;
+  readonly sub: string;
+  readonly backToPanel: string;
+  readonly tabDonation: string;
+  readonly tabStock: string;
+  readonly tabCook: string;
+  readonly tabRations: string;
+  readonly loading: string;
+  readonly loadFailed: string;
+  readonly permissionDenied: string;
+  readonly saveFailed: string;
+  readonly cancel: string;
+  readonly remove: string;
+  readonly chooseCategory: string;
+
+  readonly donationTextLabel: string;
+  readonly donationTextHint: string;
+  readonly parseButton: string;
+  readonly parsing: string;
+  readonly addLine: string;
+  readonly receivedLabel: string;
+  readonly donorLabel: string;
+  readonly notesLabel: string;
+  readonly lineFood: string;
+  readonly lineCategory: string;
+  readonly lineQuantity: string;
+  readonly lineMassKg: string;
+  readonly lineExpiry: string;
+  readonly lineInStock: string;
+  readonly fromText: string;
+  readonly missingHazardsTitle: string;
+  readonly reviewNote: string;
+  readonly saveDonation: string;
+  readonly savedDonation: string;
+  readonly recentDonations: string;
+  readonly noDonations: string;
+  readonly parsedByModel: string;
+  readonly typedByHand: string;
+
+  readonly stockTitle: string;
+  readonly stockHint: string;
+  readonly stockEmpty: string;
+  readonly stockNegative: string;
+  readonly movementOpen: string;
+  readonly movementKind: string;
+  readonly directionLabel: string;
+  readonly directionAdd: string;
+  readonly directionRemove: string;
+  readonly movementLabel: string;
+  readonly movementKg: string;
+  readonly movementDate: string;
+  readonly movementNote: string;
+  readonly saveMovement: string;
+
+  readonly cookOpen: string;
+  readonly cookHint: string;
+  readonly cookedAtLabel: string;
+  readonly inputsTitle: string;
+  readonly inputLabel: string;
+  readonly inputKg: string;
+  readonly addInput: string;
+  readonly toxicAck: string;
+  readonly potFillLabel: string;
+  readonly notLooked: string;
+  readonly cookedKgLabel: string;
+  readonly ladlesLabel: string;
+  readonly dogsServedLabel: string;
+  readonly cookedByLabel: string;
+  readonly saveCook: string;
+  readonly recentBatches: string;
+  readonly noBatches: string;
+  readonly editOutcome: string;
+  readonly saveOutcome: string;
+  readonly calibrationTitle: string;
+  readonly yieldTitle: string;
+
+  readonly rationsTitle: string;
+  readonly rationsHint: string;
+  readonly noAnimals: string;
+  readonly ladlesToday: string;
+  readonly adjustedReason: string;
+  readonly dogsPresentLabel: string;
+  readonly dogsPresentInvalid: string;
+  readonly shortfallLabel: string;
+  readonly saveDay: string;
+  readonly savedDay: string;
+  readonly sharesTitle: string;
+  readonly sharesHint: string;
+  readonly sharesNeedTwo: string;
+  readonly notFromPot: string;
+  readonly servingInvalid: string;
+  readonly measurementsFailed: string;
+}
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -257,4 +374,72 @@ export interface Messages {
 
   /** How long two animals shared a pen: "12 días juntos", "menos de un día". */
   contactDurationLabel(ms: number): string;
+
+  // ── food: donations, stock, the pot, rations — step 13 ────────────────────
+
+  foodCategoryLabel(category: FoodCategory): string;
+
+  /** "Cebolla, ajo o puerro". */
+  foodHazardLabel(hazard: FoodHazard): string;
+
+  /**
+   * One sentence on WHY, for the person holding the bag.
+   *
+   * ⚠️ Informs, never instructs what to feed. Plan §12.4: the system flags for
+   * the shelter's own judgement and gives no nutritional advice.
+   */
+  foodHazardAdvice(hazard: FoodHazard): string;
+
+  /** A mass for reading: "15 kg", "500 g", "−2,3 kg". */
+  formatGrams(grams: number): string;
+
+  donationError(error: DonationError): string;
+  donationLineError(error: DonationLineError): string;
+  donationLineWarning(warning: DonationLineWarning): string;
+
+  stockMovementError(error: StockMovementError): string;
+
+  cookBatchError(error: CookBatchError): string;
+  cookBatchWarning(warning: CookBatchWarning): string;
+
+  /**
+   * Why there is, or is not, a ladle estimate.
+   *
+   * ⚠️ `no-kitchen-constants` is what every screen shows today, and it must say
+   * WHY rather than show nothing: an unexplained absence reads as a bug.
+   */
+  yieldEstimateText(estimate: YieldEstimate): string;
+
+  /** "perro adulto", "cachorro de menos de 4 meses". */
+  energyStageLabel(stage: EnergyStage): string;
+
+  /** A suggestion, worded as one. Never an instruction and never automatic. */
+  bodyConditionSuggestionText(suggestion: BodyConditionSuggestion): string;
+
+  foodParseFailure(failure: FoodParseFailure): string;
+
+  readonly food: FoodCopy;
+
+  stockEntryKindLabel(kind: StockEntryKind): string;
+
+  /** "1.059 kcal". Rounded: a kilocalorie decimal is false precision here. */
+  formatKcal(kcal: number): string;
+
+  /** "75 %", for how full the pot was. */
+  potFillLabel(level: number): string;
+
+  /**
+   * One animal's line on the ration sheet.
+   *
+   * ⚠️ `no-weight` must NEVER print a number of kilocalories, even when the
+   * intake photos estimated a weight. It names the estimate and says it is not
+   * used — see the decision on `rationFor`.
+   */
+  rationSummary(result: RationResult): string;
+
+  /** "Según el estándar le toca 21 % de la olla; con lo anotado recibe 40 %." */
+  potShareText(row: PotShareRow): string;
+
+  /** A measured ratio from cook batches, always with its n. */
+  measuredRatioText(measure: 'cooked-to-raw' | 'grams-per-ladle', ratio: MeasuredRatio | null): string;
 }

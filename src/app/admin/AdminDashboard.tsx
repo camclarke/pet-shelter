@@ -81,6 +81,9 @@ export function AdminDashboard() {
           <Link href="/admin/areas" className="btn btn--muted">
             Áreas
           </Link>
+          <Link href="/admin/food" className="btn btn--muted">
+            {t.food.navLabel}
+          </Link>
           <Link href="/admin/intake" className="btn btn--action">
             + Nuevo ingreso
           </Link>
