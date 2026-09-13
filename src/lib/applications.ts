@@ -487,7 +487,14 @@ export type ApprovalWarning =
   /** The applicant never confirmed the email address. */
   | 'email-unverified'
   /** The animal is no longer on the wall — legal, but worth a second look. */
-  | 'pet-not-on-wall';
+  | 'pet-not-on-wall'
+  /**
+   * `location/current` exists, and approving lets the new owner read it through
+   * `ownsPet()`. For an animal that was fostered it may be a volunteer's home
+   * address (CLAUDE.md concern #2). A warning, because the shelter may have
+   * recorded the adopter's own area on purpose.
+   */
+  | 'location-will-be-visible';
 
 export interface ApprovalContext {
   application: Pick<
@@ -498,6 +505,8 @@ export interface ApprovalContext {
   pet: { id: string; status: PetStatus } | null;
   /** Every OTHER application for the same pet, in any status. */
   otherApplications: readonly Pick<AdoptionApplication, 'id' | 'status'>[];
+  /** Whether `pets/{petId}/location/current` exists. Required, so no caller can skip asking. */
+  hasRecordedLocation: boolean;
 }
 
 export interface ApprovalCheck {
@@ -536,6 +545,8 @@ export function approvalCheck(context: ApprovalContext): ApprovalCheck {
   if (otherOpenIds.length > 0) warnings.push('other-open-applications');
 
   if (!context.application.applicantEmailVerified) warnings.push('email-unverified');
+
+  if (context.hasRecordedLocation) warnings.push('location-will-be-visible');
 
   return { blockers, warnings, otherOpenIds };
 }

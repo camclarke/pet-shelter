@@ -82,6 +82,23 @@ test('approval commits the tested builder, in one batch', () => {
   assert.equal((body.match(/\.commit\(\)/g) ?? []).length, 1);
 });
 
+test('re-admission revokes ownership in the SAME batch, through the tested decision', () => {
+  // The step-14 evaluation's second MAJOR: reopenPet left adoptions/{petId} in
+  // place, so a returned animal's former family kept reading its microchip and
+  // location through ownsPet().
+  const admin = source('lib', 'pets-admin.ts');
+  const body = admin.slice(admin.indexOf('export async function reopenPet'));
+  const batchAt = body.indexOf('writeBatch(');
+  const deleteAt = body.indexOf("batch.delete(doc(db, 'adoptions', pet.id))");
+  const commitAt = body.indexOf('batch.commit()');
+  assert.ok(deleteAt > 0, 'reopenPet no longer deletes adoptions/{petId}: the former family keeps ownsPet()');
+  assert.ok(batchAt > 0 && batchAt < deleteAt && deleteAt < commitAt, 'the ownership delete is not inside the re-admission batch');
+  assert.ok(
+    body.slice(0, deleteAt).includes('if (readmissionRevokesOwnership(plan.status))'),
+    'the delete is no longer driven by the tested decision',
+  );
+});
+
 test('no new application code logs an answer or a draft', () => {
   // A private person's household. Errors are logged by Firestore code only.
   const files = [

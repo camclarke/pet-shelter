@@ -171,6 +171,12 @@ export interface ApprovalPreview {
   others: ApplicationRecord[];
 }
 
+/** Whether the pet has a `location/current` — which approving hands to the new owner. */
+async function hasRecordedLocation(petId: string): Promise<boolean> {
+  const { db } = getFirebase();
+  return (await getDoc(doc(db, 'pets', petId, 'location', 'current'))).exists();
+}
+
 async function readPet(petId: string): Promise<Pet | null> {
   const { db } = getFirebase();
   const snap = await getDoc(doc(db, 'pets', petId));
@@ -179,9 +185,10 @@ async function readPet(petId: string): Promise<Pet | null> {
 
 /** What the approval screen shows before anyone confirms. */
 export async function previewApproval(application: ApplicationRecord): Promise<ApprovalPreview> {
-  const [pet, forPet] = await Promise.all([
+  const [pet, forPet, located] = await Promise.all([
     readPet(application.petId),
     listApplicationsForPet(application.petId),
+    hasRecordedLocation(application.petId),
   ]);
   const others = forPet.filter((other) => other.id !== application.id);
   return {
@@ -191,6 +198,7 @@ export async function previewApproval(application: ApplicationRecord): Promise<A
       application,
       pet: pet ? { id: pet.id, status: pet.status } : null,
       otherApplications: others,
+      hasRecordedLocation: located,
     }),
   };
 }
@@ -206,6 +214,19 @@ export async function previewApproval(application: ApplicationRecord): Promise<A
  * The rules are the last line: they refuse the application update unless the
  * same batch writes `adoptions/{petId}` for this applicant and the pet status,
  * and unless the pet was not already adopted before the batch.
+ *
+ * ── The residual race, stated precisely ───────────────────────────────────
+ * The custody and placement ids to close come from QUERIES read just before
+ * the batch, and a client-SDK transaction cannot read a query — only documents
+ * by reference — so a transaction would not close this window without
+ * restructuring how open intervals are found. What the window can do, if
+ * another admin action touches the same pet between the reads and the commit:
+ *   - a custody or placement opened in the window is NOT closed, and stays open
+ *     until the next move or release on that pet;
+ *   - one closed in the window has its `endedAt` re-stamped with this commit's
+ *     time, seconds later than the real close.
+ * What it cannot do is approve two families for one animal: the rules check the
+ * pet's status BEFORE the batch, so the second approval is refused.
  */
 export async function approveApplication(
   application: ApplicationRecord,
@@ -215,10 +236,11 @@ export async function approveApplication(
   const { db } = getFirebase();
   const petRef = doc(db, 'pets', application.petId);
 
-  const [current, pet, forPet, openCustody, openPlacements] = await Promise.all([
+  const [current, pet, forPet, located, openCustody, openPlacements] = await Promise.all([
     getApplication(application.id),
     readPet(application.petId),
     listApplicationsForPet(application.petId),
+    hasRecordedLocation(application.petId),
     getDocs(query(collection(petRef, 'custody'), where('endedAt', '==', null))),
     getDocs(query(collection(petRef, 'placements'), where('endedAt', '==', null))),
   ]);
@@ -228,6 +250,7 @@ export async function approveApplication(
     application: current,
     pet: pet ? { id: pet.id, status: pet.status } : null,
     otherApplications: forPet.filter((other) => other.id !== current.id),
+    hasRecordedLocation: located,
     adminUid: user.uid,
     holder,
     newCustodyId: doc(collection(petRef, 'custody')).id,

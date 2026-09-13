@@ -66,6 +66,30 @@ test('it ships switched OFF', () => {
   assert.equal(config.enabled, false);
 });
 
+test('the rules enforce the same switch the config declares', () => {
+  // The config flag only hides the page. The rules copy is what refuses an
+  // application written straight through the SDK — found by the step-14
+  // evaluation with the switch "off" and the create still allowed.
+  const match = /return\s+(true|false)\s*;/.exec(rulesFunctionBody('applicationsEnabled'));
+  assert.ok(match, 'applicationsEnabled() no longer returns a literal — the drift guard cannot compare');
+  assert.equal(
+    match[1] === 'true',
+    config.enabled,
+    'firestore.rules applicationsEnabled() and shelter.ts adoptionApplications.enabled disagree — change both, deploy the rules',
+  );
+});
+
+test('the applicant create rule is gated on the switch', () => {
+  const create = [...RULES.matchAll(/allow create:[^;]*/g)]
+    .map((m) => m[0])
+    .find((rule) => rule.includes('ownApplicationId()'));
+  assert.ok(create, 'no adoptionApplications create rule found');
+  assert.ok(
+    /^allow create: if applicationsEnabled\(\)\s*&&/.test(create),
+    'the application create rule no longer starts with applicationsEnabled()',
+  );
+});
+
 // ─── the questions ──────────────────────────────────────────────────────────
 
 test('question ids are unique, English identifiers, and within the cap', () => {
@@ -224,6 +248,7 @@ function allApplicationCopy(): string[] {
     es.approvalWarning('other-open-applications', { otherOpenCount: 3 }),
     es.approvalWarning('email-unverified', { otherOpenCount: 0 }),
     es.approvalWarning('pet-not-on-wall', { otherOpenCount: 0 }),
+    es.approvalWarning('location-will-be-visible', { otherOpenCount: 0 }),
     ...config.questions.flatMap((q) => [q.label, q.hint ?? '', ...(q.options ?? []).map((o) => o.label)]),
   );
   return out.filter((s) => s !== '');
