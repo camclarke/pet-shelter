@@ -194,3 +194,60 @@ export function modelKeyFor(id: string): ModelKey | string {
   const hit = (Object.keys(MODELS) as ModelKey[]).find((k) => MODELS[k].id === id);
   return hit ?? id;
 }
+
+/**
+ * The vaccination-card ladder, as persisted KEYS, strongest first.
+ * Build-order step 9.
+ *
+ * ── Why Flash first ─────────────────────────────────────────────────────────
+ * Plan §11 #1: a handwritten, faded, stamped card photographed on a phone is
+ * close to the hardest OCR case there is, so start on a reasoning tier and let
+ * the review-correction rate decide — not a guess made now.
+ *
+ * ── Why 3.8 and 3.7, and NOT 3.6 ────────────────────────────────────────────
+ * Free-tier quota is a separate bucket PER MODEL, 20 requests a day each on the
+ * Flash tiers. `gemini-3.6-flash` is the intake cascade's PRIMARY — the tier
+ * that reads an arriving animal's sex and age. A card read from that bucket is
+ * an animal's intake pushed down the cascade, so cards stay off it entirely.
+ * 3.8's documented weakness (it under-delivers sex from a genital photo) is
+ * irrelevant to reading a card.
+ *
+ * ── Why it ends on Flash-Lite, always ───────────────────────────────────────
+ * 500 requests a day, and a different pool, so it is up when the Flash tiers
+ * are overloaded. A weaker reading of a card is still worth having here, because
+ * every value is reviewed by a person before it counts, and a withheld field
+ * costs one typed entry. `cardLadderKeys` enforces this whatever the override.
+ */
+export const CARD_MODEL_LADDER_DEFAULT_KEYS: readonly ModelKey[] = [
+  'flash-3.8',
+  'flash-3.7',
+  'flash-lite',
+];
+
+/**
+ * The card ladder's keys, from an optional comma-separated override
+ * (`GEMINI_CARD_LADDER=flash-lite`).
+ *
+ * The override exists so the tier can change without a deploy once the
+ * review-correction rate is known, and so a local end-to-end probe can run on
+ * Flash-Lite without spending the shelter's Flash quota. Unknown keys and
+ * non-vision models are ignored; an override that leaves nothing falls back
+ * to the default; and Flash-Lite is moved to — or added at — the end, because
+ * a ladder that can run out without trying the 500-a-day tier is the one
+ * configuration this must not allow.
+ */
+export function cardLadderKeys(override: string | undefined): ModelKey[] {
+  const requested = (override ?? '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter((key): key is ModelKey => key in MODELS && MODELS[key as ModelKey].supportsVision);
+
+  const keys = requested.length > 0 ? requested : [...CARD_MODEL_LADDER_DEFAULT_KEYS];
+  const unique = [...new Set(keys)].filter((key) => key !== 'flash-lite');
+  return [...unique, 'flash-lite'];
+}
+
+/** The card ladder as model IDs to call, resolved once at module load. */
+export const CARD_MODEL_LADDER: readonly string[] = cardLadderKeys(
+  process.env.GEMINI_CARD_LADDER
+).map(modelIdFor);
