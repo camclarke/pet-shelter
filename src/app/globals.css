@@ -2006,3 +2006,373 @@ textarea {
     min-width: 0;
   }
 }
+
+
+/* ===========================================================================
+   QR identity tags — build-order step 12, plan §7.
+   =========================================================================== */
+
+/* ---- the page a finder lands on (/id/[token]) ---------------------------- */
+/* One job: turn a stranger holding an animal into a WhatsApp message. The
+   question and its button are the loudest thing on the page, and the only
+   .btn--action — on a lost animal the coral banner above the name joins them,
+   because "this dog is being looked for" outranks everything. */
+.tag-page {
+  padding-block: var(--space-4) var(--space-5);
+}
+
+.tag-page__inner {
+  max-width: 40rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tag-page__alert {
+  background: var(--coral);
+  color: var(--charcoal);
+  font-family: var(--display);
+  font-weight: 900;
+  font-variation-settings: var(--wonk);
+  font-size: clamp(24px, 6vw, 34px);
+  line-height: 1.08;
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--jade-deep);
+  overflow-wrap: anywhere;
+}
+
+.tag-page__who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tag-page__photo {
+  flex: 0 0 auto;
+  width: 120px;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: var(--jade);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.tag-page__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tag-page__identity {
+  min-width: 0;
+}
+
+.tag-page__name {
+  color: var(--jade);
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme='dark'] .tag-page__name {
+  color: var(--jade-light);
+}
+
+.tag-page__meta {
+  margin-top: 10px;
+}
+
+.tag-page__color {
+  margin-top: 6px;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.tag-page__situation,
+.tag-page__fallback-title + .tag-page__situation {
+  font-size: 17px;
+  line-height: 1.55;
+  max-width: 46ch;
+}
+
+.tag-page__found {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: var(--space-3);
+  background: var(--cream-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tag-page--lost .tag-page__found {
+  border: 2px solid var(--coral);
+}
+
+.tag-page__question {
+  font-size: clamp(24px, 6vw, 34px);
+}
+
+.tag-page__cta {
+  min-height: 52px;
+  font-size: 15px;
+}
+
+.tag-page__phone {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+/* Reads the printed code back to the finder, so they can confirm the tag in
+   their hand is the one this page is about. */
+.tag-page__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (max-width: 30rem) {
+  .tag-page__cta {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .tag-page__photo {
+    width: 96px;
+  }
+}
+
+/* ---- the admin panel ---------------------------------------------------- */
+.qr-panel__current {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+.qr-panel__preview {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 96px;
+  display: block;
+}
+
+.qr-panel__details {
+  min-width: 0;
+}
+
+/* Monospace so a volunteer reading the code aloud down the phone cannot mix
+   up characters that a proportional face draws alike. */
+.qr-panel__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+}
+
+.qr-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+/* Long uppercase labels ("DAR DE BAJA Y EMITIR OTRA") must wrap inside the
+   button at 360px rather than push the row wider than the phone. */
+.qr-panel__actions .btn,
+.qr-print .admin__footer .btn {
+  white-space: normal;
+  text-align: center;
+  justify-content: center;
+}
+
+.qr-panel__confirm {
+  margin-top: var(--space-2);
+}
+
+.qr-panel__history {
+  list-style: none;
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  opacity: 0.75;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.qr-panel__history-alert {
+  color: var(--jade-deep);
+  opacity: 1;
+  font-weight: 700;
+  border-left: 3px solid var(--coral);
+  padding-left: 8px;
+}
+
+.qr-panel__limitation {
+  margin-top: var(--space-2);
+  max-width: 62ch;
+  font-size: 13.5px;
+  line-height: 1.55;
+  opacity: 0.8;
+}
+
+/* ---- the batch picker --------------------------------------------------- */
+.qr-pick {
+  list-style: none;
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qr-pick__item label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 52px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  cursor: pointer;
+}
+
+.qr-pick__item input {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  accent-color: var(--jade);
+}
+
+.qr-pick__text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.qr-pick__text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ---- the tag itself, and the sheet ---------------------------------------
+   Sized in MILLIMETRES because it is printed. 26mm is QR_PRINT_SIZE_MM in
+   src/lib/qr-tokens.ts, which is what keeps the decodable symbol at 20mm or
+   more; a test fails if this rule and that constant drift apart. Black on
+   white regardless of theme: the tag is paper, not the page. */
+.qr-tag {
+  width: 34mm;
+  margin: 0;
+  padding: 2mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1mm;
+  background: #fff;
+  color: #000;
+  border: 0.3mm dashed #8a8a8a;
+  break-inside: avoid;
+}
+
+.qr-tag__code {
+  width: 26mm;
+  height: 26mm;
+  display: block;
+}
+
+.qr-tag__caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.qr-tag__host {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 6.5pt;
+}
+
+.qr-tag__token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 8.5pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.qr-tag__phone {
+  font-size: 6.5pt;
+}
+
+.qr-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 38mm);
+  gap: 4mm;
+  margin-top: var(--space-3);
+}
+
+.qr-sheet__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1mm;
+  break-inside: avoid;
+}
+
+/* Which animal a tag belongs to — OUTSIDE the dashed cut line, so it guides
+   the scissors and never ends up on the collar. */
+.qr-sheet__label {
+  max-width: 34mm;
+  font-size: 8pt;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- print -----------------------------------------------------------------
+   Scoped with :has() to pages that carry .qr-print, so printing the adoption
+   dossier or any other page keeps its header and footer. Where :has() is not
+   supported the chrome simply prints too — ugly, never wrong. No @page rule:
+   it cannot be scoped, and the shelter's printer may be Carta rather than A4. */
+@media print {
+  body:has(.qr-print) .skip-link,
+  body:has(.qr-print) .header,
+  body:has(.qr-print) .ticker,
+  body:has(.qr-print) .site-footer,
+  body:has(.qr-print) .no-print {
+    display: none !important;
+  }
+
+  body:has(.qr-print) {
+    background: #fff;
+  }
+
+  body:has(.qr-print)::after {
+    display: none;
+  }
+
+  .qr-print {
+    max-width: none;
+    padding: 0 !important;
+  }
+
+  .qr-print .qr-sheet {
+    margin-top: 0;
+  }
+
+  .qr-tag {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
