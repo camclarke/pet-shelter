@@ -15,6 +15,7 @@ import {
   type MeasurementDraft,
 } from '../measurements';
 import { es } from '@/i18n/es';
+import { parseDateInput } from '../date-input';
 
 /**
  * Build-order step 10. Every threshold below is written as a LITERAL rather
@@ -161,6 +162,56 @@ test('a reading dated minutes ahead is NOT rejected — clocks drift', () => {
   // Firestore measured 2.7 s ahead of this machine; browser clocks drift by
   // minutes. Four minutes is inside the five-minute tolerance.
   assert.deepEqual(validateMeasurementDraft(draft({ measuredAt: NOW + 4 * 60_000 }), NOW), []);
+});
+
+// ─── regression: a reading dated TODAY must be saveable before noon ─────────
+//
+// `parseDateInput` stamps a picked `YYYY-MM-DD` at LOCAL NOON. The old
+// `measuredAt > now + tolerance` check compared that noon stamp against an
+// INSTANT, so a weighing done this morning was told the date "hasn't arrived
+// yet" until the clock caught up to noon. Built with the LOCAL `Date`
+// constructor throughout, never `Date.parse('...Z')`, so this passes or
+// fails the same way in any timezone — CI runs UTC and this machine does not.
+
+function localTime(hour: number, minute: number): number {
+  return new Date(2026, 8, 15, hour, minute).getTime(); // 2026-09-15, fixed
+}
+
+test('a reading dated today is accepted at 00:01, 09:00, 11:59 and 23:59', () => {
+  const measuredAt = parseDateInput('2026-09-15').getTime();
+  for (const [hour, minute] of [[0, 1], [9, 0], [11, 59], [23, 59]] as const) {
+    const errors = validateMeasurementDraft(draft({ measuredAt }), localTime(hour, minute));
+    assert.equal(
+      errors.includes('measured-in-future'),
+      false,
+      `today at ${hour}:${minute} should be accepted`
+    );
+  }
+});
+
+test('a reading dated tomorrow is still rejected at 09:00 and 23:00', () => {
+  const measuredAt = parseDateInput('2026-09-16').getTime();
+  for (const [hour, minute] of [[9, 0], [23, 0]] as const) {
+    const errors = validateMeasurementDraft(draft({ measuredAt }), localTime(hour, minute));
+    assert.ok(
+      errors.includes('measured-in-future'),
+      `tomorrow at ${hour}:${minute} should still be rejected`
+    );
+  }
+});
+
+test('a reading dated 3 days ahead is still rejected', () => {
+  const measuredAt = parseDateInput('2026-09-18').getTime();
+  const errors = validateMeasurementDraft(draft({ measuredAt }), localTime(9, 0));
+  assert.ok(errors.includes('measured-in-future'));
+});
+
+test('the clock-skew allowance still works across midnight: 23:57 accepts tomorrow, 23:50 does not', () => {
+  const measuredAt = parseDateInput('2026-09-16').getTime();
+  const near = validateMeasurementDraft(draft({ measuredAt }), localTime(23, 57));
+  assert.equal(near.includes('measured-in-future'), false);
+  const notYet = validateMeasurementDraft(draft({ measuredAt }), localTime(23, 50));
+  assert.ok(notYet.includes('measured-in-future'));
 });
 
 test('the defaults never carry a weight', () => {

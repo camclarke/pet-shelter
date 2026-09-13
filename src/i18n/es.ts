@@ -514,6 +514,124 @@ export const es: Messages = {
     return `${whole} ${whole === 1 ? 'día' : 'días'} juntos`;
   },
 
+  /**
+   * QR identity tags. Build-order step 12, plan §7.
+   *
+   * ⚠️ Nothing on the public side promises to hand over a family's details.
+   * "Les avisamos" — WE tell THEM — and never "te pasamos su número": the
+   * shelter relays, because a tag is readable by anyone who picks up the
+   * animal, including someone who should not learn where it lives.
+   */
+  tag: {
+    foundQuestion: '¿Encontraste a este animalito?',
+    writeToShelter: 'Escríbenos por WhatsApp',
+    genericTitle: 'Placa de identificación',
+
+    lostBanner: (name, sex) => `¡${name} está ${sex === 'female' ? 'perdida' : 'perdido'}!`,
+
+    situation(tone, name, sex, shelterName) {
+      const pronoun = sex === 'female' ? 'la' : 'lo';
+      switch (tone) {
+        case 'lost':
+          return `Su familia ${pronoun} está buscando. Escríbenos y les avisamos enseguida.`;
+        case 'adopted':
+          return `${name} ya tiene familia. Si ${pronoun} encontraste ${sex === 'female' ? 'sola' : 'solo'} en la calle, algo pasó: escríbenos y les avisamos.`;
+        case 'available':
+          return `${name} está en adopción con ${shelterName}. Si ${pronoun} encontraste en la calle, se nos escapó: escríbenos y vamos a buscar${pronoun}.`;
+        case 'in-care':
+          return `${name} está al cuidado de ${shelterName}. Si ${pronoun} encontraste en la calle, se nos escapó: escríbenos y vamos a buscar${pronoun}.`;
+        default: {
+          const unhandled: never = tone;
+          return String(unhandled);
+        }
+      }
+    },
+
+    microchipHint: (sex) =>
+      `Tiene microchip. Si puedes, ${sex === 'female' ? 'llévala' : 'llévalo'} a una veterinaria: lo pueden leer ahí mismo y confirmar quién es.`,
+
+    finderMessage({ name, sex, formattedToken, tone }) {
+      const base = `Hola, encontré a ${name}. Su placa dice ${formattedToken}.`;
+      return tone === 'lost'
+        ? `${base} La página dice que está ${sex === 'female' ? 'perdida' : 'perdido'}.`
+        : base;
+    },
+
+    meetLink: (name) => `Conoce a ${name} →`,
+    phoneLine: (display) => `WhatsApp ${display}`,
+    codeLine: (formattedToken) => `Placa ${formattedToken}`,
+    adminLink: 'Abrir ficha interna',
+
+    inactiveTitle: 'Esta placa ya no está activa',
+    inactiveBody: (shelterName) =>
+      `La placa fue dada de baja, así que esta página no muestra a quién pertenece. Si tienes al animalito contigo, escríbenos igual: con el código, en ${shelterName} podemos averiguarlo.`,
+    inactiveMessage: (formattedToken, shelterName) =>
+      `Hola, encontré un animalito con una placa de ${shelterName} que ya no está activa. El código es ${formattedToken}.`,
+    unknownTitle: 'No encontramos esta placa',
+    unknownBody: (shelterName) =>
+      `Ese código no corresponde a ninguna placa activa de ${shelterName}. Revisa que esté bien escrito: son 10 letras y números. Si tienes al animalito contigo, escríbenos igual.`,
+    unknownMessage: (shelterName) =>
+      `Hola, encontré un animalito con una placa de ${shelterName}, pero su código no aparece en la página.`,
+    vetHint: 'Si puedes, llévalo a una veterinaria: si tiene microchip, lo pueden leer ahí mismo.',
+
+    panelTitle: 'Placa QR',
+    loading: 'Cargando…',
+    noneYet: 'Todavía no tiene placa. Emite una para imprimirla y ponerla en su collar.',
+    // The code itself is already shown large right above this line.
+    activeSince: (_code, date) => `Activa · emitida el ${date}`,
+    revokedOn: (code, date) => `${code} · dada de baja el ${date}`,
+    alsoActive: (code, date) => `${code} · TAMBIÉN activa, emitida el ${date}`,
+    backToRecord: '← Ficha interna',
+    backToPanel: '← Panel',
+    issue: 'Emitir placa',
+    issuing: 'Guardando…',
+    reissue: 'Dar de baja y emitir otra',
+    revoke: 'Dar de baja',
+    print: 'Imprimir',
+    cancel: 'Cancelar',
+    revokeConfirm: (code) =>
+      `¿Dar de baja la placa ${code}? Quien la escanee verá que ya no está activa. No se puede deshacer.`,
+    reissueConfirm: (code) =>
+      `¿Dar de baja la placa ${code} y emitir otra? La vieja deja de funcionar en cuanto confirmes, así que imprime la nueva y cámbiala en el collar lo antes posible.`,
+    confirmRevoke: 'Sí, dar de baja',
+    confirmReissue: 'Sí, emitir otra',
+
+    // Plan §7's honest limitation, and rfid-microchips.md §1: neither a collar
+    // tag nor a chip reports where an animal is.
+    limitation:
+      'Una placa QR va en el collar, y un collar se cae o se quita. El microchip va bajo la piel y no se sale. Se complementan: el QR es el que sirve a cualquier persona con un celular, sin lector de microchip. Ninguno de los dos es un rastreador: no dicen dónde está el animalito, solo a quién avisar cuando alguien lo encuentra.',
+
+    issueFailed: 'No pudimos emitir la placa. Revisa tu conexión e intenta de nuevo.',
+    revokeFailed: 'No pudimos dar de baja la placa. Revisa tu conexión e intenta de nuevo.',
+    loadFailed: 'No pudimos cargar las placas. Revisa tu conexión e intenta de nuevo.',
+    permissionDenied:
+      'Firestore rechazó la operación por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+    printTip: 'Imprime al 100 % de escala, sin «ajustar a la página»: así el código sale del tamaño indicado.',
+    testTip: 'Antes de ponerla en el collar, escanéala con tu celular y confirma que abre la ficha correcta.',
+    printSize: (mm) => `El código mide ${mm} mm por lado, con su margen blanco.`,
+    qrAlt: (name) => `Código QR de la placa de ${name}`,
+    noActiveTag: 'Este animalito no tiene una placa activa. Emítela desde su ficha interna.',
+    printTitle: (name) => `Placa de ${name}`,
+
+    sheetTitle: 'Placas para imprimir',
+    sheetIntro:
+      'Para un ingreso de varios animalitos a la vez: marca los que necesitan placa, emite las que falten e imprime una sola hoja.',
+    sheetEmpty: 'Todavía no hay animalitos publicados.',
+    sheetTruncated: (shown, total) =>
+      `${
+        total === null
+          ? `Solo se muestran los ${shown} registros más recientes.`
+          : `Se muestran los ${shown} registros más recientes de ${total}.`
+      } Si un animalito no aparece, emite e imprime su placa desde su ficha interna.`,
+    sheetLink: 'Placas QR',
+    noTag: 'sin placa',
+    selectAll: 'Marcar todos',
+    clearSelection: 'Quitar marcas',
+    issueMissing: (count) => (count === 1 ? 'Emitir la placa que falta' : `Emitir las ${count} placas que faltan`),
+    printSheet: (count) => (count === 1 ? 'Imprimir 1 placa' : `Imprimir ${count} placas`),
+    nothingToPrint: 'Marca al menos un animalito que ya tenga placa.',
+  },
+
   // ── the medical review gate, and reading a vaccination card (step 9) ──────
 
   medicalReview: {
