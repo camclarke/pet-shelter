@@ -3,10 +3,16 @@
  * no Spanish, so every rule in it is unit-tested and break-probed.
  *
  * Plan §4.8, "the review gate is not optional". Everything Gemini produces is
- * written with `source: 'llm-extracted'` and `confirmedBy: null`, is VISIBLE in
- * the admin UI, and is EXCLUDED from everything that computes — due dates,
- * rabies validity, any "vacunado" signal, anything public — until a human
- * confirms it, one record at a time.
+ * VISIBLE in the admin UI and EXCLUDED from everything that computes — due
+ * dates, rabies validity, any "vacunado" signal, anything public — until a
+ * human confirms it, one record at a time.
+ *
+ * ⚠️ Since the step-9 evaluation (2026-09-13) the exclusion is first of all a
+ * LOCATION: a model's reading is a candidate in the admin-only
+ * `pets/{petId}/medicalCandidates`, and only a confirmation creates a record in
+ * `medical` — see `medical-candidates.ts`. The predicate below is DEFENCE IN
+ * DEPTH over `medical`: it still decides what counts for any record that
+ * reaches a computing function without a named confirmer.
  *
  * Built for vaccination cards (step 9) and designed to be reused as-is by
  * veterinary dictation (step 11). Nothing here knows what a card is.

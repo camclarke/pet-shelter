@@ -1,32 +1,31 @@
 /**
- * Prove what the DEPLOYED security rules do for the card-extraction path,
- * without deploying or writing anything. Build-order step 9.
+ * Prove what the security rules do for card extraction and its review, without
+ * deploying or writing anything. Build-order step 9.
  *
- *   npm run probe:card-rules
+ *   GOOGLE_CLOUD_PROJECT=wawitas npm run probe:card-rules
  *
- * ── What it does ────────────────────────────────────────────────────────────
- * Fetches the rulesets that are LIVE right now for `cloud.firestore` and for
- * the Storage bucket, and evaluates test cases against each through the
- * Firebase Rules test API (`projects.test`). Nothing is released, no document
- * or object is created, and nothing needs cleaning up.
+ * Evaluates test cases through the Firebase Rules test API (`projects.test`).
+ * Nothing is released, no document or object is created, nothing needs
+ * cleaning up.
  *
- * Every suite carries ALLOW cases as well as DENY cases, on purpose: a probe
+ * ── Three suites ────────────────────────────────────────────────────────────
+ *   1. Firestore, LOCAL `firestore.rules` — the PROPOSED ruleset, which adds
+ *      the admin-only `medicalCandidates` rule (step-9 evaluation, 2026-09-13).
+ *      Candidates: admin allowed every verb, everyone else denied. `medical`:
+ *      unchanged for signed-in readers.
+ *   2. Firestore, LIVE ruleset — what is deployed today. An admin's read of a
+ *      candidate is DENIED here until the new rule is deployed; that case is
+ *      the measurement that a deploy is still owed, and it will FAIL (correctly)
+ *      once the deploy happens.
+ *   3. Storage, LIVE ruleset — the card photo paths, unchanged by this PR.
+ *
+ * Every suite carries ALLOW cases as well as DENY cases, and controls: a probe
  * whose request shape the API misreads denies everything, and a run with only
  * DENY expectations would then pass while proving nothing.
  *
- * ── Why this and not a client-SDK probe ─────────────────────────────────────
- * Step 9 needed NO rules change — the deployed `medical` rule is
- * `allow write: if isAdmin()` and the Storage `medical/{petId}/{fileName}` rule
- * is admin-only — so this measures the rules that already exist against the
- * exact documents and paths the new code writes and reads.
- *
- * ⚠️ `x-goog-user-project` is required on every call. Without it, a user
+ * ⚠️ `x-goog-user-project` is required on every call. Without it a user
  * credential gets a 403 "requires a quota project", which reads exactly like a
  * permission problem and is not one.
- *
- * Needs ADC for the project owner (`gcloud auth application-default login`)
- * and GOOGLE_CLOUD_PROJECT (defaults to reading `.firebaserc`-free config:
- * pass `--project` otherwise).
  */
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -69,19 +68,25 @@ async function call(method, url, body) {
 async function liveSource(release) {
   const rel = await call('GET', `${API}/projects/${PROJECT}/releases/${release}`);
   const ruleset = await call('GET', `${API}/${rel.rulesetName}`);
-  return { name: rel.rulesetName, files: ruleset.source.files };
+  return { name: rel.rulesetName.split('/').pop(), files: ruleset.source.files };
 }
+
+const lf = (s) => s.replace(/\r\n/g, '\n');
 
 // ── identities ───────────────────────────────────────────────────────────────
 const ADMIN = { uid: 'probe-admin', token: { admin: true, email: 'admin@example.com' } };
 const MEMBER = { uid: 'probe-member', token: { email: 'member@example.com' } };
+const ADMIN_FALSE = { uid: 'probe-admin-false', token: { admin: false, email: 'nope@example.com' } };
 // Signed out: no `auth` key at all, so request.auth is null.
 
-// ── Firestore: pets/{petId}/medical/{recordId} ───────────────────────────────
-const RECORD = '/databases/(default)/documents/pets/probe-pet/medical/probe-record';
+// ── Firestore paths and documents ────────────────────────────────────────────
+const DOCS = '/databases/(default)/documents';
+const RECORD = `${DOCS}/pets/probe-pet/medical/probe-record`;
+const CANDIDATE = `${DOCS}/pets/probe-pet/medicalCandidates/card-0123abcd-0`;
+const UNDECLARED = `${DOCS}/pets/probe-pet/undeclared/probe-doc`;
 
-/** A candidate exactly as the route writes it — unconfirmed. */
-const CANDIDATE = {
+/** A candidate exactly as the route writes it. */
+const CANDIDATE_DOC = {
   kind: 'vaccination',
   name: 'Vacuna de prueba',
   performedAt: null,
@@ -93,82 +98,123 @@ const CANDIDATE = {
   batch: null,
   manufacturer: null,
   notes: null,
-  codes: [],
-  source: 'llm-extracted',
-  confirmedBy: null,
-  confirmedAt: null,
   sourceDocument: 'medical/probe-pet/card-0123abcd.jpg',
   extractedByModel: 'flash-lite',
   extractedAt: null,
   extractedFrom: 'vaccination-card',
   extractionEvidence: { name: { snippet: 'Vacuna de prueba', confidence: 0.9, withheld: null } },
+  sourceIndex: 0,
   recordedBy: 'admin@example.com',
 };
-const CONFIRMED = { ...CANDIDATE, confirmedBy: 'admin@example.com' };
 
-const firestoreCases = [
-  ['admin writes an UNCONFIRMED candidate with the new fields', 'ALLOW', { auth: ADMIN, method: 'create', resource: { data: CANDIDATE } }],
-  ['admin CONFIRMS a candidate (sets confirmedBy)', 'ALLOW', { auth: ADMIN, method: 'update', resource: { data: CONFIRMED } }, { data: CANDIDATE }],
-  ['admin DISCARDS a candidate', 'ALLOW', { auth: ADMIN, method: 'delete' }, { data: CANDIDATE }],
-  ['admin reads the history', 'ALLOW', { auth: ADMIN, method: 'get' }, { data: CANDIDATE }],
-  ['a signed-in NON-admin reads a candidate (the recorded exposure: medical is the authenticated tier)', 'ALLOW', { auth: MEMBER, method: 'get' }, { data: CANDIDATE }],
-  ['a signed-in NON-admin confirms a candidate', 'DENY', { auth: MEMBER, method: 'update', resource: { data: CONFIRMED } }, { data: CANDIDATE }],
-  ['a signed-in NON-admin writes a candidate', 'DENY', { auth: MEMBER, method: 'create', resource: { data: CANDIDATE } }],
-  ['a signed-in NON-admin discards a candidate', 'DENY', { auth: MEMBER, method: 'delete' }, { data: CANDIDATE }],
-  ['signed out reads a candidate', 'DENY', { method: 'get' }, { data: CANDIDATE }],
-  ['signed out writes a candidate', 'DENY', { method: 'create', resource: { data: CANDIDATE } }],
-].map(([name, expectation, request, resource]) => ({
-  name,
-  testCase: {
-    expectation,
-    request: { path: RECORD, ...request },
-    ...(resource ? { resource } : {}),
-  },
-}));
+/** The record a confirmation creates. */
+const CONFIRMED_RECORD = {
+  ...CANDIDATE_DOC,
+  sourceIndex: undefined,
+  codes: [],
+  source: 'llm-extracted',
+  confirmedBy: 'admin@example.com',
+  confirmedAt: null,
+};
+delete CONFIRMED_RECORD.sourceIndex;
+
+function fsCase(name, expectation, path, request, existing) {
+  return {
+    name,
+    testCase: {
+      expectation,
+      request: { path, ...request },
+      ...(existing ? { resource: { data: existing } } : {}),
+    },
+  };
+}
+
+const proposedFirestore = [
+  // candidates — admin, every verb
+  fsCase('admin reads a candidate', 'ALLOW', CANDIDATE, { auth: ADMIN, method: 'get' }, CANDIDATE_DOC),
+  fsCase('admin creates a candidate', 'ALLOW', CANDIDATE, { auth: ADMIN, method: 'create', resource: { data: CANDIDATE_DOC } }),
+  fsCase('admin updates a candidate', 'ALLOW', CANDIDATE, { auth: ADMIN, method: 'update', resource: { data: CANDIDATE_DOC } }, CANDIDATE_DOC),
+  fsCase('admin deletes (discards) a candidate', 'ALLOW', CANDIDATE, { auth: ADMIN, method: 'delete' }, CANDIDATE_DOC),
+  // candidates — everyone else
+  fsCase('a signed-in NON-admin reads a candidate', 'DENY', CANDIDATE, { auth: MEMBER, method: 'get' }, CANDIDATE_DOC),
+  fsCase('a signed-in NON-admin creates a candidate', 'DENY', CANDIDATE, { auth: MEMBER, method: 'create', resource: { data: CANDIDATE_DOC } }),
+  fsCase('a signed-in NON-admin updates a candidate', 'DENY', CANDIDATE, { auth: MEMBER, method: 'update', resource: { data: CANDIDATE_DOC } }, CANDIDATE_DOC),
+  fsCase('a signed-in NON-admin deletes a candidate', 'DENY', CANDIDATE, { auth: MEMBER, method: 'delete' }, CANDIDATE_DOC),
+  fsCase('a token with admin:false reads a candidate', 'DENY', CANDIDATE, { auth: ADMIN_FALSE, method: 'get' }, CANDIDATE_DOC),
+  fsCase('signed out reads a candidate', 'DENY', CANDIDATE, { method: 'get' }, CANDIDATE_DOC),
+  // medical — unchanged
+  fsCase('medical UNCHANGED: a signed-in NON-admin reads a confirmed record', 'ALLOW', RECORD, { auth: MEMBER, method: 'get' }, CONFIRMED_RECORD),
+  fsCase('medical UNCHANGED: signed out reads a record', 'DENY', RECORD, { method: 'get' }, CONFIRMED_RECORD),
+  fsCase('admin creates the confirmed record', 'ALLOW', RECORD, { auth: ADMIN, method: 'create', resource: { data: CONFIRMED_RECORD } }),
+  fsCase('a signed-in NON-admin creates a record', 'DENY', RECORD, { auth: MEMBER, method: 'create', resource: { data: CONFIRMED_RECORD } }),
+  fsCase('a signed-in NON-admin self-confirms a record', 'DENY', RECORD, { auth: MEMBER, method: 'update', resource: { data: CONFIRMED_RECORD } }, CANDIDATE_DOC),
+  // control: the candidates ALLOW is the new rule, not something broader
+  fsCase('CONTROL: admin reads an undeclared subcollection', 'DENY', UNDECLARED, { auth: ADMIN, method: 'get' }, CANDIDATE_DOC),
+];
+
+const liveFirestore = [
+  fsCase('LIVE, NOT YET DEPLOYED: admin reads a candidate', 'DENY', CANDIDATE, { auth: ADMIN, method: 'get' }, CANDIDATE_DOC),
+  fsCase('LIVE medical unchanged: a signed-in NON-admin reads a record', 'ALLOW', RECORD, { auth: MEMBER, method: 'get' }, CONFIRMED_RECORD),
+];
 
 // ── Storage: medical/{petId}/{fileName} ──────────────────────────────────────
 const object = (name) => `/b/${BUCKET}/o/${name}`;
 const CARD = 'medical/probe-pet/card-0123abcd.jpg';
 const JPEG = (name) => ({ name, bucket: BUCKET, size: 400_000, contentType: 'image/jpeg' });
 
-const storageCases = [
+const liveStorage = [
   ['admin reads a card photo', 'ALLOW', { auth: ADMIN, method: 'get', path: object(CARD) }],
   ['admin uploads a card photo', 'ALLOW', { auth: ADMIN, method: 'create', path: object(CARD), resource: JPEG(CARD) }],
   ['admin deletes a card photo', 'ALLOW', { auth: ADMIN, method: 'delete', path: object(CARD) }],
   ['a signed-in NON-admin reads a card photo', 'DENY', { auth: MEMBER, method: 'get', path: object(CARD) }],
   ['a signed-in NON-admin uploads a card photo', 'DENY', { auth: MEMBER, method: 'create', path: object(CARD), resource: JPEG(CARD) }],
   ['signed out reads a card photo', 'DENY', { method: 'get', path: object(CARD) }],
-  // The flat path is load-bearing: `{fileName}` is ONE segment.
   ['admin uploads to a NESTED medical/{pet}/cards/ path — no rule matches', 'DENY', { auth: ADMIN, method: 'create', path: object('medical/probe-pet/cards/card-0123abcd.jpg'), resource: JPEG('medical/probe-pet/cards/card-0123abcd.jpg') }],
-  // Controls, so a DENY above means the rule and not a misread request shape.
   ['CONTROL: signed out reads a public pet photo', 'ALLOW', { method: 'get', path: object('pets/probe-pet/cover.jpg') }],
   ['CONTROL: signed out reads a private intake photo', 'DENY', { method: 'get', path: object('pets/probe-pet/private/0123abcd.jpg') }],
 ].map(([name, expectation, request]) => ({ name, testCase: { expectation, request } }));
 
 // ── run ──────────────────────────────────────────────────────────────────────
-async function suite(label, release, cases) {
-  const source = await liveSource(release);
+async function suite(label, files, cases) {
   const result = await call('POST', `${API}/projects/${PROJECT}:test`, {
-    source: { files: source.files },
+    source: { files },
     testSuite: { testCases: cases.map((c) => c.testCase) },
   });
 
-  console.log(`\n── ${label} — live ruleset ${source.name.split('/').pop()} ──`);
+  console.log(`\n── ${label} ──`);
   if (result.issues?.length) console.log('issues:', JSON.stringify(result.issues, null, 2));
 
   let failures = 0;
-  result.testResults.forEach((r, i) => {
+  (result.testResults ?? []).forEach((r, i) => {
     const ok = r.state === 'SUCCESS';
     if (!ok) failures++;
     console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${cases[i].testCase.expectation.padEnd(5)}  ${cases[i].name}`);
     if (!ok && r.debugMessages?.length) console.log(`          ${r.debugMessages.join(' | ')}`);
   });
+  if (!result.testResults) failures = cases.length;
   return { failures, total: cases.length };
 }
 
-const fs = await suite('Firestore pets/{petId}/medical', 'cloud.firestore', firestoreCases);
-const st = await suite(`Storage ${BUCKET}`, `firebase.storage/${BUCKET}`, storageCases);
+const localFirestore = [{ name: 'firestore.rules', content: readFileSync('firestore.rules', 'utf8') }];
+const liveFs = await liveSource('cloud.firestore');
+const liveSt = await liveSource(`firebase.storage/${BUCKET}`);
 
-const failures = fs.failures + st.failures;
-console.log(`\n${fs.total + st.total - failures}/${fs.total + st.total} as expected`);
+const liveLines = new Set(lf(liveFs.files[0].content).split('\n'));
+const added = lf(localFirestore[0].content)
+  .split('\n')
+  .filter((line) => !liveLines.has(line));
+console.log(
+  `local firestore.rules vs live ${liveFs.name}: ${added.length} line(s) not in the deployed ruleset` +
+    (added.length ? ` — first: ${JSON.stringify(added.find((l) => l.includes('match')) ?? added[0])}` : '')
+);
+
+const results = [
+  await suite('Firestore — LOCAL firestore.rules (proposed)', localFirestore, proposedFirestore),
+  await suite(`Firestore — LIVE ruleset ${liveFs.name}`, liveFs.files, liveFirestore),
+  await suite(`Storage ${BUCKET} — LIVE ruleset ${liveSt.name}`, liveSt.files, liveStorage),
+];
+
+const failures = results.reduce((n, r) => n + r.failures, 0);
+const total = results.reduce((n, r) => n + r.total, 0);
+console.log(`\n${total - failures}/${total} as expected`);
 process.exit(failures === 0 ? 0 : 1);

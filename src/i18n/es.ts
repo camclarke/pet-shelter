@@ -547,6 +547,12 @@ export const es: Messages = {
       'No pudimos abrir esa foto. Prueba tomarla con la cámara desde aquí, o elige una en JPG.',
     captureReading: 'Leyendo la tarjeta…',
     captureSavedNote: 'la foto de la tarjeta ya se guardó y queda aunque la lectura falle.',
+    candidatesTitle: 'Por revisar',
+    candidatesUnavailable:
+      'No pudimos cargar las lecturas por revisar. El historial confirmado sí está al día.',
+    candidateGone: 'Ese registro ya no está por revisar: alguien más lo confirmó o lo descartó.',
+    confirmFailed: 'No pudimos confirmar ese registro. Revisa tu conexión e inténtalo de nuevo.',
+    discardFailed: 'No pudimos descartar ese registro.',
   } satisfies MedicalReviewCopy,
 
   extractionSourceLabel(source: MedicalExtractionSource | null) {

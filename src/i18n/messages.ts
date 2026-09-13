@@ -332,4 +332,12 @@ export interface MedicalReviewCopy {
   readonly captureReading: string;
   /** Completes "No cierres esta pantalla — …". */
   readonly captureSavedNote: string;
+  /** Heading of the readings nobody has confirmed yet. */
+  readonly candidatesTitle: string;
+  /** The readings could not be loaded; the confirmed history still shows. */
+  readonly candidatesUnavailable: string;
+  /** Another admin confirmed or discarded it first. */
+  readonly candidateGone: string;
+  readonly confirmFailed: string;
+  readonly discardFailed: string;
 }

@@ -20,8 +20,8 @@ import {
 } from '@/lib/medical-server';
 
 /**
- * POST /api/medical/cards/extract — read a vaccination card, write UNCONFIRMED
- * candidates. Build-order step 9, plan §4.3–§4.8.
+ * POST /api/medical/cards/extract — read a vaccination card, write CANDIDATES
+ * for a person to review. Build-order step 9, plan §4.3–§4.8.
  *
  * Body: `{ petId, path }`, where `path` is a card photo the admin's browser
  * already uploaded to `medical/{petId}/card-{uuid}.jpg`.
@@ -33,10 +33,10 @@ import {
  * entire boundary. `AdminGate` runs in the browser and protects nothing here.
  *
  * ── What it deliberately does NOT do ─────────────────────────────────────────
- * It never confirms anything. Every candidate is written with
- * `confirmedBy: null` — a literal type in `candidateRecordFields`, so this
- * cannot be changed by accident — and counts for nothing until a person
- * confirms it in the medical panel.
+ * It never writes a medical record. Every reading goes to the admin-only
+ * `pets/{petId}/medicalCandidates`, and becomes a record in `medical` only
+ * when a person confirms it (`confirmMedicalRecord`). A candidate carries no
+ * `confirmedBy` field at all, so there is nothing here to set by accident.
  *
  * ── Failure direction: OPEN, toward typing the record by hand ───────────────
  * Every failure writes nothing and says why. The card photo is already stored,
@@ -89,7 +89,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     // checkRevoked: a revoked admin loses access immediately. The one-hour
     // claim lag cuts both ways, and on a path that spends and writes medical
-    // records the strict side is the safe one.
+    // data the strict side is the safe one.
     const decoded = await getAdminAuth().verifyIdToken(token, true);
     isAdmin = decoded.admin === true;
     reviewer = decoded.email?.trim() || decoded.uid;
@@ -121,8 +121,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     if (!(await petExists(petId))) return fail('pet-not-found', 404);
 
-    // Before the model: a retry of a request whose response was lost must not
-    // spend a second request and write every candidate twice.
+    // The fast path, before the model: an ordinary retry of a request whose
+    // response was lost does not spend a second request. Not the guarantee —
+    // see writeCardCandidates' create-if-absent ids below.
     if (await cardAlreadyExtracted(petId, path)) return fail('already-extracted', 409);
 
     const card = await readCardPhoto(path);
@@ -163,15 +164,15 @@ export async function POST(request: Request): Promise<Response> {
         droppedRows: review.kind === 'reviewed' ? review.droppedRows : 0,
         notACard: review.kind === 'not-a-card',
         modelKey: extraction.modelKey,
-        recordIds: [],
+        candidateIds: [],
       };
       return NextResponse.json(nothing);
     }
 
-    // ── 6. write them, unconfirmed ───────────────────────────────────────────
-    let recordIds: string[];
+    // ── 6. write them as candidates, create-if-absent ───────────────────────
+    let written;
     try {
-      recordIds = await writeCardCandidates(petId, review.candidates, {
+      written = await writeCardCandidates(petId, review.candidates, {
         modelKey: extraction.modelKey,
         sourceDocument: path,
         recordedBy: reviewer,
@@ -183,17 +184,24 @@ export async function POST(request: Request): Promise<Response> {
       return fail('save-failed', 500);
     }
 
+    if (written.kind === 'already-extracted') {
+      // A concurrent request for the same card won the race. Its candidates
+      // are there; ours were refused atomically because the ids collide.
+      console.warn(`[card-extract] card=${cardKb}KB lost a race to a concurrent extraction; nothing written`);
+      return fail('already-extracted', 409);
+    }
+
     console.info(
       `[card-extract] ok in ${Date.now() - started}ms card=${cardKb}KB model=${extraction.modelKey} ` +
-        `written=${recordIds.length} dropped=${review.droppedRows}`
+        `written=${written.ids.length} dropped=${review.droppedRows}`
     );
 
     const success: CardExtractSuccess = {
-      written: recordIds.length,
+      written: written.ids.length,
       droppedRows: review.droppedRows,
       notACard: false,
       modelKey: extraction.modelKey,
-      recordIds,
+      candidateIds: written.ids,
     };
     return NextResponse.json(success);
   } catch (err) {

@@ -4,14 +4,14 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 /**
- * Source-level wiring checks for the review gate, plan §4.8.
+ * Source-level wiring checks for the review, plan §4.8.
  *
  * ⚠️ Crude on purpose, and the only check available: there is no component
  * test setup here, and `/admin/pets/{id}` sits behind `AdminGate`, which needs
  * a human password. PR #26 (2026-09-02) is why a wiring check is worth having
  * at all — the policy layer computed `sex` and the UI threw it away, with every
- * unit test green. The pure gate being right proves nothing if a screen
- * computes around it.
+ * unit test green. These are tests of source text, not of behaviour: a check
+ * that does not follow imports can be evaded by indirection (step-9 evaluation).
  *
  * `npm test` runs from the repository root, so paths are relative to it.
  */
@@ -29,6 +29,14 @@ function code(path: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/** The body of one exported function, from its declaration to the next top-level export. */
+function exportedFunction(src: string, name: string): string {
+  const start = src.indexOf(`export async function ${name}(`);
+  assert.ok(start >= 0, `${name} must exist`);
+  const next = src.indexOf('\nexport ', start + 1);
+  return src.slice(start, next < 0 ? undefined : next);
+}
+
 function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(join(ROOT, dir))) {
@@ -40,6 +48,9 @@ function walk(dir: string): string[] {
 }
 
 const PANEL = 'src/app/admin/pets/[petId]/MedicalPanel.tsx';
+const ADMIN = 'src/lib/medical-admin.ts';
+const SERVER = 'src/lib/medical-server.ts';
+const ROUTE = 'src/app/api/medical/cards/extract/route.ts';
 
 test('the medical panel draws row flags through the gate, never around it', () => {
   const src = code(PANEL);
@@ -60,6 +71,24 @@ test('one-click confirm is offered only through canConfirmAsIs', () => {
   assert.ok(/confirmMedicalRecord\(/.test(src));
 });
 
+test('confirmMedicalRecord refuses to write unless the confirmation plan succeeds', () => {
+  // The invariant lives with the write, not with whichever button calls it.
+  const body = exportedFunction(code(ADMIN), 'confirmMedicalRecord');
+  const plan = body.indexOf('planConfirmation(');
+  const refuse = body.indexOf('throw new MedicalConfirmationError(');
+  const write = body.indexOf('runTransaction(');
+  assert.ok(plan >= 0, 'must call planConfirmation()');
+  assert.ok(refuse > plan, 'must throw MedicalConfirmationError when the plan fails');
+  assert.ok(write > refuse, 'the write must come after the refusal');
+});
+
+test('confirming reads the candidate inside the transaction and deletes it there', () => {
+  const body = exportedFunction(code(ADMIN), 'confirmMedicalRecord');
+  assert.ok(/tx\.get\(candidateRef\)/.test(body), 'a gone candidate must not become a record');
+  assert.ok(/tx\.set\(recordRef/.test(body));
+  assert.ok(/tx\.delete\(candidateRef\)/.test(body));
+});
+
 test('no public surface reads the medical collection without the gate', () => {
   // Public = every page and component that is not the admin console or an API
   // route, plus the server module the public pages read through.
@@ -76,28 +105,46 @@ test('no public surface reads the medical collection without the gate', () => {
     const src = code(file);
     const readsMedical = /['"`]medical['"`]/.test(src);
     const gated = /summarizeMedicalHistory|confirmedOnly/.test(src);
-    return readsMedical && !gated;
+    return (readsMedical && !gated) || /medicalCandidates/.test(src);
   });
   assert.deepEqual(
     offenders.map((f) => relative(ROOT, join(ROOT, f))),
     [],
-    'a public module reads `medical` without summarizeMedicalHistory or confirmedOnly'
+    'a public module reads `medical` without the gate, or reads candidates at all'
   );
 });
 
-test('the card route never confirms anything', () => {
-  for (const file of ['src/app/api/medical/cards/extract/route.ts', 'src/lib/medical-server.ts']) {
+test('the card route and its server writer never confirm anything', () => {
+  for (const file of [ROUTE, SERVER]) {
     assert.equal(
       /confirmedBy\s*:/.test(code(file)),
       false,
-      `${file} must not set confirmedBy — candidateRecordFields writes null`
+      `${file} must not set confirmedBy — a candidate has no such field`
     );
   }
 });
 
+test('the server writer puts readings in medicalCandidates and only READS medical', () => {
+  const src = code(SERVER);
+  const medicalRefs = src.match(/collection\('medical'\)/g) ?? [];
+  assert.equal(medicalRefs.length, 1, 'medical may be touched only by the already-read check');
+  assert.ok(/collection\('medical'\)\s*\.where\('sourceDocument'/.test(src));
+  assert.ok(
+    /doc\(petId\)\.collection\('medicalCandidates'\)/.test(src),
+    'candidates must be written to medicalCandidates'
+  );
+});
+
+test('candidates are written create-if-absent, never overwritten', () => {
+  const body = exportedFunction(code(SERVER), 'writeCardCandidates');
+  assert.ok(/batch\.create\(/.test(body), 'create is what makes the deterministic id an idempotency key');
+  assert.equal(/batch\.set\(/.test(body), false);
+  assert.ok(/candidateIdFor\(/.test(body));
+});
+
 test('a card photo is never given a download URL', () => {
   for (const file of [
-    'src/lib/medical-admin.ts',
+    ADMIN,
     'src/app/admin/pets/[petId]/CardCapture.tsx',
     'src/app/admin/pets/[petId]/ReviewEvidence.tsx',
   ]) {
@@ -116,7 +163,7 @@ test('the card is stripped of EXIF before it is uploaded', () => {
 test('the route checks the admin claim before it checks configuration', () => {
   // A 503 "not configured" answered to an unauthenticated caller would tell
   // them whether the feature is switched on.
-  const src = code('src/app/api/medical/cards/extract/route.ts');
+  const src = code(ROUTE);
   const auth = src.indexOf('verifyIdToken(token, true)');
   const configured = src.indexOf('aiIsConfigured()');
   assert.ok(auth >= 0, 'must verify with checkRevoked');

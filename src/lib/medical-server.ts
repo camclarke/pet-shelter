@@ -3,12 +3,9 @@ import 'server-only';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 
 import { getAdminDb, getAdminStorage } from './firebase-admin';
-import type { MedicalRecord } from './types';
-import {
-  candidateRecordFields,
-  type CandidateMeta,
-  type CardCandidate,
-} from './card-extraction';
+import type { MedicalCandidate } from './types';
+import { cardCandidateFields, type CandidateMeta, type CardCandidate } from './card-extraction';
+import { candidateIdFor, isAlreadyExistsError } from './medical-candidates';
 
 /**
  * Medical records: the SERVER side, through the Admin SDK. Build-order step 9.
@@ -23,6 +20,12 @@ import {
  * `src/app/api/medical/cards/extract/route.ts` — verifies the ID token and the
  * admin claim itself, and only then calls in here. Nothing in this file may be
  * reachable any other way.
+ *
+ * ⚠️ It writes CANDIDATES, never records. A model's reading goes to the
+ * admin-only `pets/{petId}/medicalCandidates`; the only way into
+ * `pets/{petId}/medical` is a person confirming it (`confirmMedicalRecord`).
+ * `medical-wiring.test.ts` pins that this file touches `medical` only to ask
+ * whether a card was already read.
  */
 
 /** Largest card photo the route will read. Matches the pet-photo cap in storage.rules. */
@@ -33,20 +36,19 @@ const CARD_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 /**
  * The document a candidate is written as.
  *
- * ⚠️ Derived from `MedicalRecord`, not written out by hand — the same reason
- * `PetDocumentWrite` exists. A field added to `MedicalRecord` and forgotten in
- * `candidateRecordFields` fails the typecheck here instead of producing a
+ * ⚠️ Derived from `MedicalCandidate`, not written out by hand — the same reason
+ * `PetDocumentWrite` exists. A field added to `MedicalCandidate` and forgotten
+ * in `cardCandidateFields` fails the typecheck here instead of producing a
  * document without it.
  */
 type CandidateWrite = Omit<
-  MedicalRecord,
-  'id' | 'performedAt' | 'nextDueAt' | 'validFrom' | 'validUntil' | 'confirmedAt' | 'extractedAt'
+  MedicalCandidate,
+  'id' | 'performedAt' | 'nextDueAt' | 'validFrom' | 'validUntil' | 'extractedAt'
 > & {
   performedAt: Timestamp | null;
   nextDueAt: Timestamp | null;
-  validFrom: null;
-  validUntil: null;
-  confirmedAt: null;
+  validFrom: Timestamp | null;
+  validUntil: Timestamp | null;
   extractedAt: FieldValue;
 };
 
@@ -73,23 +75,23 @@ export async function petExists(petId: string): Promise<boolean> {
 }
 
 /**
- * Has this card already produced records?
+ * Has this card already produced candidates or confirmed records?
  *
- * Asked BEFORE the model is called, so a retry after a response the browser
- * never received — Firebase Hosting cuts at 60 s, and the write may already
- * have landed — does not spend a second free-tier request and duplicate every
- * candidate. A single-field equality on one pet's subcollection: indexed
+ * The FAST path, asked before the model is called, so an ordinary retry does
+ * not spend a free-tier request. It is not the guarantee: two requests can
+ * both pass it. The guarantee is `writeCardCandidates`' create-if-absent
+ * deterministic ids, which refuse the loser atomically.
+ *
+ * Both are single-field equalities on one pet's subcollection: indexed
  * automatically, and no entry belongs in `firestore.indexes.json`.
  */
 export async function cardAlreadyExtracted(petId: string, path: string): Promise<boolean> {
-  const snap = await getAdminDb()
-    .collection('pets')
-    .doc(petId)
-    .collection('medical')
-    .where('sourceDocument', '==', path)
-    .limit(1)
-    .get();
-  return !snap.empty;
+  const pet = getAdminDb().collection('pets').doc(petId);
+  const [records, candidates] = await Promise.all([
+    pet.collection('medical').where('sourceDocument', '==', path).limit(1).get(),
+    pet.collection('medicalCandidates').where('sourceDocument', '==', path).limit(1).get(),
+  ]);
+  return !records.empty || !candidates.empty;
 }
 
 export type CardReadResult =
@@ -127,35 +129,49 @@ export async function readCardPhoto(path: string): Promise<CardReadResult> {
   return { kind: 'ok', bytes: new Uint8Array(buffer), mediaType: contentType };
 }
 
+export type CandidateWriteResult =
+  | { kind: 'written'; ids: string[] }
+  /** A candidate with one of these ids already exists: this card was read already. */
+  | { kind: 'already-extracted' };
+
 /**
- * Write every candidate from one card, atomically, UNCONFIRMED.
+ * Write every candidate from one card, atomically, into `medicalCandidates`.
  *
- * One batch, so a card is never half-written: either every row the policy
- * kept is there for review, or none is and the extraction can be retried.
+ * ⚠️ `create`, never `set`. Each id is `candidateIdFor(card path, index)`, so a
+ * second extraction of the same card — however it got past
+ * `cardAlreadyExtracted` — collides on the first id and the WHOLE batch is
+ * refused. One card is never half-written and never written twice.
  */
 export async function writeCardCandidates(
   petId: string,
   candidates: readonly CardCandidate[],
   meta: CandidateMeta
-): Promise<string[]> {
+): Promise<CandidateWriteResult> {
   const db = getAdminDb();
-  const medical = db.collection('pets').doc(petId).collection('medical');
+  const collectionRef = db.collection('pets').doc(petId).collection('medicalCandidates');
   const batch = db.batch();
   const ids: string[] = [];
 
-  for (const candidate of candidates) {
-    const fields = candidateRecordFields(candidate, meta);
+  candidates.forEach((candidate, index) => {
+    const fields = cardCandidateFields(candidate, index, meta);
     const write: CandidateWrite = {
       ...fields,
       performedAt: toTimestamp(fields.performedAt),
       nextDueAt: toTimestamp(fields.nextDueAt),
+      validFrom: toTimestamp(fields.validFrom),
+      validUntil: toTimestamp(fields.validUntil),
       extractedAt: FieldValue.serverTimestamp(),
     };
-    const ref = medical.doc();
-    batch.set(ref, write);
-    ids.push(ref.id);
-  }
+    const id = candidateIdFor(meta.sourceDocument, index);
+    batch.create(collectionRef.doc(id), write);
+    ids.push(id);
+  });
 
-  await batch.commit();
-  return ids;
+  try {
+    await batch.commit();
+  } catch (err) {
+    if (isAlreadyExistsError(err)) return { kind: 'already-extracted' };
+    throw err;
+  }
+  return { kind: 'written', ids };
 }
