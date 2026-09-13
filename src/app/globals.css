@@ -2129,6 +2129,17 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* The text links on these screens are real tap targets on a phone. Measured at
+   360px before this rule: "Conoce a Luna" was 19px tall and "Marcar todos"
+   23px. A 44px row keeps the look of a link and the reach of a button. */
+.tag-page__meet .auth__link,
+.tag-page__admin .auth__link,
+.qr-panel__actions .auth__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
 @media (max-width: 30rem) {
   .tag-page__cta {
     width: 100%;
@@ -2354,8 +2365,24 @@ textarea {
     display: none !important;
   }
 
+  /* Black on white whatever the theme. Measured in the harness: printing from
+     the dark theme left each animal's name above its tag in the theme's light
+     text colour — and a browser drops backgrounds when it prints, so that is
+     light text on white paper, and the one label that says which tag goes on
+     which animal all but disappears. */
   body:has(.qr-print) {
     background: #fff;
+    color: #000;
+  }
+
+  /* The admin card is a screen affordance: its border, shadow and padding
+     would print as a box around the sheet and eat the page margin. */
+  .qr-print .admin {
+    max-width: none;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
   }
 
   body:has(.qr-print)::after {
