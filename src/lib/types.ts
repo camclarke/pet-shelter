@@ -800,6 +800,34 @@ export interface Placement {
   note: string | null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// qrTokens/{token} — public GET (never list), admin create, revoke-only update
+//
+// The code printed under a collar tag's QR symbol. Plan §2.5 and §7. A
+// separate document rather than a field on `Pet`, for two reasons that are
+// both load-bearing: a token can be revoked and reissued without touching the
+// animal's record, and `pets` is public READ — which includes list — so a
+// token stored there would make every tag enumerable from the wall.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface QrToken {
+  /**
+   * The DOCUMENT ID, never a stored field — `firestore.rules` rejects a
+   * create carrying one. 10 characters of Crockford base32; see
+   * `src/lib/qr-tokens.ts` for the alphabet and why.
+   */
+  token: string;
+  /** Always a pet that existed when the token was minted (the rules check). */
+  petId: string;
+  /**
+   * null while the tag works. Set once, by an admin, to the server's clock,
+   * and never cleared — the rules refuse an un-revoke.
+   */
+  revokedAt: Timestamp | null;
+  createdAt: Timestamp;
+  /** The admin's uid. */
+  createdBy: string;
+}
+
 /** Geographic bounds for the Cochabamba region, enforced in security rules. */
 export const COCHABAMBA_BOUNDS = {
   minLat: -17.75,
