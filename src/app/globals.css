@@ -1625,6 +1625,38 @@ textarea {
   border-color: var(--jade);
 }
 
+/* A history row that is a RECORD, not a link — the medical and measurement
+   histories on an animal's internal page. Until 2026-09-12 these rows had no
+   rule at all, and nothing noticed because no record had ever been rendered:
+   `.t-data` is inline, so every detail ran into the headline and into the next
+   ("12,5 KG · CONDICIÓN 5 · IDEAL9 SEP 2026…"), and Editar sat flush against
+   Borrar with a zero gap — on a phone, where a mis-tap deletes a medical record.
+   Measured at 360px against this stylesheet. */
+.admin-list__item--record {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+.admin-list__item--record > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  /* A vet's full name or an admin's email must wrap, never widen the row. */
+  overflow-wrap: anywhere;
+}
+
+.admin-list__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
 /* ---- areas and placements ----------------------------------------------- */
 /* The occupancy board, the move form's warnings, and the placement timeline.
    Built on the same tokens as the rest of the admin console — no new colours,

@@ -8,9 +8,11 @@
 
 import type { Messages } from './messages';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
+import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
 import type {
   AreaKind,
   MedicalRecordKind,
+  MuscleCondition,
   PetSex,
   PetSize,
   PetStatus,
@@ -130,6 +132,64 @@ const MEDICAL_WARNING: Record<MedicalWarning, string> = {
   'vaccination-no-next-due':
     'No pusiste cuándo toca la próxima. Sin eso no va a aparecer en los recordatorios.',
 };
+
+const MEASUREMENT_ERROR: Record<MeasurementError, string> = {
+  'nothing-measured': 'Anota al menos uno: el peso, la condición corporal o la masa muscular.',
+  'measured-required': 'Falta la fecha de la medición.',
+  'measured-in-future': 'Esa fecha todavía no llegó. Revisa el día.',
+  'weight-invalid': 'El peso tiene que ser un número, por ejemplo 12,5.',
+  'weight-too-precise':
+    'Usa como máximo dos decimales, por ejemplo 12,5. Con tres no se sabe si «12.500» son doce kilos y medio o doce mil quinientos.',
+  'weight-not-positive': 'El peso tiene que ser mayor que cero.',
+  'weight-too-heavy': 'Ese peso no es posible para un animalito. Revisa si falta la coma.',
+  'bcs-out-of-range': 'La condición corporal va del 1 al 9, en números enteros.',
+};
+
+/**
+ * WSAVA's bands, as NOUNS on purpose. "Delgado"/"delgada" would have to agree
+ * with the animal's sex, which this label does not receive; "bajo peso" does
+ * not inflect.
+ */
+const BODY_CONDITION_BAND = [
+  'Emaciación',
+  'Muy bajo peso',
+  'Bajo peso',
+  'Ideal',
+  'Ideal',
+  'Sobrepeso',
+  'Sobrepeso',
+  'Obesidad',
+  'Obesidad severa',
+] as const;
+
+const MUSCLE_CONDITION: Record<MuscleCondition, string> = {
+  normal: 'Masa muscular normal',
+  mild: 'Pérdida muscular leve',
+  moderate: 'Pérdida muscular moderada',
+  marked: 'Pérdida muscular marcada',
+};
+
+/**
+ * Generic masculine plural, the one form that needs no sex to agree with — and
+ * deliberately NOT the diminutive `SPECIES_PLURAL` above. "Poco común en
+ * perritos" is the wall's warmth misplaced in a note about a dosing weight.
+ */
+const SPECIES_PLURAL_PLAIN: Record<Species, string> = {
+  dog: 'perros',
+  cat: 'gatos',
+  rabbit: 'conejos',
+  other: 'animales',
+};
+
+/**
+ * A weight in Bolivian notation: decimal comma, at most two decimals, and NO
+ * grouping. ⚠️ No grouping on purpose — in es-BO "1.250" means twelve hundred
+ * and fifty, and `parseWeightInput` refuses three decimals rather than guess,
+ * so a grouped value would not survive being edited.
+ */
+function kgNumber(kg: number): string {
+  return kg.toLocaleString('es-BO', { maximumFractionDigits: 2, useGrouping: false });
+}
 
 const MICROCHIP_ERROR: Record<MicrochipError, string> = {
   empty: 'Ingresa el número del microchip.',
@@ -372,6 +432,31 @@ export const es: Messages = {
   medicalError: (error) => MEDICAL_ERROR[error],
 
   medicalWarning: (warning) => MEDICAL_WARNING[warning],
+
+  measurementError: (error) => MEASUREMENT_ERROR[error],
+
+  measurementWarning(warning) {
+    if (warning.kind === 'weight-unusual-for-species') {
+      return `Pasa de ${kgNumber(warning.aboveKg)} kg, que es poco común en ${SPECIES_PLURAL_PLAIN[warning.species]}. Revisa que no falte la coma. Si el peso es real, guárdalo igual.`;
+    }
+    const previous = `${kgNumber(warning.previousKg)} kg`;
+    return warning.direction === 'up'
+      ? `Es el doble o más del último peso anotado (${previous}). En un cachorro que está creciendo puede ser real; si no, revisa la coma, porque las dosis se calculan por kilo.`
+      : `Es la mitad o menos del último peso anotado (${previous}). Revisa la coma, porque las dosis se calculan por kilo. Si de verdad bajó tanto, guárdalo igual.`;
+  },
+
+  bodyConditionLabel(score) {
+    const band = BODY_CONDITION_BAND[score - 1];
+    return band ? `${score} · ${band}` : String(score);
+  },
+
+  muscleConditionLabel: (condition) => MUSCLE_CONDITION[condition],
+
+  formatKg: (kg) => `${kgNumber(kg)} kg`,
+
+  formatKgRange: (minKg, maxKg) => `${kgNumber(minKg)}–${kgNumber(maxKg)} kg`,
+
+  formatKgInput: (kg) => kgNumber(kg),
 
   microchipError: (error) => MICROCHIP_ERROR[error],
 
