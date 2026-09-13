@@ -35,6 +35,30 @@ export function todayInputValue(): string {
   return toDateInput(Date.now());
 }
 
+/**
+ * Is `dateMs` after today, comparing LOCAL CALENDAR DAYS rather than exact
+ * instants?
+ *
+ * ⚠️ A validator that compares instants (`dateMs > now`) rejects a record
+ * dated TODAY from local midnight until `now`'s clock time catches up to
+ * `dateMs`'s. `parseDateInput` stamps a picked date at local NOON, so a form
+ * defaulting to `todayInputValue()` produced a `performedAt`/`measuredAt` in
+ * the caller's future for every save made before local noon — a shelter
+ * recording a morning vaccination or weighing was told the date "hasn't
+ * arrived yet" and had to backdate to yesterday to save at all. Comparing the
+ * CALENDAR DAY instead accepts today at any hour and rejects only a
+ * genuinely later day.
+ *
+ * `toleranceMs` is added to `now` before the comparison so the existing
+ * clock-skew allowance still works across midnight: a browser clock a few
+ * minutes behind the real day must not have "today" (its real today, our
+ * tomorrow) refused. `toDateInput` zero-pads, so the `YYYY-MM-DD` strings
+ * compare correctly as strings — no `Date` arithmetic needed here.
+ */
+export function isDateAfterToday(dateMs: number, now: number, toleranceMs: number): boolean {
+  return toDateInput(dateMs) > toDateInput(now + toleranceMs);
+}
+
 /** Epoch ms as Bolivian-readable text. */
 export function formatDate(ms: number): string {
   return new Date(ms).toLocaleDateString('es-BO', {
