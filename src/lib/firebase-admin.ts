@@ -67,9 +67,17 @@ export function getAdminDb(): Firestore {
  * WARNING: a Next.js route handler runs OUTSIDE firestore.rules. Every other
  * admin write in this project goes straight from the browser to Firestore and
  * is gated by the rules; a route handler is not, so it must verify the caller
- * itself. That is what this exists for. See src/app/api/intake/suggest/route.ts.
+ * itself. That is what this exists for. See src/lib/require-admin.ts.
  */
 export function getAdminAuth(): Auth {
   init();
   return getAuth();
+}
+
+/**
+ * `requireAdmin`'s verifier, bound to the Admin SDK — what every route passes
+ * to it. Checking the claim is `requireAdmin`'s job, not this function's.
+ */
+export function verifyAdminIdToken(token: string, checkRevoked: boolean) {
+  return getAdminAuth().verifyIdToken(token, checkRevoked);
 }

@@ -1,6 +1,6 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 
-import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin';
+import { getAdminDb, verifyAdminIdToken } from '@/lib/firebase-admin';
 import { handleCookBatchPost, type CookBatchPlan } from '@/lib/cook-batch-handler';
 import type { CookBatch, StockEntry } from '@/lib/types';
 
@@ -81,7 +81,7 @@ async function commit(plan: CookBatchPlan): Promise<string> {
 
 export async function POST(request: Request): Promise<Response> {
   return handleCookBatchPost(request, {
-    verifyIdToken: (token, checkRevoked) => getAdminAuth().verifyIdToken(token, checkRevoked),
+    verifyIdToken: verifyAdminIdToken,
     commit,
     log: (message, err) => console.warn(message, err),
   });

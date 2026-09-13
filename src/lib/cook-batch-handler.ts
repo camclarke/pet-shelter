@@ -46,6 +46,7 @@ import {
   type CookInputDraft,
 } from './food-stock';
 import type { CookBatchInput, FoodCategory } from './types';
+import { requireAdmin, type VerifiedIdToken, type VerifyIdToken } from './require-admin';
 
 /** Stamped on every failure this handler generates — see `SUGGEST_FAILURE_HEADER`. */
 export const COOK_BATCH_FAILURE_HEADER = 'X-Cook-Batch-Failure';
@@ -65,14 +66,11 @@ export interface CookBatchPlan {
   entries: { category: FoodCategory; label: string; deltaG: number; occurredAtMs: number }[];
 }
 
-export interface VerifiedToken {
-  uid: string;
-  email?: string | null;
-  admin?: unknown;
-}
+/** `requireAdmin`'s token shape, under the name this module's callers already use. */
+export type VerifiedToken = VerifiedIdToken;
 
 export interface CookBatchDeps {
-  verifyIdToken: (token: string, checkRevoked: boolean) => Promise<VerifiedToken>;
+  verifyIdToken: VerifyIdToken;
   commit: (plan: CookBatchPlan) => Promise<string>;
   now?: () => number;
   log?: (message: string, err?: unknown) => void;
@@ -173,19 +171,10 @@ function fail(error: string, status: number, extra: Record<string, unknown> = {}
 }
 
 export async function handleCookBatchPost(request: Request, deps: CookBatchDeps): Promise<Response> {
-  // ── 1. authenticate, before anything else ─────────────────────────────────
-  const header = request.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!token) return fail('unauthenticated', 401);
-
-  let decoded: VerifiedToken;
-  try {
-    // checkRevoked: a revoked admin loses this write immediately, not in an hour.
-    decoded = await deps.verifyIdToken(token, true);
-  } catch {
-    return fail('unauthenticated', 401);
-  }
-  if (decoded.admin !== true) return fail('forbidden', 403);
+  // ── 1. authenticate, before anything else — `require-admin.ts` verifies the
+  //       token with checkRevoked, so a revoked admin loses this write now ────
+  const auth = await requireAdmin(request, deps.verifyIdToken);
+  if (!auth.ok) return fail(auth.error, auth.status);
 
   // ── 2. the body ───────────────────────────────────────────────────────────
   let body: unknown;
@@ -199,7 +188,7 @@ export async function handleCookBatchPost(request: Request, deps: CookBatchDeps)
 
   // ── 3. the same validator the screen runs, toxic gate included ────────────
   // Attribution comes from the verified token: email when it has one, else uid.
-  const author = decoded.email || decoded.uid;
+  const author = auth.email ?? auth.uid;
   const planned = planCookBatch(draft, author, (deps.now ?? Date.now)());
   if ('errors' in planned) return fail('batch-invalid', 422, { errors: planned.errors });
 
