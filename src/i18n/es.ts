@@ -24,6 +24,177 @@ import { MS_PER_DAY, type Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
+import type { ApplicationStatus } from '@/lib/types';
+import type {
+  ApplicationAnswerError,
+  ApprovalBlocker,
+  ApprovalWarning,
+} from '@/lib/applications';
+import type { ApplicationSection } from '@/config/shelter';
+import type { ApplicationCopy } from './messages';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Online adoption applications — plan §6
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What the SHELTER calls each status, on the queue. */
+const APPLICATION_STATUS: Record<ApplicationStatus, string> = {
+  submitted: 'Nueva',
+  reviewing: 'En revisión',
+  interview: 'Entrevista',
+  approved: 'Aprobada',
+  rejected: 'Rechazada',
+  withdrawn: 'Retirada',
+};
+
+/**
+ * What the APPLICANT sees. Only `rejected` differs, and only in tone: a family
+ * turned down reads «No aprobada» on their own account page, which says the
+ * same thing without the word a person hears as a verdict on them.
+ */
+const APPLICANT_STATUS: Record<ApplicationStatus, string> = {
+  submitted: 'Enviada',
+  reviewing: 'En revisión',
+  interview: 'Entrevista',
+  approved: 'Aprobada',
+  rejected: 'No aprobada',
+  withdrawn: 'Retirada',
+};
+
+/**
+ * ⚠️ Each line must be true. The shelter reviews by hand, nothing is sent
+ * automatically, and WhatsApp is where a conversation actually happens — so
+ * every status that needs the applicant to do something points them there.
+ */
+const APPLICANT_STATUS_EXPLANATION: Record<ApplicationStatus, string> = {
+  submitted:
+    'El equipo todavía no la revisa. Lo hacen a mano, así que puede tomar unos días.',
+  reviewing: 'Alguien del equipo la está leyendo.',
+  interview:
+    'El equipo quiere conversar contigo. Si todavía no te escribieron, escríbeles por WhatsApp.',
+  approved: 'La adopción quedó registrada. Gracias por darle un hogar.',
+  rejected:
+    'Esta vez la solicitud no fue aprobada. Si quieres saber por qué, escríbele al equipo por WhatsApp.',
+  withdrawn: 'Esta solicitud se retiró.',
+};
+
+const APPLICATION_SECTION: Record<ApplicationSection, string> = {
+  contact: 'Contacto',
+  housing: 'Vivienda',
+  household: 'Quiénes viven en la casa',
+  otherPets: 'Otros animales',
+  experience: 'Experiencia',
+  why: 'Por qué este animalito',
+};
+
+const APPLICATION_ANSWER_ERROR: Record<ApplicationAnswerError, string> = {
+  required: 'Esta pregunta es obligatoria.',
+  'too-long': 'La respuesta es muy larga. Resúmela un poco.',
+  'phone-invalid': 'Escribe un número de teléfono, con o sin el +591.',
+  'count-invalid': 'Escribe un número entero, sin decimales.',
+  'choice-invalid': 'Elige una de las opciones.',
+};
+
+/**
+ * ⚠️ These BLOCK, so each one says why the state is unsafe and what to do
+ * instead — never just "no".
+ */
+const APPROVAL_BLOCKER: Record<ApprovalBlocker, string> = {
+  'application-not-approvable':
+    'Solo se puede aprobar una solicitud que está en revisión o en entrevista. Pásala primero a revisión.',
+  'pet-missing': 'La ficha de este animalito ya no existe.',
+  'pet-already-adopted':
+    'Este animalito ya figura como adoptado. Aprobar ahora le daría su microchip y su historial a una segunda familia. Si volvió al refugio, regístralo primero como reingreso.',
+  'pet-not-ready':
+    'Este animalito todavía no puede pasar a adoptado: está en camino, en cuarentena o su rescate se canceló. Primero tiene que llegar y tener el alta.',
+};
+
+const APPLICATION_COPY: ApplicationCopy = {
+  applyLink: 'Postular en línea →',
+
+  pageTitle: (petName) => `Postular para adoptar a ${petName}`,
+  intro: (petName) =>
+    `Esta solicitud es opcional. Si prefieres, escríbenos por WhatsApp: es el camino más rápido para conocer a ${petName}.`,
+  whatsappInstead: 'Escribir por WhatsApp',
+  privacy: (shelterName) =>
+    `Tus respuestas solo las ve el equipo de ${shelterName}. Nunca se publican.`,
+  signInPrompt:
+    'Para postular en línea necesitas una cuenta. Entra o crea una y vuelves directo a este formulario.',
+  signInButton: 'Entrar o crear cuenta',
+  notAccepting: (petName) =>
+    `${petName} no está recibiendo solicitudes en línea en este momento. Si quieres saber más, escríbenos por WhatsApp.`,
+  alreadyApplied: 'Ya enviaste una solicitud para este animalito.',
+  goToAccount: 'Ver mis solicitudes',
+  requiredMark: 'obligatoria',
+  optionalMark: 'opcional',
+  choosePlaceholder: 'Elige…',
+  fixErrors: 'Revisa las preguntas marcadas antes de enviar.',
+  submit: 'Enviar solicitud',
+  submitting: 'Enviando…',
+  submitFailed:
+    'No pudimos enviar la solicitud. Revisa tu conexión e intenta de nuevo: tus respuestas siguen aquí.',
+  submitRefused:
+    'No pudimos guardar la solicitud. Puede que este animalito ya no esté disponible o que ya hayas postulado. Revisa «Mi cuenta».',
+  confirmationTitle: 'Recibimos tu solicitud',
+  confirmationSteps: (petName, shelterName) => [
+    `El equipo de ${shelterName} revisa cada solicitud a mano. Puede tomar unos días.`,
+    'Nadie te va a responder por esta página ni por correo. Si quieren conversar contigo, te escriben por WhatsApp al número que dejaste.',
+    `Enviar la solicitud no reserva a ${petName}. Si tienes apuro o dudas, escríbeles por WhatsApp.`,
+    'Puedes ver en qué estado está tu solicitud en «Mi cuenta».',
+  ],
+  backToPet: (petName) => `← Volver a ${petName}`,
+
+  mine: 'Mis solicitudes de adopción',
+  unknownPet: 'Animalito sin ficha pública',
+  withdraw: 'Retirar solicitud',
+  withdrawQuestion:
+    'Si la retiras, no vas a poder volver a postular en línea para este animalito. ¿La retiras?',
+  withdrawConfirm: 'Sí, retirarla',
+  keep: 'No, mantenerla',
+  withdrawFailed: 'No pudimos retirar la solicitud. Revisa tu conexión e intenta de nuevo.',
+  loadFailed: 'No pudimos cargar tus solicitudes. Revisa tu conexión e intenta de nuevo.',
+
+  queueLink: 'Solicitudes',
+  queueTitle: 'Solicitudes de adopción',
+  queueIntro:
+    'Agrupadas por animalito, la más antigua primero. Nada de lo que hagas aquí le envía un mensaje a nadie: a cada persona avísale tú por WhatsApp.',
+  formStateNote(enabled, questionsAreDraft) {
+    if (questionsAreDraft) {
+      return 'Las preguntas del formulario todavía son un BORRADOR que no escribió el refugio. El formulario público está apagado hasta que se reemplacen por las preguntas reales.';
+    }
+    return enabled ? null : 'El formulario público está apagado: nadie puede postular en línea.';
+  },
+  filterLabel: 'Mostrar',
+  filterOpen: 'Abiertas',
+  filterAll: 'Todas',
+  emptyQueue: 'No hay solicitudes con este filtro.',
+  submittedOn: (date) => `Enviada el ${date}`,
+  emailUnverifiedTag: 'correo sin verificar',
+  backToQueue: '← Solicitudes',
+  internalRecord: 'Ficha interna',
+  applicantTitle: 'Quién postula',
+  answersTitle: 'Respuestas',
+  notAnswered: 'Sin responder',
+  retiredQuestion: (id) => `Pregunta que ya no está en el formulario (${id})`,
+  notesTitle: 'Notas internas',
+  notesHint: 'Solo las ve el equipo del refugio. Quien postuló nunca las ve.',
+  saveNotes: 'Guardar notas',
+  notesSaved: 'Notas guardadas.',
+  notesFailed: 'No pudimos guardar las notas. Revisa tu conexión e intenta de nuevo.',
+  actionsTitle: 'Qué hacer con esta solicitud',
+  noActions: 'Esta solicitud ya está cerrada.',
+  approveTitle: 'Aprobar la adopción',
+  approveExplain: (petName, applicant) =>
+    `Al aprobar, ${petName} pasa a «Adoptado» y ${applicant} queda como responsable: va a poder ver su microchip, su historial de custodia y la ubicación que tenga registrada. Hazlo el día que ${petName} se va con su familia. No se envía ningún mensaje automático.`,
+  approveConfirm: 'Sí, aprobar',
+  cancel: 'Cancelar',
+  approvedDone: (petName) => `Adopción registrada. El estado de ${petName} ahora es «Adoptado».`,
+  actionFailed: 'No pudimos guardar el cambio. Revisa tu conexión e intenta de nuevo.',
+  actionRefused:
+    'Firestore rechazó el cambio. Puede que alguien más la haya cambiado mientras tanto: recarga la página.',
+  otherOpenTitle: 'Otras solicitudes abiertas para este animalito',
+  applicationMissing: 'Esa solicitud no existe.',
+};
 
 /**
  * How much breed copy an adoption-wall card can carry. MEASURED, not guessed.
@@ -509,4 +680,52 @@ export const es: Messages = {
     const whole = Math.floor(days);
     return `${whole} ${whole === 1 ? 'día' : 'días'} juntos`;
   },
+
+  yesNo: (value) => (value ? 'Sí' : 'No'),
+
+  applicationStatusLabel: (status) => APPLICATION_STATUS[status],
+
+  applicantStatusLabel: (status) => APPLICANT_STATUS[status],
+
+  applicantStatusExplanation: (status) => APPLICANT_STATUS_EXPLANATION[status],
+
+  applicationActionLabel(from, to) {
+    switch (to) {
+      case 'reviewing':
+        return from === 'rejected' ? 'Volver a revisar' : 'Pasar a revisión';
+      case 'interview':
+        return 'Marcar para entrevista';
+      case 'approved':
+        return 'Aprobar adopción…';
+      case 'rejected':
+        return 'Rechazar';
+      case 'withdrawn':
+        // The admin is RECORDING the applicant's decision, told to them on
+        // WhatsApp — not making it.
+        return 'Registrar que la retiró';
+      case 'submitted':
+        return 'Marcar como nueva';
+    }
+  },
+
+  applicationSectionLabel: (section) => APPLICATION_SECTION[section],
+
+  applicationAnswerError: (error) => APPLICATION_ANSWER_ERROR[error],
+
+  approvalBlocker: (blocker) => APPROVAL_BLOCKER[blocker],
+
+  approvalWarning(warning, { otherOpenCount }) {
+    switch (warning) {
+      case 'other-open-applications':
+        return otherOpenCount === 1
+          ? 'Hay otra solicitud abierta para este animalito. Aprobar esta no la cambia: avísale a esa persona y recházala tú.'
+          : `Hay ${otherOpenCount} solicitudes abiertas más para este animalito. Aprobar esta no las cambia: avísales y recházalas tú.`;
+      case 'email-unverified':
+        return 'La persona no verificó su correo. Confirma sus datos por WhatsApp antes de aprobar.';
+      case 'pet-not-on-wall':
+        return 'Este animalito ya no figura como disponible en el muro. Si así lo decidieron, puedes aprobar igual.';
+    }
+  },
+
+  applications: APPLICATION_COPY,
 };
