@@ -4,11 +4,10 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '@/components/AuthProvider';
 import { t } from '@/i18n';
-import { parseDateInput, todayInputValue } from '@/lib/date-input';
+import { dayToInstant, parseDateInput, todayInputValue } from '@/lib/date-input';
 import { readStock, recordStockMovement } from '@/lib/food-admin';
 import {
   FOOD_CATEGORIES,
-  dayToInstant,
   stockLines,
   validateStockMovement,
   type ManualMovementKind,

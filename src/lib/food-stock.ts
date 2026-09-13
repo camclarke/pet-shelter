@@ -341,31 +341,6 @@ export function cookOutcomeValues(draft: CookOutcomeDraft): {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dates from a date field
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * The instant to store for a day picked in a date field.
- *
- * ⚠️ `parseDateInput` returns LOCAL MIDDAY, which is right for protecting the
- * calendar day across timezones and wrong for "today" before noon: 12:00 is
- * then hours in the future, so every "not in the future" check — ours at five
- * minutes, the rules' at ten — would refuse a donation recorded at 9 a.m.
- * So today becomes `now`, and any other day keeps its midday. A day that is
- * genuinely in the future keeps its midday too, and is refused as it should
- * be.
- */
-export function dayToInstant(dayMiddayMs: number, now: number = Date.now()): number {
-  const day = new Date(dayMiddayMs);
-  const today = new Date(now);
-  const sameDay =
-    day.getFullYear() === today.getFullYear() &&
-    day.getMonth() === today.getMonth() &&
-    day.getDate() === today.getDate();
-  return sameDay ? now : dayMiddayMs;
-}
-
 /**
  * @param stock  grams per category from a SUCCESSFUL read, or null when stock
  *               could not be read — in which case no stock warning is raised,
