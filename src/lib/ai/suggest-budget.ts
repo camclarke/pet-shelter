@@ -449,16 +449,33 @@ export function shouldFallBackToWeakerModel(err: unknown): boolean {
 export async function walkModelLadder<T>(
   ladder: readonly string[],
   call: (model: string, deadline: number) => Promise<T>,
-  deps: { now?: () => number; warn?: (message: string) => void; describe?: (err: unknown) => string } = {}
+  deps: {
+    now?: () => number;
+    warn?: (message: string) => void;
+    describe?: (err: unknown) => string;
+    /** Log prefix. Defaults to intake's, so its log lines are unchanged. */
+    label?: string;
+    /**
+     * An EARLIER deadline, when the request's clock started before this walk
+     * did. Card extraction passes the moment the request arrived, because
+     * Firebase Hosting's 60s runs from there and the route does a pet lookup
+     * and a Storage read first. It can only shorten the budget, never extend
+     * it: a later value is ignored, because past SUGGEST_TOTAL_BUDGET_MS the
+     * answer cannot be delivered at all.
+     */
+    deadline?: number;
+  } = {}
 ): Promise<T> {
   const now = deps.now ?? Date.now;
   const warn = deps.warn ?? console.warn;
   const describe = deps.describe ?? (() => 'failed');
+  const label = deps.label ?? '[intake-suggest]';
 
   if (ladder.length === 0) throw new Error('walkModelLadder: ladder must not be empty');
 
   // ONE deadline, created once, handed to every tier unchanged.
-  const deadline = now() + SUGGEST_TOTAL_BUDGET_MS;
+  const ceiling = now() + SUGGEST_TOTAL_BUDGET_MS;
+  const deadline = deps.deadline === undefined ? ceiling : Math.min(deps.deadline, ceiling);
 
   let lastErr: unknown;
   for (let tier = 0; tier < ladder.length; tier++) {
@@ -476,12 +493,12 @@ export async function walkModelLadder<T>(
       const left = deadline - now();
       if (left < SUGGEST_MIN_RETRY_MS) {
         warn(
-          `[intake-suggest] only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms; not trying ${model} (tier ${tier + 1}/${ladder.length})`
+          `${label} only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms; not trying ${model} (tier ${tier + 1}/${ladder.length})`
         );
         break;
       }
       warn(
-        `[intake-suggest] ${ladder[tier - 1]} ${describe(lastErr)}; falling back to ${model} (tier ${tier + 1}/${ladder.length}) with ${left}ms left`
+        `${label} ${ladder[tier - 1]} ${describe(lastErr)}; falling back to ${model} (tier ${tier + 1}/${ladder.length}) with ${left}ms left`
       );
     }
 
@@ -498,5 +515,94 @@ export async function walkModelLadder<T>(
   // Every tier refused, or the budget ran out part-way down. The LAST error is
   // thrown, so the caller's message describes the tier that actually gave up
   // rather than the first one that did.
+  throw lastErr;
+}
+
+/** For a log line that has to say what went wrong without a stack. */
+export function describeFailure(err: unknown): string {
+  if (isTimeoutFailure(err)) return 'timed out';
+  if (isOverloadedFailure(err)) return 'reported overload';
+  return 'failed';
+}
+
+export interface RetryDeps {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  warn?: (message: string) => void;
+  describe?: (err: unknown) => string;
+  /** Log prefix. Defaults to intake's, so its log lines are unchanged. */
+  label?: string;
+}
+
+/**
+ * Retry what a second attempt on the SAME model can actually fix, within BOTH
+ * budgets — the per-attempt one and the total.
+ *
+ * ⚠️ MOVED here from `intake-suggest.ts` (where it was `withRetry`) on
+ * 2026-09-12, unchanged in behaviour, for two reasons. Vaccination-card
+ * extraction needs the same policy, and a second copy of a retry policy is how
+ * the 2026-08-30 "retry that could never run" bug gets reintroduced in the copy
+ * nobody remembered to fix. And it was untestable inside a `server-only`
+ * module full of network calls; here it takes an injected clock.
+ *
+ * Two failures qualify, for opposite reasons. A HANG gets a retry because it
+ * gets a fresh connection. An OVERLOAD gets one because the provider itself
+ * said the condition is temporary, after a backoff. Everything else is handed
+ * straight back: a 400 for a malformed image fails identically twice, and a
+ * 429 has a better remedy than a retry — the next tier down.
+ *
+ * ⚠️ The deadline is passed IN, never created here. A caller may run this once
+ * per model tier, and a self-made deadline per tier lets N tiers run to N x the
+ * budget — past the 60s edge the budget exists to respect. That is the
+ * 2026-09-02 defect.
+ *
+ * ⚠️ The per-attempt budget is floored at 0. A deadline already past would
+ * otherwise hand `AbortSignal.timeout` a negative number, which throws a
+ * TypeError — reported as a generic failure rather than as the timeout it is.
+ */
+export async function retryWithinDeadline<T>(
+  deadline: number,
+  perAttemptMs: number,
+  call: (budgetMs: number) => Promise<T>,
+  deps: RetryDeps = {}
+): Promise<T> {
+  const now = deps.now ?? Date.now;
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const warn = deps.warn ?? console.warn;
+  const describe = deps.describe ?? describeFailure;
+  const label = deps.label ?? '[intake-suggest]';
+
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= SUGGEST_MAX_ATTEMPTS; attempt++) {
+    const started = now();
+    try {
+      return await call(Math.max(0, Math.min(perAttemptMs, deadline - started)));
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableFailure(err) || attempt === SUGGEST_MAX_ATTEMPTS) throw err;
+
+      const elapsed = now() - started;
+      const backoffMs = retryBackoffMsFor(err);
+      const left = deadline - now() - backoffMs;
+      if (left < SUGGEST_MIN_RETRY_MS) {
+        // Say so rather than retrying into a wall. The admin gets the timeout
+        // message now instead of after another attempt that cannot be
+        // delivered, and a free-tier request is not spent on an answer the
+        // edge will discard.
+        warn(
+          `${label} attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describe(err)} after ${elapsed}ms; only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms, not retrying`
+        );
+        throw err;
+      }
+      // Logged per attempt, so a failure still says which attempt died, how
+      // long it took, and WHY it is being retried.
+      warn(
+        `${label} attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describe(err)} after ${elapsed}ms; retrying in ${backoffMs}ms with ${left}ms left`
+      );
+      if (backoffMs > 0) await sleep(backoffMs);
+    }
+  }
   throw lastErr;
 }

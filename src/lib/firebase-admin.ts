@@ -14,6 +14,23 @@
 import { getApps, initializeApp, cert, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getStorage, type Storage } from 'firebase-admin/storage';
+
+/**
+ * Admin Storage, for the one server path that reads an object a browser
+ * uploaded: `/api/medical/cards/extract` reading a vaccination card.
+ *
+ * ⚠️ Bypasses `storage.rules` exactly as `getAdminDb()` bypasses
+ * `firestore.rules`. It can read ANY object in the bucket, including the
+ * intimate intake photos under `pets/{id}/private/`. The route that uses it
+ * verifies the admin claim itself and accepts only a path of the exact shape
+ * `isCardPhotoPathFor()` allows — that check, not the rules, is what stops it
+ * becoming a way to send an arbitrary object to a third-party model.
+ */
+export function getAdminStorage(): Storage {
+  init();
+  return getStorage();
+}
 
 let app: App;
 

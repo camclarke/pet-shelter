@@ -14,14 +14,9 @@ import type { PetPhotoSlot } from '../types';
 import { recordAiUsage, type AiProcess } from './metered';
 import type { RawPhotoSuggestion } from '../intake-suggestion';
 import {
-  SUGGEST_MAX_ATTEMPTS,
-  SUGGEST_MIN_RETRY_MS,
-  SUGGEST_TOTAL_BUDGET_MS,
   attemptTimeoutMsFor,
-  isOverloadedFailure,
-  isRetryableFailure,
-  isTimeoutFailure,
-  retryBackoffMsFor,
+  describeFailure,
+  retryWithinDeadline,
   walkModelLadder,
 } from './suggest-budget';
 
@@ -217,11 +212,6 @@ export interface SuggestOptions {
  * Ask the model what it sees. Throws on failure — the caller decides what a
  * failure means, and for intake it means "carry on without suggestions".
  */
-/** Pause between attempts. Only ever called with a positive, budgeted delay. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Retry what a second attempt can actually fix, within BOTH budgets — the
  * per-attempt one and the total.
@@ -247,39 +237,11 @@ async function withRetry<T>(
   perAttemptMs: number,
   call: (budgetMs: number) => Promise<T>
 ): Promise<T> {
-  let lastErr: unknown;
-
-  for (let attempt = 1; attempt <= SUGGEST_MAX_ATTEMPTS; attempt++) {
-    const started = Date.now();
-    try {
-      return await call(Math.min(perAttemptMs, deadline - started));
-    } catch (err) {
-      lastErr = err;
-      if (!isRetryableFailure(err) || attempt === SUGGEST_MAX_ATTEMPTS) throw err;
-
-      const elapsed = Date.now() - started;
-      const backoffMs = retryBackoffMsFor(err);
-      const left = deadline - Date.now() - backoffMs;
-      if (left < SUGGEST_MIN_RETRY_MS) {
-        // Say so rather than retrying into a wall. The admin gets the timeout
-        // message now instead of after another attempt that cannot be
-        // delivered, and a free-tier request — 20 a day on Flash — is not
-        // spent on an answer the edge will discard.
-        console.warn(
-          `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describeFailure(err)} after ${elapsed}ms; only ${left}ms left of ${SUGGEST_TOTAL_BUDGET_MS}ms, not retrying`
-        );
-        throw err;
-      }
-      // Logged per attempt, so a future failure still says which attempt died,
-      // how long it took, and WHY it is being retried — the thing that was
-      // missing when this was one opaque 25s abort.
-      console.warn(
-        `[intake-suggest] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describeFailure(err)} after ${elapsed}ms; retrying in ${backoffMs}ms with ${left}ms left`
-      );
-      if (backoffMs > 0) await sleep(backoffMs);
-    }
-  }
-  throw lastErr;
+  // ⚠️ The policy itself now lives in suggest-budget.ts as
+  // retryWithinDeadline, moved there unchanged on 2026-09-12 so that card
+  // extraction runs the SAME policy rather than a copy, and so it is tested
+  // with an injected clock. The log lines keep the `[intake-suggest]` prefix.
+  return retryWithinDeadline(deadline, perAttemptMs, call, { label: '[intake-suggest]' });
 }
 
 /**
@@ -309,13 +271,6 @@ export async function suggestFromPhoto(
     (model, deadline) => extractWith(model, photos, deadline, proc),
     { describe: describeFailure }
   );
-}
-
-/** For a log line that has to say what went wrong without a stack. */
-function describeFailure(err: unknown): string {
-  if (isTimeoutFailure(err)) return 'timed out';
-  if (isOverloadedFailure(err)) return 'reported overload';
-  return 'failed';
 }
 
 async function extractWith(
