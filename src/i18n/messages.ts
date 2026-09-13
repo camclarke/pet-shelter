@@ -65,6 +65,12 @@ export interface ApplicationCopy {
   privacy(shelterName: string): string;
   readonly signInPrompt: string;
   readonly signInButton: string;
+  /** Shown on /account when sign-in will return the visitor to a form. */
+  readonly returnNotice: string;
+  /** On /account, signed in, when a form is waiting to be returned to. */
+  readonly continueApplication: string;
+  readonly loading: string;
+  readonly retry: string;
   notAccepting(petName: string): string;
   readonly alreadyApplied: string;
   readonly goToAccount: string;
@@ -124,6 +130,19 @@ export interface ApplicationCopy {
   readonly actionRefused: string;
   readonly otherOpenTitle: string;
   readonly applicationMissing: string;
+  readonly backToPanel: string;
+  readonly statusTitle: string;
+  decidedByOn(who: string, date: string): string;
+  withdrawnOn(date: string): string;
+  readonly emailLabel: string;
+  readonly phoneLabel: string;
+  /** Asked before an ADMIN records a withdrawal, because it cannot be undone. */
+  readonly confirmRecordWithdrawal: string;
+  readonly adminLoadFailed: string;
+  readonly permissionDenied: string;
+  readonly blockersTitle: string;
+  readonly warningsTitle: string;
+  readonly checking: string;
 }
 
 export interface Messages {
