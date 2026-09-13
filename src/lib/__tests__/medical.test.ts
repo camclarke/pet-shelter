@@ -223,13 +223,19 @@ test('byMostRecent does not mutate its input', () => {
 
 test('nextDue picks the soonest and ignores records with no due date', () => {
   const soonest = nextDue([
-    { nextDueAt: null },
-    { nextDueAt: NOW + 300 * DAY },
-    { nextDueAt: NOW + 30 * DAY },
+    { nextDueAt: null, confirmedBy: 'vet' },
+    { nextDueAt: NOW + 300 * DAY, confirmedBy: 'vet' },
+    { nextDueAt: NOW + 30 * DAY, confirmedBy: 'vet' },
   ]);
   assert.equal(soonest?.nextDueAt, NOW + 30 * DAY);
 });
 
 test('nextDue returns null when nothing is scheduled', () => {
-  assert.equal(nextDue([{ nextDueAt: null }, { nextDueAt: null }]), null);
+  assert.equal(
+    nextDue([
+      { nextDueAt: null, confirmedBy: 'vet' },
+      { nextDueAt: null, confirmedBy: 'vet' },
+    ]),
+    null
+  );
 });

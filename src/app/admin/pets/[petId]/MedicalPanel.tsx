@@ -6,11 +6,10 @@ import { useAuth } from '@/components/AuthProvider';
 import { t } from '@/i18n';
 import { formatDate, parseDateInput, toDateInput, todayInputValue } from '@/lib/date-input';
 import {
-  isOverdue,
   medicalDraftDefaults,
   medicalWarnings,
-  protectionLapsed,
   rabiesProtectionStart,
+  recordSignals,
   validateMedicalDraft,
   type MedicalRecordDraft,
 } from '@/lib/medical';
@@ -181,24 +180,26 @@ export default function MedicalPanel({
             <li key={r.id} className="admin-list__item admin-list__item--record">
               <div>
                 <strong>
-                  {t.medicalKindLabel(r.kind)} · {r.name}
+                  {r.kind ? t.medicalKindLabel(r.kind) : '¿Tipo?'} · {r.name || '¿Nombre?'}
                 </strong>
                 <span className="t-data">
-                  {formatDate(r.performedAt)}
+                  {r.performedAt !== null ? formatDate(r.performedAt) : 'Fecha sin leer'}
                   {r.veterinarian ? ` · ${r.veterinarian}` : ''}
                   {r.clinic ? ` · ${r.clinic}` : ''}
                 </span>
 
+                {/* ⚠️ Both flags come from recordSignals(), which applies the
+                    review gate: an unconfirmed record never reads "VENCIDA". */}
                 {r.nextDueAt !== null && (
                   <span className="t-data">
                     Próxima: {formatDate(r.nextDueAt)}
-                    {isOverdue(r.nextDueAt) ? ' · VENCIDA' : ''}
+                    {recordSignals(r).overdue ? ' · VENCIDA' : ''}
                   </span>
                 )}
 
                 {/* Protection lapsing is a DIFFERENT question from a booster
                     being due, so it gets its own line rather than sharing one. */}
-                {r.validUntil !== null && protectionLapsed(r.validUntil) && (
+                {r.validUntil !== null && recordSignals(r).lapsed && (
                   <span className="t-data">
                     La protección declarada venció el {formatDate(r.validUntil)}
                   </span>

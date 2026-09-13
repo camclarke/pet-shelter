@@ -562,12 +562,67 @@ export type MedicalRecordKind =
    */
   | 'serology';
 
+/**
+ * What a model read a medical record FROM. A stored value, so English, and
+ * cheap to extend only while `medical` holds no documents.
+ *
+ * `dictation` is declared now, before step 11 exists, so the review gate and
+ * its UI label a dictated record correctly from its first write rather than
+ * reading it as a card.
+ */
+export type MedicalExtractionSource = 'vaccination-card' | 'dictation';
+
+/**
+ * Why a value a model reported was deliberately NOT copied into its field.
+ *
+ * `disputed` is for step 11: two extractors that disagree on a dose null the
+ * field (see `dictation.ts`), and the reviewer needs to be told that is why it
+ * is empty.
+ */
+export type WithheldReason =
+  | 'low-confidence'
+  | 'unreadable-date'
+  | 'implausible-date'
+  | 'too-long'
+  | 'disputed';
+
+/**
+ * What a model saw for ONE field, kept beside the value so a reviewer can
+ * compare "I read «12/03/25» here" against the source. Plan §4.3: the source is
+ * an image or a recording, so no string match can check the value — a human
+ * looking at the literal text next to the original is the check.
+ */
+export interface FieldEvidence {
+  /** The literal text read, in the source's own wording. Null when absent or illegible. */
+  snippet: string | null;
+  /**
+   * The model's own confidence, 0..1. UNCALIBRATED and advisory: it decides
+   * what is PREFILLED and what is highlighted, never what COUNTS. Only a
+   * human's confirmation does that — see `review-gate.ts`.
+   */
+  confidence: number;
+  /** Set when the value was deliberately left empty; null when it was copied. */
+  withheld: WithheldReason | null;
+}
+
 export interface MedicalRecord {
   id: string;
-  kind: MedicalRecordKind;
-  /** e.g. "Rabia", "Quintuple", "Ivermectina". */
+  /**
+   * ⚠️ Null ONLY on an unconfirmed, model-extracted candidate whose kind could
+   * not be read with confidence. Confirming requires `validateMedicalDraft` to
+   * pass, which requires a kind, so a confirmed record always carries one.
+   */
+  kind: MedicalRecordKind | null;
+  /** e.g. "Rabia", "Quintuple", "Ivermectina". Empty on a candidate whose name was withheld. */
   name: string;
-  performedAt: Timestamp;
+  /**
+   * ⚠️ Null ONLY on an unconfirmed candidate whose date could not be read with
+   * confidence. Plan §4.3: never invent a date — a hallucinated vaccination
+   * date is a health decision made on fabricated data, and for rabies it
+   * carries legal consequences. The review gate keeps such a record out of
+   * everything that computes, and confirming requires a date.
+   */
+  performedAt: Timestamp | null;
   /** When the next dose or check is due, where applicable. */
   nextDueAt: Timestamp | null;
 
@@ -608,14 +663,33 @@ export interface MedicalRecord {
   codes: string[];
 
   /**
-   * Provenance. Stage 2 parses vaccination cards with an LLM; entries it
-   * produces stay flagged until a human confirms them. A misread vaccination
-   * date is a health decision made on bad data, and rabies timing in
-   * particular has legal consequences under EU 576/2013.
+   * Provenance. Vaccination cards (step 9) and dictation (step 11) produce
+   * records with an LLM; every one stays unconfirmed until a human confirms it.
+   * A misread vaccination date is a health decision made on bad data, and
+   * rabies timing in particular has legal consequences under Reg. (EU)
+   * 2026/131, which superseded 576/2013 on 22 April 2026.
    */
   source: 'manual' | 'llm-extracted';
+  /**
+   * ⚠️ THE GATE. A record counts for computation — due dates, rabies validity,
+   * any "vacunado" signal, anything public — only when this is a non-empty
+   * string. See `isConfirmed()` in `review-gate.ts`, which deliberately does not
+   * look at `source`.
+   *
+   * A manual record is stamped with its author at creation. A model-extracted
+   * one is written with null and stays null until a person confirms it.
+   */
   confirmedBy: string | null;
-  /** Scan of the physical card this was extracted from, if any. */
+  /** When `confirmedBy` was stamped. Null while unconfirmed. */
+  confirmedAt: Timestamp | null;
+  /**
+   * The document a record was extracted from, as a Storage PATH — never a URL.
+   *
+   * ⚠️ A vaccination card lives at `medical/{petId}/card-{uuid}.jpg`, which
+   * `storage.rules` serves to admins only: a card very often carries the
+   * owner's name, address and phone. It is never given a download URL, because
+   * `getDownloadURL()` mints a token that bypasses the rules outright.
+   */
   sourceDocument: string | null;
 
   /**
@@ -627,6 +701,17 @@ export interface MedicalRecord {
    */
   extractedByModel: string | null;
   extractedAt: Timestamp | null;
+  /** What the record was read from. Null for a record a person typed. */
+  extractedFrom: MedicalExtractionSource | null;
+  /**
+   * What the model read for each field, keyed by field name (`name`,
+   * `performedAt`, `batch`…). Null for a record a person typed.
+   *
+   * Kept AFTER confirmation, deliberately: it is the only trace of what the
+   * source said beside what a person confirmed, and a later accuracy problem is
+   * only scopeable if both survive.
+   */
+  extractionEvidence: Record<string, FieldEvidence> | null;
 
   recordedBy: string;
 }

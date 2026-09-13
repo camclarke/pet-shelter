@@ -23,14 +23,16 @@ import {
   getDocs,
   orderBy,
   query,
+  serverTimestamp,
   updateDoc,
   type FieldValue,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 
 import { getFirebase } from './firebase-client';
-import type { MedicalRecord } from './types';
-import type { MedicalRecordDraft } from './medical';
+import type { FieldEvidence, MedicalExtractionSource, MedicalRecord } from './types';
+import { medicalEditFields, type MedicalEditFields, type MedicalRecordDraft } from './medical';
+import { readEvidence, reviewerLabel } from './review-gate';
 
 /**
  * The exact shape written to `pets/{petId}/medical/{recordId}`.
@@ -39,15 +41,29 @@ import type { MedicalRecordDraft } from './medical';
  * literal means a field added to `MedicalRecord` produces a green typecheck and
  * a document without it. That hole sat in the pet writer for three weeks. Do
  * not replace this with an inline literal.
+ *
+ * The two stamps are `FieldValue` sentinels going in and Timestamps coming out,
+ * which is why this cannot simply be `MedicalRecord`.
  */
-type MedicalRecordWrite = Omit<MedicalRecord, 'id'>;
+type MedicalRecordWrite = Omit<MedicalRecord, 'id' | 'confirmedAt' | 'extractedAt'> & {
+  confirmedAt: FieldValue | null;
+  extractedAt: FieldValue | null;
+};
+
+/** An edit: the editable fields plus the confirmation stamp, and nothing else. */
+type MedicalEditWrite = Pick<
+  MedicalRecordWrite,
+  keyof MedicalEditFields | 'confirmedBy' | 'confirmedAt'
+>;
 
 /** What a caller gets back — epoch ms, so the pure layer needs no Timestamp. */
 export interface MedicalRecordView {
   id: string;
+  /** Null only on an unconfirmed candidate. */
   kind: MedicalRecord['kind'];
   name: string;
-  performedAt: number;
+  /** Null only on an unconfirmed candidate whose date was not read. */
+  performedAt: number | null;
   nextDueAt: number | null;
   validFrom: number | null;
   validUntil: number | null;
@@ -58,7 +74,11 @@ export interface MedicalRecordView {
   notes: string | null;
   source: MedicalRecord['source'];
   confirmedBy: string | null;
+  confirmedAt: number | null;
+  sourceDocument: string | null;
   extractedByModel: string | null;
+  extractedFrom: MedicalExtractionSource | null;
+  extractionEvidence: Record<string, FieldEvidence> | null;
   recordedBy: string;
 }
 
@@ -67,17 +87,20 @@ function toMillis(value: unknown): number | null {
   return null;
 }
 
-function toDraftTimestamp(ms: number | null): Timestamp | null {
+function toTimestamp(ms: number | null): Timestamp | null {
   return ms === null ? null : Timestamp.fromMillis(ms);
 }
+
+const EXTRACTION_SOURCES: readonly MedicalExtractionSource[] = ['vaccination-card', 'dictation'];
 
 /**
  * Every medical record for one pet, most recent first.
  *
- * Ordered by `performedAt` descending, which the deployed
- * `medical(kind, performedAt desc)` index supports. A record missing
- * `performedAt` would be dropped from this query silently — which is why the
- * writer makes it non-nullable rather than optional.
+ * Ordered by `performedAt` descending, a single-field ordering Firestore
+ * indexes automatically. A document MISSING `performedAt` would be dropped from
+ * this query silently, which is why every writer sets the field — to a
+ * Timestamp, or to null on a candidate whose date was not read. A null is a
+ * value, so it stays in the results, sorted last.
  */
 export async function listMedicalRecords(petId: string): Promise<MedicalRecordView[]> {
   const { db } = getFirebase();
@@ -89,11 +112,11 @@ export async function listMedicalRecords(petId: string): Promise<MedicalRecordVi
     const data = d.data();
     return {
       id: d.id,
-      kind: data.kind,
+      kind: data.kind ?? null,
       name: data.name ?? '',
-      // A record without this is unorderable and unreadable; 0 makes the gap
-      // visible rather than crashing the panel.
-      performedAt: toMillis(data.performedAt) ?? 0,
+      // Null on a candidate whose date was not read: the panel says so rather
+      // than rendering the epoch.
+      performedAt: toMillis(data.performedAt),
       nextDueAt: toMillis(data.nextDueAt),
       validFrom: toMillis(data.validFrom),
       validUntil: toMillis(data.validUntil),
@@ -103,45 +126,50 @@ export async function listMedicalRecords(petId: string): Promise<MedicalRecordVi
       manufacturer: data.manufacturer ?? null,
       notes: data.notes ?? null,
       source: data.source ?? 'manual',
-      confirmedBy: data.confirmedBy ?? null,
+      // ⚠️ Read as-is and judged by isConfirmed(), never coerced here. A
+      // document with no confirmer must reach the gate as "no confirmer".
+      confirmedBy: typeof data.confirmedBy === 'string' ? data.confirmedBy : null,
+      confirmedAt: toMillis(data.confirmedAt),
+      sourceDocument: typeof data.sourceDocument === 'string' ? data.sourceDocument : null,
       extractedByModel: data.extractedByModel ?? null,
+      extractedFrom: EXTRACTION_SOURCES.includes(data.extractedFrom) ? data.extractedFrom : null,
+      extractionEvidence: readEvidence(data.extractionEvidence),
       recordedBy: data.recordedBy ?? '',
     };
   });
 }
 
-function buildWrite(draft: MedicalRecordDraft, user: User): MedicalRecordWrite {
-  if (draft.kind === null || draft.performedAt === null) {
-    // Callers validate first; this is the type-level backstop.
-    throw new Error('medical: draft is incomplete');
-  }
-
+/** Epoch ms back to Timestamps, for the date fields an edit writes. */
+function editWrite(fields: MedicalEditFields) {
   return {
-    kind: draft.kind,
-    name: draft.name.trim(),
-    performedAt: Timestamp.fromMillis(draft.performedAt),
-    nextDueAt: toDraftTimestamp(draft.nextDueAt),
-    validFrom: toDraftTimestamp(draft.validFrom),
-    validUntil: toDraftTimestamp(draft.validUntil),
-    // ⚠️ Null here is NOT an incomplete record. Bolivia's free rabies campaign
-    // produces real vaccinations with no named vet and no lot number.
-    veterinarian: draft.veterinarian?.trim() || null,
-    clinic: draft.clinic?.trim() || null,
-    batch: draft.batch?.trim() || null,
-    manufacturer: draft.manufacturer?.trim() || null,
-    notes: draft.notes?.trim() || null,
+    ...fields,
+    performedAt: Timestamp.fromMillis(fields.performedAt),
+    nextDueAt: toTimestamp(fields.nextDueAt),
+    validFrom: toTimestamp(fields.validFrom),
+    validUntil: toTimestamp(fields.validUntil),
+  };
+}
+
+function buildCreate(draft: MedicalRecordDraft, user: User): MedicalRecordWrite {
+  const by = reviewerLabel(user);
+  return {
+    ...editWrite(medicalEditFields(draft)),
     // Reserved socket for a future VeNom / SNOMED VetSCT mapping. Deliberately
     // empty: neither terminology survives a volunteer transcribing a card, and
     // free text is backfillable.
     codes: [],
     source: 'manual',
-    // A human typed this, so it is confirmed at creation. An LLM-extracted
-    // record arrives with confirmedBy null until someone accepts it.
-    confirmedBy: user.email ?? user.uid,
+    // A human typed this, so it is confirmed at creation. A model-extracted
+    // record arrives with confirmedBy null until someone confirms it — see
+    // src/app/api/medical/cards/extract.
+    confirmedBy: by,
+    confirmedAt: serverTimestamp(),
     sourceDocument: null,
     extractedByModel: null,
     extractedAt: null,
-    recordedBy: user.email ?? user.uid,
+    extractedFrom: null,
+    extractionEvidence: null,
+    recordedBy: by,
   };
 }
 
@@ -151,17 +179,26 @@ export async function addMedicalRecord(
   user: User
 ): Promise<string> {
   const { db } = getFirebase();
-  const ref = await addDoc(collection(db, 'pets', petId, 'medical'), buildWrite(draft, user));
+  const ref = await addDoc(collection(db, 'pets', petId, 'medical'), buildCreate(draft, user));
   return ref.id;
 }
 
 /**
- * Edit an existing record.
+ * Edit a record — and, by editing it, vouch for it.
+ *
+ * This is also the EDIT-BEFORE-CONFIRM path for a model-extracted candidate:
+ * the person correcting what the model read is the one now vouching for it, so
+ * the save stamps them as the confirmer.
+ *
+ * ⚠️ Writes ONLY the editable fields plus the confirmation stamp, so an edit
+ * cannot relabel a record's provenance. Until 2026-09-12 this wrote the same
+ * object as a create — `source: 'manual'`, `sourceDocument: null`,
+ * `extractedByModel: null` — which would have turned a corrected card reading
+ * into "typed by hand" and discarded the card it came from.
  *
  * ⚠️ Deliberately does NOT touch `recordedBy`. Who first entered a medical
  * record is history, and overwriting it on every edit would erase the only
- * trace of who originally wrote it down. `confirmedBy` moves to the editor,
- * because they are the one now vouching for it.
+ * trace of who originally wrote it down.
  */
 export async function updateMedicalRecord(
   petId: string,
@@ -170,12 +207,40 @@ export async function updateMedicalRecord(
   user: User
 ): Promise<void> {
   const { db } = getFirebase();
-  const write = buildWrite(draft, user);
-  const { recordedBy: _ignored, ...rest } = write;
+  const write: MedicalEditWrite = {
+    ...editWrite(medicalEditFields(draft)),
+    confirmedBy: reviewerLabel(user),
+    confirmedAt: serverTimestamp(),
+  };
 
-  await updateDoc(doc(db, 'pets', petId, 'medical', recordId), {
-    ...rest,
-  } as Record<string, FieldValue | unknown>);
+  await updateDoc(
+    doc(db, 'pets', petId, 'medical', recordId),
+    write as Record<string, FieldValue | unknown>
+  );
+}
+
+/**
+ * Confirm a record exactly as it stands — the one-click path, plan §4.8.
+ *
+ * Stamps who and when, and writes nothing else: the values are the ones the
+ * person just read on screen. ⚠️ The CALLER checks `canConfirmAsIs()` against
+ * `validateMedicalDraft()` first; a candidate with no date or no kind has to go
+ * through the edit path instead, because a record without them is not a record.
+ */
+export async function confirmMedicalRecord(
+  petId: string,
+  recordId: string,
+  user: User
+): Promise<void> {
+  const { db } = getFirebase();
+  const stamp: Pick<MedicalRecordWrite, 'confirmedBy' | 'confirmedAt'> = {
+    confirmedBy: reviewerLabel(user),
+    confirmedAt: serverTimestamp(),
+  };
+  await updateDoc(
+    doc(db, 'pets', petId, 'medical', recordId),
+    stamp as Record<string, FieldValue | unknown>
+  );
 }
 
 /**
