@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { getAdminAuth } from '@/lib/firebase-admin';
+import { verifyAdminIdToken } from '@/lib/firebase-admin';
+import { requireAdmin } from '@/lib/require-admin';
 import { aiIsConfigured } from '@/lib/ai/google';
 import { parseDonationText } from '@/lib/ai/food-parse';
 import { isTimeoutFailure } from '@/lib/ai/suggest-budget';
@@ -37,19 +38,10 @@ function fail(error: string, status: number): NextResponse {
 
 export async function POST(request: Request): Promise<Response> {
   // ── 1. authenticate — BEFORE anything else, so an anonymous caller learns
-  //       nothing, not even whether the feature is configured ──────────────
-  const header = request.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!token) return fail('unauthenticated', 401);
-
-  let isAdmin = false;
-  try {
-    const decoded = await getAdminAuth().verifyIdToken(token, true);
-    isAdmin = decoded.admin === true;
-  } catch {
-    return fail('unauthenticated', 401);
-  }
-  if (!isAdmin) return fail('forbidden', 403);
+  //       nothing, not even whether the feature is configured.
+  //       `require-admin.ts` verifies with checkRevoked ────────────────────────
+  const auth = await requireAdmin(request, verifyAdminIdToken);
+  if (!auth.ok) return fail(auth.error, auth.status);
 
   // ── 2. configured ──────────────────────────────────────────────────────────
   if (!aiIsConfigured()) return fail('ai-not-configured', 503);
