@@ -32,7 +32,9 @@ import { GoogleAuth } from 'google-auth-library';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCLOUD_PROJECT ?? 'wawitas';
-const rules = readFileSync(join(REPO, 'firestore.rules'), 'utf8');
+// FOOD_RULES_FILE lets a deliberate-break probe hand in a copy of the rules with
+// one predicate removed, and confirm a case fails. Defaults to the real file.
+const rules = readFileSync(process.env.FOOD_RULES_FILE ?? join(REPO, 'firestore.rules'), 'utf8');
 
 const T = '2026-09-13T01:00:00Z';
 const T_PLUS_1H = '2026-09-13T02:00:00Z';
