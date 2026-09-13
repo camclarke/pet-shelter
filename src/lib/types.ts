@@ -562,6 +562,49 @@ export type MedicalRecordKind =
    */
   | 'serology';
 
+/**
+ * What a model read a medical record FROM. A stored value, so English, and
+ * cheap to extend only while `medical` holds no documents.
+ *
+ * `dictation` is declared now, before step 11 exists, so the review gate and
+ * its UI label a dictated record correctly from its first write rather than
+ * reading it as a card.
+ */
+export type MedicalExtractionSource = 'vaccination-card' | 'dictation';
+
+/**
+ * Why a value a model reported was deliberately NOT copied into its field.
+ *
+ * `disputed` is for step 11: two extractors that disagree on a dose null the
+ * field (see `dictation.ts`), and the reviewer needs to be told that is why it
+ * is empty.
+ */
+export type WithheldReason =
+  | 'low-confidence'
+  | 'unreadable-date'
+  | 'implausible-date'
+  | 'too-long'
+  | 'disputed';
+
+/**
+ * What a model saw for ONE field, kept beside the value so a reviewer can
+ * compare "I read «12/03/25» here" against the source. Plan §4.3: the source is
+ * an image or a recording, so no string match can check the value — a human
+ * looking at the literal text next to the original is the check.
+ */
+export interface FieldEvidence {
+  /** The literal text read, in the source's own wording. Null when absent or illegible. */
+  snippet: string | null;
+  /**
+   * The model's own confidence, 0..1. UNCALIBRATED and advisory: it decides
+   * what is PREFILLED and what is highlighted, never what COUNTS. Only a
+   * human's confirmation does that — see `review-gate.ts`.
+   */
+  confidence: number;
+  /** Set when the value was deliberately left empty; null when it was copied. */
+  withheld: WithheldReason | null;
+}
+
 export interface MedicalRecord {
   id: string;
   kind: MedicalRecordKind;
@@ -608,14 +651,36 @@ export interface MedicalRecord {
   codes: string[];
 
   /**
-   * Provenance. Stage 2 parses vaccination cards with an LLM; entries it
-   * produces stay flagged until a human confirms them. A misread vaccination
-   * date is a health decision made on bad data, and rabies timing in
-   * particular has legal consequences under EU 576/2013.
+   * Provenance. Vaccination cards (step 9) and dictation (step 11) produce
+   * records with an LLM; every one stays unconfirmed until a human confirms it.
+   * A misread vaccination date is a health decision made on bad data, and
+   * rabies timing in particular has legal consequences under Reg. (EU)
+   * 2026/131, which superseded 576/2013 on 22 April 2026.
    */
   source: 'manual' | 'llm-extracted';
+  /**
+   * ⚠️ THE GATE. A record counts for computation — due dates, rabies validity,
+   * any "vacunado" signal, anything public — only when this is a non-empty
+   * string. See `isConfirmed()` in `review-gate.ts`, which deliberately does not
+   * look at `source`.
+   *
+   * Every writer stamps it: a typed record with its author at creation, a
+   * model's reading with the person who confirmed it. A reading nobody has
+   * confirmed is NOT a `MedicalRecord` at all — it is a `MedicalCandidate` in
+   * the admin-only `medicalCandidates` (step-9 evaluation, 2026-09-13). The
+   * gate stays inside the computing functions as defence in depth.
+   */
   confirmedBy: string | null;
-  /** Scan of the physical card this was extracted from, if any. */
+  /** When `confirmedBy` was stamped. Null while unconfirmed. */
+  confirmedAt: Timestamp | null;
+  /**
+   * The document a record was extracted from, as a Storage PATH — never a URL.
+   *
+   * ⚠️ A vaccination card lives at `medical/{petId}/card-{uuid}.jpg`, which
+   * `storage.rules` serves to admins only: a card very often carries the
+   * owner's name, address and phone. It is never given a download URL, because
+   * `getDownloadURL()` mints a token that bypasses the rules outright.
+   */
   sourceDocument: string | null;
 
   /**
@@ -627,7 +692,61 @@ export interface MedicalRecord {
    */
   extractedByModel: string | null;
   extractedAt: Timestamp | null;
+  /** What the record was read from. Null for a record a person typed. */
+  extractedFrom: MedicalExtractionSource | null;
+  /**
+   * What the model read for each field, keyed by field name (`name`,
+   * `performedAt`, `batch`…). Null for a record a person typed.
+   *
+   * Kept AFTER confirmation, deliberately: it is the only trace of what the
+   * source said beside what a person confirmed, and a later accuracy problem is
+   * only scopeable if both survive.
+   */
+  extractionEvidence: Record<string, FieldEvidence> | null;
 
+  recordedBy: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pets/{petId}/medicalCandidates/{candidateId} — ADMIN ONLY, every verb
+//
+// What a model read — a vaccination card (step 9), a consult (step 11) — that
+// nobody has confirmed. A NEW TIER, so a NEW DOCUMENT: `medical` is readable by
+// any signed-in account, and an unchecked model guess does not belong at that
+// tier (step-9 evaluation, 2026-09-13). Confirming creates the `MedicalRecord`
+// and deletes this document in one transaction — see
+// `src/lib/medical-candidates.ts`.
+//
+// The id is deterministic, `{source file stem}-{sourceIndex}`, so a repeated or
+// concurrent extraction of the same source collides instead of duplicating.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface MedicalCandidate {
+  id: string;
+  /** Null when the model could not read it with confidence. */
+  kind: MedicalRecordKind | null;
+  /** Empty when the name was withheld. */
+  name: string;
+  /** Null when the date was not read. Never invented — plan §4.3. */
+  performedAt: Timestamp | null;
+  nextDueAt: Timestamp | null;
+  validFrom: Timestamp | null;
+  validUntil: Timestamp | null;
+  veterinarian: string | null;
+  clinic: string | null;
+  batch: string | null;
+  manufacturer: string | null;
+  notes: string | null;
+  /** The Storage PATH of what was read. Admin-only, never a URL. */
+  sourceDocument: string;
+  /** The stable model KEY, never the raw id. Plan §4.4. */
+  extractedByModel: string;
+  extractedAt: Timestamp;
+  extractedFrom: MedicalExtractionSource;
+  /** What the model read for each field. Copied onto the record on confirmation. */
+  extractionEvidence: Record<string, FieldEvidence>;
+  /** Position among what the source yielded; with the file stem, the document id. */
+  sourceIndex: number;
+  /** The admin who asked for the extraction. */
   recordedBy: string;
 }
 
@@ -705,6 +824,81 @@ export interface Adoption {
   ownerUid: string;
   adoptedAt: Timestamp;
   approvedBy: string;
+  /**
+   * The online application this adoption came from, or null when it was
+   * agreed some other way — which today is most adoptions, because WhatsApp is
+   * the primary path and stays so (plan §6). `firestore.rules` checks this
+   * against the application being approved in the same batch.
+   */
+  applicationId: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// adoptionApplications/{petId}__{applicantUid} — the APPLICANT and ADMINS read
+//
+// The step before `adoptions/{petId}`: someone asking to adopt, with the
+// shelter's screening answers attached. Plan §2.4 and §6.
+//
+// ⚠️ Secondary by design. The WhatsApp button on the dossier is the conversion
+// and stays in front of this; an account is never required to reach it.
+//
+// ⚠️ PRIVATE PERSON'S DATA. Housing, household and a phone number. No field
+// here is ever public, no answer is ever logged, and nothing about the
+// application is copied into another document on approval.
+//
+// The document id is DETERMINISTIC — `{petId}__{applicantUid}` — and that id is
+// the duplicate guard. Rules cannot run a query, so "is there already an open
+// application?" checked in the browser would be advisory and racy (two tabs,
+// two creates). A fixed id turns the second create into an UPDATE, which the
+// rules only let an applicant use to withdraw. See `applicationIdFor()`.
+// ─────────────────────────────────────────────────────────────────────────────
+export type ApplicationStatus =
+  | 'submitted' // sent by the applicant; nobody has looked yet
+  | 'reviewing' // someone on the team is reading it
+  | 'interview' // the team wants to talk — in person or by WhatsApp
+  | 'approved' // the adoption is recorded: `adoptions/{petId}` exists
+  | 'rejected' // not approved; reconsiderable by an admin
+  | 'withdrawn'; // the applicant pulled out, or told the shelter to
+
+/** An answer as stored. Never null: an unanswered optional question is absent. */
+export type ApplicationAnswer = string | boolean | number;
+
+export interface AdoptionApplication {
+  id: string;
+  petId: string;
+  applicantUid: string;
+  /** Copied from the ID token by rule, so it cannot be typed as someone else's. */
+  applicantEmail: string;
+  /**
+   * Whether that address was verified at submission, also from the token.
+   * Recorded rather than required: a verification email lost to a spam folder
+   * must not stop a family applying. The admin sees it and decides.
+   */
+  applicantEmailVerified: boolean;
+  /** Keyed by question id — see `adoptionApplications` in `src/config/shelter.ts`. */
+  answers: Record<string, ApplicationAnswer>;
+  status: ApplicationStatus;
+  submittedAt: Timestamp;
+  updatedAt: Timestamp;
+  /** Set exactly when `status` is `withdrawn`. */
+  withdrawnAt: Timestamp | null;
+  /** Set exactly when `status` is `approved` or `rejected`. */
+  decidedAt: Timestamp | null;
+  /** The admin who approved or rejected. Null otherwise. */
+  decidedBy: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// adoptionApplications/{id}/internal/notes — ADMIN ONLY
+//
+// A separate DOCUMENT, never a field on the application, because rules protect
+// documents and not fields. An applicant who could read the shelter's private
+// assessment of them is a problem the first time someone is turned down.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface ApplicationInternalNotes {
+  text: string;
+  updatedAt: Timestamp;
+  updatedBy: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -798,6 +992,34 @@ export interface Placement {
    */
   movedBy: string;
   note: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// qrTokens/{token} — public GET (never list), admin create, revoke-only update
+//
+// The code printed under a collar tag's QR symbol. Plan §2.5 and §7. A
+// separate document rather than a field on `Pet`, for two reasons that are
+// both load-bearing: a token can be revoked and reissued without touching the
+// animal's record, and `pets` is public READ — which includes list — so a
+// token stored there would make every tag enumerable from the wall.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface QrToken {
+  /**
+   * The DOCUMENT ID, never a stored field — `firestore.rules` rejects a
+   * create carrying one. 10 characters of Crockford base32; see
+   * `src/lib/qr-tokens.ts` for the alphabet and why.
+   */
+  token: string;
+  /** Always a pet that existed when the token was minted (the rules check). */
+  petId: string;
+  /**
+   * null while the tag works. Set once, by an admin, to the server's clock,
+   * and never cleared — the rules refuse an un-revoke.
+   */
+  revokedAt: Timestamp | null;
+  createdAt: Timestamp;
+  /** The admin's uid. */
+  createdBy: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

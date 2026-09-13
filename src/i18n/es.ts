@@ -9,6 +9,10 @@
 import type { Messages } from './messages';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
+import type { MedicalReviewCopy } from './messages';
+import type { FieldEvidence, MedicalExtractionSource, WithheldReason } from '@/lib/types';
+import type { CardField } from '@/lib/card-extraction';
+import type { CardExtractFailure } from '@/lib/card-extract-client';
 import type {
   AreaKind,
   MedicalRecordKind,
@@ -24,6 +28,196 @@ import { MS_PER_DAY, type Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
+import type { ApplicationStatus } from '@/lib/types';
+import type {
+  ApplicationAnswerError,
+  ApprovalBlocker,
+  ApprovalWarning,
+} from '@/lib/applications';
+import type { ApplicationSection } from '@/config/shelter';
+import type { ApplicationCopy } from './messages';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Online adoption applications — plan §6
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What the SHELTER calls each status, on the queue. */
+const APPLICATION_STATUS: Record<ApplicationStatus, string> = {
+  submitted: 'Nueva',
+  reviewing: 'En revisión',
+  interview: 'Entrevista',
+  approved: 'Aprobada',
+  rejected: 'Rechazada',
+  withdrawn: 'Retirada',
+};
+
+/**
+ * What the APPLICANT sees. Only `rejected` differs, and only in tone: a family
+ * turned down reads «No aprobada» on their own account page, which says the
+ * same thing without the word a person hears as a verdict on them.
+ */
+const APPLICANT_STATUS: Record<ApplicationStatus, string> = {
+  submitted: 'Enviada',
+  reviewing: 'En revisión',
+  interview: 'Entrevista',
+  approved: 'Aprobada',
+  rejected: 'No aprobada',
+  withdrawn: 'Retirada',
+};
+
+/**
+ * ⚠️ Each line must be true. The shelter reviews by hand, nothing is sent
+ * automatically, and WhatsApp is where a conversation actually happens — so
+ * every status that needs the applicant to do something points them there.
+ */
+const APPLICANT_STATUS_EXPLANATION: Record<ApplicationStatus, string> = {
+  submitted:
+    'El equipo todavía no la revisa. Lo hacen a mano, así que puede tomar unos días.',
+  reviewing: 'Alguien del equipo la está leyendo.',
+  interview:
+    'El equipo quiere conversar contigo. Si todavía no te escribieron, escríbeles por WhatsApp.',
+  approved: 'La adopción quedó registrada. Gracias por darle un hogar.',
+  rejected:
+    'Esta vez la solicitud no fue aprobada. Si quieres saber por qué, escríbele al equipo por WhatsApp.',
+  withdrawn: 'Esta solicitud se retiró.',
+};
+
+const APPLICATION_SECTION: Record<ApplicationSection, string> = {
+  contact: 'Contacto',
+  housing: 'Vivienda',
+  household: 'Quiénes viven en la casa',
+  otherPets: 'Otros animales',
+  experience: 'Experiencia',
+  why: 'Por qué este animalito',
+};
+
+const APPLICATION_ANSWER_ERROR: Record<ApplicationAnswerError, string> = {
+  required: 'Esta pregunta es obligatoria.',
+  'too-long': 'La respuesta es muy larga. Resúmela un poco.',
+  'phone-invalid': 'Escribe un número de teléfono, con o sin el +591.',
+  'count-invalid': 'Escribe un número entero, sin decimales.',
+  'choice-invalid': 'Elige una de las opciones.',
+};
+
+/**
+ * ⚠️ These BLOCK, so each one says why the state is unsafe and what to do
+ * instead — never just "no".
+ */
+const APPROVAL_BLOCKER: Record<ApprovalBlocker, string> = {
+  'application-not-approvable':
+    'Solo se puede aprobar una solicitud que está en revisión o en entrevista. Pásala primero a revisión.',
+  'pet-missing': 'La ficha de este animalito ya no existe.',
+  'pet-already-adopted':
+    'Este animalito ya figura como adoptado. Aprobar ahora le daría su microchip y su historial a una segunda familia. Si volvió al refugio, regístralo primero como reingreso.',
+  'pet-not-ready':
+    'Este animalito todavía no puede pasar a adoptado: está en camino, en cuarentena o su rescate se canceló. Primero tiene que llegar y tener el alta.',
+};
+
+const APPLICATION_COPY: ApplicationCopy = {
+  applyLink: 'Postular en línea →',
+
+  pageTitle: (petName) => `Postular para adoptar a ${petName}`,
+  intro: (petName) =>
+    `Esta solicitud es opcional. Si prefieres, escríbenos por WhatsApp: es el camino más rápido para conocer a ${petName}.`,
+  whatsappInstead: 'Escribir por WhatsApp',
+  privacy: (shelterName) =>
+    `Tus respuestas solo las ve el equipo de ${shelterName}. Nunca se publican.`,
+  signInPrompt:
+    'Para postular en línea necesitas una cuenta. Entra o crea una y vuelves directo a este formulario.',
+  signInButton: 'Entrar o crear cuenta',
+  returnNotice: 'Cuando entres, vuelves directo al formulario de adopción.',
+  continueApplication: 'Volver al formulario de adopción',
+  loading: 'Cargando…',
+  retry: 'Intentar de nuevo',
+  notAccepting: (petName) =>
+    `${petName} no está recibiendo solicitudes en línea en este momento. Si quieres saber más, escríbenos por WhatsApp.`,
+  alreadyApplied: 'Ya enviaste una solicitud para este animalito.',
+  goToAccount: 'Ver mis solicitudes',
+  requiredMark: 'obligatoria',
+  optionalMark: 'opcional',
+  choosePlaceholder: 'Elige…',
+  fixErrors: 'Revisa las preguntas marcadas antes de enviar.',
+  submit: 'Enviar solicitud',
+  submitting: 'Enviando…',
+  submitFailed:
+    'No pudimos enviar la solicitud. Revisa tu conexión e intenta de nuevo: tus respuestas siguen aquí.',
+  submitRefused:
+    'No pudimos guardar la solicitud. Puede que este animalito ya no esté disponible o que ya hayas postulado. Revisa «Mi cuenta».',
+  confirmationTitle: 'Recibimos tu solicitud',
+  confirmationSteps: (petName, shelterName) => [
+    `El equipo de ${shelterName} revisa cada solicitud a mano. Puede tomar unos días.`,
+    'Nadie te va a responder por esta página ni por correo. Si quieren conversar contigo, te escriben por WhatsApp al número que dejaste.',
+    `Enviar la solicitud no reserva a ${petName}. Si tienes apuro o dudas, escríbeles por WhatsApp.`,
+    'Puedes ver en qué estado está tu solicitud en «Mi cuenta».',
+  ],
+  backToPet: (petName) => `← Volver a ${petName}`,
+
+  mine: 'Mis solicitudes de adopción',
+  unknownPet: 'Animalito sin ficha pública',
+  withdraw: 'Retirar solicitud',
+  withdrawQuestion:
+    'Si la retiras, no vas a poder volver a postular en línea para este animalito. ¿La retiras?',
+  withdrawConfirm: 'Sí, retirarla',
+  keep: 'No, mantenerla',
+  withdrawFailed: 'No pudimos retirar la solicitud. Revisa tu conexión e intenta de nuevo.',
+  loadFailed: 'No pudimos cargar tus solicitudes. Revisa tu conexión e intenta de nuevo.',
+
+  queueLink: 'Solicitudes',
+  queueTitle: 'Solicitudes de adopción',
+  queueIntro:
+    'Agrupadas por animalito, la más antigua primero. Nada de lo que hagas aquí le envía un mensaje a nadie: a cada persona avísale tú por WhatsApp.',
+  formStateNote(enabled, questionsAreDraft) {
+    if (questionsAreDraft) {
+      return 'Las preguntas del formulario todavía son un BORRADOR que no escribió el refugio. El formulario público está apagado hasta que se reemplacen por las preguntas reales.';
+    }
+    return enabled ? null : 'El formulario público está apagado: nadie puede postular en línea.';
+  },
+  filterLabel: 'Mostrar',
+  filterOpen: 'Abiertas',
+  filterAll: 'Todas',
+  emptyQueue: 'No hay solicitudes con este filtro.',
+  submittedOn: (date) => `Enviada el ${date}`,
+  emailUnverifiedTag: 'correo sin verificar',
+  backToQueue: '← Solicitudes',
+  internalRecord: 'Ficha interna',
+  applicantTitle: 'Quién postula',
+  answersTitle: 'Respuestas',
+  notAnswered: 'Sin responder',
+  retiredQuestion: (id) => `Pregunta que ya no está en el formulario (${id})`,
+  notesTitle: 'Notas internas',
+  notesHint: 'Solo las ve el equipo del refugio. Quien postuló nunca las ve.',
+  saveNotes: 'Guardar notas',
+  notesSaved: 'Notas guardadas.',
+  notesFailed: 'No pudimos guardar las notas. Revisa tu conexión e intenta de nuevo.',
+  actionsTitle: 'Qué hacer con esta solicitud',
+  noActions: 'Esta solicitud ya está cerrada.',
+  approveTitle: 'Aprobar la adopción',
+  approveExplain: (petName, applicant) =>
+    `Al aprobar, ${petName} pasa a «Adoptado» y ${applicant} queda como responsable: va a poder ver su microchip, su historial de custodia y la ubicación que tenga registrada. Hazlo el día que ${petName} se va con su familia. No se envía ningún mensaje automático.`,
+  approveConfirm: 'Sí, aprobar',
+  cancel: 'Cancelar',
+  approvedDone: (petName) => `Adopción registrada. El estado de ${petName} ahora es «Adoptado».`,
+  actionFailed: 'No pudimos guardar el cambio. Revisa tu conexión e intenta de nuevo.',
+  actionRefused:
+    'Firestore rechazó el cambio. Puede que alguien más la haya cambiado mientras tanto: recarga la página.',
+  otherOpenTitle: 'Otras solicitudes abiertas para este animalito',
+  applicationMissing: 'Esa solicitud no existe.',
+  backToPanel: '← Panel',
+  statusTitle: 'Estado',
+  decidedByOn: (who, date) => `Decidida por ${who} el ${date}.`,
+  withdrawnOn: (date) => `Retirada el ${date}.`,
+  emailLabel: 'Correo',
+  phoneLabel: 'Teléfono',
+  confirmRecordWithdrawal:
+    'Esto la cierra para siempre: la persona no va a poder volver a postular en línea para este animalito. ¿Registrar que la retiró?',
+  adminLoadFailed: 'No pudimos cargar las solicitudes. Revisa tu conexión e intenta de nuevo.',
+  permissionDenied:
+    'Firestore rechazó la lectura por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+  blockersTitle: 'No se puede aprobar',
+  warningsTitle: 'Antes de aprobar',
+  checking: 'Revisando…',
+};
+
 import type { FoodCategory, FoodHazard } from '@/lib/types';
 import type { DonationError, DonationLineError } from '@/lib/food-parse';
 import type { StockMovementError } from '@/lib/food-stock';
@@ -759,6 +953,305 @@ export const es: Messages = {
     const whole = Math.floor(days);
     return `${whole} ${whole === 1 ? 'día' : 'días'} juntos`;
   },
+
+  /**
+   * QR identity tags. Build-order step 12, plan §7.
+   *
+   * ⚠️ Nothing on the public side promises to hand over a family's details.
+   * "Les avisamos" — WE tell THEM — and never "te pasamos su número": the
+   * shelter relays, because a tag is readable by anyone who picks up the
+   * animal, including someone who should not learn where it lives.
+   */
+  tag: {
+    foundQuestion: '¿Encontraste a este animalito?',
+    writeToShelter: 'Escríbenos por WhatsApp',
+    genericTitle: 'Placa de identificación',
+
+    lostBanner: (name, sex) => `¡${name} está ${sex === 'female' ? 'perdida' : 'perdido'}!`,
+
+    situation(tone, name, sex, shelterName) {
+      const pronoun = sex === 'female' ? 'la' : 'lo';
+      switch (tone) {
+        case 'lost':
+          return `Su familia ${pronoun} está buscando. Escríbenos y les avisamos enseguida.`;
+        case 'adopted':
+          return `${name} ya tiene familia. Si ${pronoun} encontraste ${sex === 'female' ? 'sola' : 'solo'} en la calle, algo pasó: escríbenos y les avisamos.`;
+        case 'available':
+          return `${name} está en adopción con ${shelterName}. Si ${pronoun} encontraste en la calle, se nos escapó: escríbenos y vamos a buscar${pronoun}.`;
+        case 'in-care':
+          return `${name} está al cuidado de ${shelterName}. Si ${pronoun} encontraste en la calle, se nos escapó: escríbenos y vamos a buscar${pronoun}.`;
+        default: {
+          const unhandled: never = tone;
+          return String(unhandled);
+        }
+      }
+    },
+
+    microchipHint: (sex) =>
+      `Tiene microchip. Si puedes, ${sex === 'female' ? 'llévala' : 'llévalo'} a una veterinaria: lo pueden leer ahí mismo y confirmar quién es.`,
+
+    finderMessage({ name, sex, formattedToken, tone }) {
+      const base = `Hola, encontré a ${name}. Su placa dice ${formattedToken}.`;
+      return tone === 'lost'
+        ? `${base} La página dice que está ${sex === 'female' ? 'perdida' : 'perdido'}.`
+        : base;
+    },
+
+    meetLink: (name) => `Conoce a ${name} →`,
+    phoneLine: (display) => `WhatsApp ${display}`,
+    codeLine: (formattedToken) => `Placa ${formattedToken}`,
+    adminLink: 'Abrir ficha interna',
+
+    inactiveTitle: 'Esta placa ya no está activa',
+    inactiveBody: (shelterName) =>
+      `La placa fue dada de baja, así que esta página no muestra a quién pertenece. Si tienes al animalito contigo, escríbenos igual: con el código, en ${shelterName} podemos averiguarlo.`,
+    inactiveMessage: (formattedToken, shelterName) =>
+      `Hola, encontré un animalito con una placa de ${shelterName} que ya no está activa. El código es ${formattedToken}.`,
+    unknownTitle: 'No encontramos esta placa',
+    unknownBody: (shelterName) =>
+      `Ese código no corresponde a ninguna placa activa de ${shelterName}. Revisa que esté bien escrito: son 10 letras y números. Si tienes al animalito contigo, escríbenos igual.`,
+    unknownMessage: (shelterName) =>
+      `Hola, encontré un animalito con una placa de ${shelterName}, pero su código no aparece en la página.`,
+    vetHint: 'Si puedes, llévalo a una veterinaria: si tiene microchip, lo pueden leer ahí mismo.',
+
+    panelTitle: 'Placa QR',
+    loading: 'Cargando…',
+    noneYet: 'Todavía no tiene placa. Emite una para imprimirla y ponerla en su collar.',
+    // The code itself is already shown large right above this line.
+    activeSince: (_code, date) => `Activa · emitida el ${date}`,
+    revokedOn: (code, date) => `${code} · dada de baja el ${date}`,
+    alsoActive: (code, date) => `${code} · TAMBIÉN activa, emitida el ${date}`,
+    backToRecord: '← Ficha interna',
+    backToPanel: '← Panel',
+    issue: 'Emitir placa',
+    issuing: 'Guardando…',
+    reissue: 'Dar de baja y emitir otra',
+    revoke: 'Dar de baja',
+    print: 'Imprimir',
+    cancel: 'Cancelar',
+    revokeConfirm: (code) =>
+      `¿Dar de baja la placa ${code}? Quien la escanee verá que ya no está activa. No se puede deshacer.`,
+    reissueConfirm: (code) =>
+      `¿Dar de baja la placa ${code} y emitir otra? La vieja deja de funcionar en cuanto confirmes, así que imprime la nueva y cámbiala en el collar lo antes posible.`,
+    confirmRevoke: 'Sí, dar de baja',
+    confirmReissue: 'Sí, emitir otra',
+
+    // Plan §7's honest limitation, and rfid-microchips.md §1: neither a collar
+    // tag nor a chip reports where an animal is.
+    limitation:
+      'Una placa QR va en el collar, y un collar se cae o se quita. El microchip va bajo la piel y no se sale. Se complementan: el QR es el que sirve a cualquier persona con un celular, sin lector de microchip. Ninguno de los dos es un rastreador: no dicen dónde está el animalito, solo a quién avisar cuando alguien lo encuentra.',
+
+    issueFailed: 'No pudimos emitir la placa. Revisa tu conexión e intenta de nuevo.',
+    revokeFailed: 'No pudimos dar de baja la placa. Revisa tu conexión e intenta de nuevo.',
+    loadFailed: 'No pudimos cargar las placas. Revisa tu conexión e intenta de nuevo.',
+    permissionDenied:
+      'Firestore rechazó la operación por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+    printTip: 'Imprime al 100 % de escala, sin «ajustar a la página»: así el código sale del tamaño indicado.',
+    testTip: 'Antes de ponerla en el collar, escanéala con tu celular y confirma que abre la ficha correcta.',
+    printSize: (mm) => `El código mide ${mm} mm por lado, con su margen blanco.`,
+    qrAlt: (name) => `Código QR de la placa de ${name}`,
+    noActiveTag: 'Este animalito no tiene una placa activa. Emítela desde su ficha interna.',
+    printTitle: (name) => `Placa de ${name}`,
+
+    sheetTitle: 'Placas para imprimir',
+    sheetIntro:
+      'Para un ingreso de varios animalitos a la vez: marca los que necesitan placa, emite las que falten e imprime una sola hoja.',
+    sheetEmpty: 'Todavía no hay animalitos publicados.',
+    sheetTruncated: (shown, total) =>
+      `${
+        total === null
+          ? `Solo se muestran los ${shown} registros más recientes.`
+          : `Se muestran los ${shown} registros más recientes de ${total}.`
+      } Si un animalito no aparece, emite e imprime su placa desde su ficha interna.`,
+    sheetLink: 'Placas QR',
+    noTag: 'sin placa',
+    selectAll: 'Marcar todos',
+    clearSelection: 'Quitar marcas',
+    issueMissing: (count) => (count === 1 ? 'Emitir la placa que falta' : `Emitir las ${count} placas que faltan`),
+    printSheet: (count) => (count === 1 ? 'Imprimir 1 placa' : `Imprimir ${count} placas`),
+    nothingToPrint: 'Marca al menos un animalito que ya tenga placa.',
+  },
+
+  // ── the medical review gate, and reading a vaccination card (step 9) ──────
+
+  medicalReview: {
+    unconfirmedBadge: 'Sin confirmar',
+    notCounted:
+      'Todavía no cuenta: no aparece en las próximas dosis, los vencimientos ni las alertas hasta que alguien lo confirme mirando la tarjeta.',
+    confirm: 'Confirmar',
+    correctAndConfirm: 'Corregir y confirmar',
+    saveAndConfirm: 'Guardar y confirmar',
+    discard: 'Descartar',
+    confirmNeedsEdit:
+      'Falta completar lo marcado antes de confirmar. Usa «Corregir y confirmar».',
+    showCard: 'Ver tarjeta',
+    hideCard: 'Ocultar tarjeta',
+    cardAlt: 'Foto de la tarjeta de vacunación',
+    unknownKind: 'Tipo sin leer',
+    unknownName: 'Nombre sin leer',
+    unknownDate: 'Fecha sin leer',
+    reviewingNotice:
+      'Estás revisando datos leídos de una tarjeta. Compara cada uno con la foto: al guardar, tu nombre queda como quien los confirmó.',
+    captureTitle: 'Leer una tarjeta de vacunación',
+    captureHint:
+      'Fotografía la tarjeta completa, de frente y con buena luz. Cada registro que se lea queda sin confirmar hasta que lo revises.',
+    captureTakePhoto: 'Fotografiar tarjeta',
+    captureGallery: 'Galería',
+    captureRetry: 'Leer otra vez',
+    captureUploading: 'Guardando la foto de la tarjeta…',
+    captureUploadFailed:
+      'No pudimos guardar la foto de la tarjeta. Revisa tu conexión e inténtalo de nuevo.',
+    captureUnreadable:
+      'No pudimos abrir esa foto. Prueba tomarla con la cámara desde aquí, o elige una en JPG.',
+    captureReading: 'Leyendo la tarjeta…',
+    captureSavedNote: 'la foto de la tarjeta ya se guardó y queda aunque la lectura falle.',
+    candidatesTitle: 'Por revisar',
+    candidatesUnavailable:
+      'No pudimos cargar las lecturas por revisar. El historial confirmado sí está al día.',
+    candidateGone: 'Ese registro ya no está por revisar: alguien más lo confirmó o lo descartó.',
+    confirmFailed: 'No pudimos confirmar ese registro. Revisa tu conexión e inténtalo de nuevo.',
+    discardFailed: 'No pudimos descartar ese registro.',
+  } satisfies MedicalReviewCopy,
+
+  extractionSourceLabel(source: MedicalExtractionSource | null) {
+    if (source === 'vaccination-card') return 'Leído de una tarjeta de vacunación';
+    if (source === 'dictation') return 'Dictado en consulta';
+    return 'Extraído automáticamente';
+  },
+
+  cardFieldLabel(field: CardField) {
+    const labels: Record<CardField, string> = {
+      kind: 'Tipo',
+      name: 'Qué se aplicó',
+      performedAt: 'Fecha',
+      nextDueAt: 'Próxima dosis',
+      batch: 'Lote',
+      manufacturer: 'Laboratorio',
+      veterinarian: 'Veterinario',
+      clinic: 'Clínica o campaña',
+    };
+    return labels[field];
+  },
+
+  evidenceLine({ snippet, confidence, withheld }: FieldEvidence) {
+    // "92 %", with the space the RAE recommends.
+    const pct = `${Math.round(confidence * 100)} %`;
+    const read = snippet === null ? null : `«${snippet}»`;
+    const reason: WithheldReason | null = withheld;
+    switch (reason) {
+      case 'low-confidence':
+        return read
+          ? `Leído con dudas: ${read} (${pct}). No se completó: revísalo en la tarjeta.`
+          : 'No se pudo leer con seguridad. Revísalo en la tarjeta.';
+      case 'unreadable-date':
+        return `Leído: ${read ?? '—'}, pero no se entiende como fecha. No se completó.`;
+      case 'implausible-date':
+        return `Leído: ${read ?? '—'}, pero esa fecha no es posible. No se completó.`;
+      case 'too-long':
+        return 'Lo leído es demasiado largo para ser un solo dato. No se completó.';
+      case 'disputed':
+        return 'Las dos lecturas no coinciden. No se completó.';
+      default:
+        return read ? `Leído: ${read} (${pct})` : 'No se leyó nada en la tarjeta.';
+    }
+  },
+
+  cardExtractFailure(failure: CardExtractFailure) {
+    const messages: Record<CardExtractFailure, string> = {
+      'not-configured':
+        'La lectura automática de tarjetas no está disponible ahora. La foto quedó guardada; puedes cargar los registros a mano.',
+      unauthorized:
+        'No tienes permiso para leer tarjetas. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+      'already-extracted': 'Esta tarjeta ya se leyó: sus registros están en la lista.',
+      'photo-rejected':
+        'No pudimos usar esa foto. Prueba con otra foto de la tarjeta, de frente y con buena luz.',
+      'pet-missing': 'Esta ficha ya no existe.',
+      timeout:
+        'La lectura tardó demasiado y la cortamos. La foto ya está guardada: puedes intentar otra vez.',
+      failed:
+        'No pudimos leer la tarjeta. La foto ya está guardada: puedes intentar otra vez o cargar los registros a mano.',
+    };
+    return messages[failure];
+  },
+
+  cardExtractSummary({ written, droppedRows, notACard }) {
+    if (notACard) {
+      return 'Esa foto no parece una tarjeta de vacunación ni de desparasitación, así que no se cargó nada.';
+    }
+    if (written === 0) {
+      return droppedRows > 0
+        ? 'No se pudo leer con seguridad ninguna fila. Cárgalas a mano mirando la foto.'
+        : 'No se encontró ningún registro legible en la tarjeta.';
+    }
+    const read =
+      written === 1
+        ? 'Se leyó 1 registro. Queda sin confirmar: revísalo con la tarjeta a la vista.'
+        : `Se leyeron ${written} registros. Quedan sin confirmar: revísalos uno por uno con la tarjeta a la vista.`;
+    if (droppedRows === 0) return read;
+    const dropped =
+      droppedRows === 1
+        ? 'Una fila no se pudo leer y hay que cargarla a mano.'
+        : `${droppedRows} filas no se pudieron leer y hay que cargarlas a mano.`;
+    return `${read} ${dropped}`;
+  },
+
+  awaitingReviewCount(count: number) {
+    return count === 1 ? '1 registro espera revisión' : `${count} registros esperan revisión`;
+  },
+
+  confirmedByLabel: (by: string) => `Confirmado por ${by}`,
+
+  nextDueSummary: (name: string, dateText: string) => `Lo próximo: ${name}, el ${dateText}.`,
+
+  yesNo: (value) => (value ? 'Sí' : 'No'),
+
+  applicationStatusLabel: (status) => APPLICATION_STATUS[status],
+
+  applicantStatusLabel: (status) => APPLICANT_STATUS[status],
+
+  applicantStatusExplanation: (status) => APPLICANT_STATUS_EXPLANATION[status],
+
+  applicationActionLabel(from, to) {
+    switch (to) {
+      case 'reviewing':
+        return from === 'rejected' ? 'Volver a revisar' : 'Pasar a revisión';
+      case 'interview':
+        return 'Marcar para entrevista';
+      case 'approved':
+        return 'Aprobar adopción…';
+      case 'rejected':
+        return 'Rechazar';
+      case 'withdrawn':
+        // The admin is RECORDING the applicant's decision, told to them on
+        // WhatsApp — not making it.
+        return 'Registrar que la retiró';
+      case 'submitted':
+        return 'Marcar como nueva';
+    }
+  },
+
+  applicationSectionLabel: (section) => APPLICATION_SECTION[section],
+
+  applicationAnswerError: (error) => APPLICATION_ANSWER_ERROR[error],
+
+  approvalBlocker: (blocker) => APPROVAL_BLOCKER[blocker],
+
+  approvalWarning(warning, { otherOpenCount }) {
+    switch (warning) {
+      case 'other-open-applications':
+        return otherOpenCount === 1
+          ? 'Hay otra solicitud abierta para este animalito. Aprobar esta no la cambia: avísale a esa persona y recházala tú.'
+          : `Hay ${otherOpenCount} solicitudes abiertas más para este animalito. Aprobar esta no las cambia: avísales y recházalas tú.`;
+      case 'email-unverified':
+        return 'La persona no verificó su correo. Confirma sus datos por WhatsApp antes de aprobar.';
+      case 'pet-not-on-wall':
+        return 'Este animalito ya no figura como disponible en el muro. Si así lo decidieron, puedes aprobar igual.';
+      case 'location-will-be-visible':
+        return 'Este animalito tiene una ubicación registrada en su ficha, y al aprobar la nueva familia va a poder verla. Si puede ser la dirección de un hogar de tránsito, que la quiten antes de aprobar.';
+    }
+  },
+
+  applications: APPLICATION_COPY,
 
   foodCategoryLabel: (category) => FOOD_CATEGORY[category],
 

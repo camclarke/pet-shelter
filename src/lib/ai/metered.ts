@@ -59,6 +59,14 @@ export const PROCESS_LABELS = {
    * surprises you.
    */
   intake_suggest_eval: 'Evaluación de sugerencias (banco de pruebas)',
+  /** Reading a vaccination or deworming card. Build-order step 9. */
+  card_extract: 'Lectura de tarjetas de vacunación',
+  /**
+   * `npm run eval:cards`, and any local end-to-end probe of the real route.
+   * Separate from `card_extract` for the same reason `intake_suggest_eval` is:
+   * benchmarking must never read as the shelter's own spend.
+   */
+  card_extract_eval: 'Evaluación de lectura de tarjetas (banco de pruebas)',
   /** Donation text → line items, on the Flash-Lite ladder. Plan §12.1. */
   food_parse: 'Lectura de donaciones de comida',
   /** `npm run eval:food-parse`, kept apart for the reason given above. */

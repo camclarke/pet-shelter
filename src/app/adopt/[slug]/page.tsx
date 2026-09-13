@@ -87,6 +87,20 @@ export default async function PetPage({ params }: Props) {
             Adóptame ↗
           </a>
 
+          {/* The optional online application — plan §6. A SECONDARY TEXT LINK,
+              after the WhatsApp button, never a button beside it and never in
+              front of it: the account it needs must not stand between a
+              stranger and the conversation. Rendered only when the shelter has
+              switched the form on and the animal is on the wall; the rules
+              refuse any other application anyway. */}
+          {SHELTER.adoptionApplications.enabled && pet.status === 'available' && (
+            <p className="dossier__apply">
+              <a href={`/adopt/${pet.slug}/apply`} className="auth__link">
+                {t.applications.applyLink}
+              </a>
+            </p>
+          )}
+
           {/* ⚠️ Deliberately phrased in the FUTURE tense. Sign-in works as of
               2026-08-23, but nothing reads the `detail`, `medical` or
               `care/feeding` tiers yet — so "están disponibles al iniciar
