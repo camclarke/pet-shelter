@@ -1,0 +1,35 @@
+{
+  "//": "TEMPLATE for the vaccination-card eval (npm run eval:cards). The real file is _e2e/cards/ground-truth.json, written by `npm run cards:synthesize` together with the card images; both are gitignored. For a REAL card photograph, copy this, point `file` at the photo, and describe what the card actually says. Dates are ISO calendar days; null means the correct answer is NO date — the eval fails any run that returns one. `name` lists acceptable spellings. `ownerData` is text that must never appear in any extracted field. None of these values may appear in the prompt: the eval refuses to run if one does.",
+  "ownerData": ["Nombre Apellido", "70000000", "Calle de ejemplo"],
+  "cards": [
+    {
+      "variant": "example",
+      "file": "card-example.jpg",
+      "subject": "One vaccination with a sticker, one with a scribbled-out date",
+      "rows": [
+        {
+          "kind": "vaccination",
+          "name": ["Producto de ejemplo", "Producto"],
+          "printedDate": "01/02/2025",
+          "performedAt": "2025-02-01",
+          "nextDueAt": "2026-02-01",
+          "batch": "LOTE-0001",
+          "manufacturer": "Laboratorio de ejemplo",
+          "veterinarian": "Nombre del veterinario",
+          "clinic": "Nombre de la clínica"
+        },
+        {
+          "kind": "vaccination",
+          "name": ["Otra vacuna"],
+          "printedDate": null,
+          "performedAt": null,
+          "nextDueAt": null,
+          "batch": null,
+          "manufacturer": null,
+          "veterinarian": null,
+          "clinic": null
+        }
+      ]
+    }
+  ]
+}
