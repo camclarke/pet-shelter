@@ -2021,7 +2021,9 @@ textarea {
    without making it look like a second button. */
 .dossier__apply a,
 .apply-back,
-.queue-group__record {
+.queue-group__record,
+.answer__link,
+.my-applications__pet {
   display: inline-flex;
   align-items: center;
   min-height: 44px;

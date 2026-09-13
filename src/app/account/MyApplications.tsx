@@ -128,7 +128,13 @@ export function MyApplicationsView({
             <li key={application.id} className="admin-list__item--record">
               <div>
                 <strong>
-                  {pet ? <Link href={`/adopt/${pet.slug}`}>{pet.name}</Link> : copy.unknownPet}
+                  {pet ? (
+                    <Link href={`/adopt/${pet.slug}`} className="my-applications__pet">
+                      {pet.name}
+                    </Link>
+                  ) : (
+                    copy.unknownPet
+                  )}
                 </strong>
                 <span>
                   <span className="app-status">{t.applicantStatusLabel(application.status)}</span>
