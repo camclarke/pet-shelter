@@ -1657,6 +1657,62 @@ textarea {
   gap: var(--space-1);
 }
 
+/* ── the medical review gate (step 9) ────────────────────────────────────────
+   A record a model read off a card is VISIBLE and counts for nothing until a
+   person confirms it. Sun is the palette's "look at this" colour — already
+   the warning notice's edge — so an unconfirmed row reads as pending rather
+   than as an error, which it is not. */
+.admin-list__item--unconfirmed {
+  border-left: 4px solid var(--sun);
+}
+
+.review-badge {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  background: var(--sun);
+  color: var(--charcoal);
+}
+
+/* What the model READ, beside the value. Wraps anywhere: a snippet is copied
+   text off a card and can be one long unbroken lot number. */
+.evidence {
+  display: block;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  opacity: 0.8;
+}
+
+.evidence--flag {
+  opacity: 1;
+  padding: 6px 10px;
+  border-left: 3px solid var(--sun);
+  background: var(--cream-2);
+}
+
+/* An empty slot must not add a flex gap to the record's column. */
+.evidence-slot:empty {
+  display: none;
+}
+
+.review-card img {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.card-capture {
+  margin-top: var(--space-2);
+}
+
 /* ---- areas and placements ----------------------------------------------- */
 /* The occupancy board, the move form's warnings, and the placement timeline.
    Built on the same tokens as the rest of the admin console — no new colours,

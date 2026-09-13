@@ -52,3 +52,10 @@ seed/*
 # ground-truth.json describes a real animal and stays local with its photos.
 _e2e/*
 !_e2e/EXAMPLE-ground-truth.json
+# Synthetic vaccination cards for `npm run eval:cards`. Generated, so only the
+# answer-key TEMPLATE is tracked; the images and the filled-in key are rebuilt
+# by `npm run cards:synthesize`. A REAL card photographed for the eval carries
+# an owner's name, address and phone, and must never be committed.
+!_e2e/cards/
+_e2e/cards/*
+!_e2e/cards/EXAMPLE-ground-truth.json
