@@ -126,7 +126,7 @@ const MEDICAL_WARNING: Record<MedicalWarning, string> = {
   'rabies-before-microchip':
     'La antirrábica figura ANTES de la colocación del microchip. Para viajar a la Unión Europea eso anula la vacuna: haría falta repetirla después del chip. Igual puedes guardar el registro tal como pasó.',
   'rabies-under-age':
-    'El animalito habría tenido menos de 12 semanas al momento de la antirrábica. Es el mínimo que exige la norma europea. Guardalo igual si así fue.',
+    'El animalito habría tenido menos de 12 semanas al momento de la antirrábica. Es el mínimo que exige la norma europea. Guárdalo igual si así fue.',
   'rabies-no-valid-from':
     'Falta desde cuándo protege. En la antirrábica la protección empieza 21 días después de la dosis, y esa es la fecha que vale en un cruce de frontera.',
   'vaccination-no-next-due':
