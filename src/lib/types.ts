@@ -124,13 +124,20 @@ export interface Pet {
   coatType: string | null;
 
   /**
-   * An ESTIMATED weight range in kg. Both null until someone weighs the animal.
+   * An ESTIMATED weight range in kg, from the intake photographs. Both null
+   * unless a photo gave the model a scale reference.
    *
-   * The rescuer has no scale and the vet arrives hours or days later, so this
-   * is what a pen assignment and a rough ration get chosen from in the
-   * meantime. `weightIsEstimate` travels with it so a guess can never be read
-   * back as a measurement, and it must NEVER reach an mg/kg dose. A real
-   * weight belongs in a measurement recorded by whoever weighed it.
+   * The rescuer has no scale and the animal may not reach the shelter's for
+   * hours or days, so this is what a pen assignment and a rough ration get
+   * chosen from in the meantime. `weightIsEstimate` travels with it so a guess
+   * can never be read back as a measurement, and it must NEVER reach an mg/kg
+   * dose.
+   *
+   * ⚠️ Weighing the animal does NOT change these fields and does NOT flip
+   * `weightIsEstimate`. A real weight lives in `pets/{petId}/measurements`,
+   * dated, and is deliberately not copied here: this document is public-read
+   * and the measurement tier is authenticated. Flipping the flag alone would
+   * be worse than leaving it — the photo's range would then read as measured.
    */
   weightKgMin: number | null;
   weightKgMax: number | null;
@@ -380,7 +387,21 @@ export interface PetMeasurement {
   mcs: MuscleCondition | null;
 
   measuredAt: Timestamp;
-  measuredBy: string;
+
+  /**
+   * WHO weighed or scored the animal, as free text — usually the vet, who
+   * usually has no account. Null when nobody wrote it down.
+   *
+   * Separate from `recordedBy` on purpose (decided 2026-09-12, when the owner
+   * confirmed the veterinarian scores body condition): the person vouching for
+   * a number and the person who typed it into a phone are often not the same,
+   * and a dose is computed against the first.
+   */
+  measuredBy: string | null;
+
+  /** The admin account that entered it. Never overwritten by an edit. */
+  recordedBy: string;
+
   note: string | null;
 }
 

@@ -178,7 +178,7 @@ export default function MedicalPanel({
       {records !== null && records.length > 0 && (
         <ul className="admin-list__items">
           {records.map((r) => (
-            <li key={r.id} className="admin-list__item">
+            <li key={r.id} className="admin-list__item admin-list__item--record">
               <div>
                 <strong>
                   {t.medicalKindLabel(r.kind)} · {r.name}

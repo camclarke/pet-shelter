@@ -434,9 +434,9 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
     coatType: draft.coatType.trim() || null,
     weightKgMin: draft.weightKgMin,
     weightKgMax: draft.weightKgMax,
-    // Always an estimate while it comes from a photograph. It turns false
-    // only when someone weighs the animal, which happens in a measurement
-    // record rather than here.
+    // True whenever there is a range, because these fields only ever hold the
+    // photograph's estimate. Weighing the animal writes a dated record to
+    // `measurements` and leaves this untouched — see `Pet.weightKgMin`.
     weightIsEstimate: draft.weightKgMin !== null || draft.weightKgMax !== null,
     status: draft.status,
     hasMicrochip: draft.hasMicrochip,
