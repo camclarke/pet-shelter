@@ -7,15 +7,7 @@ import { FOOD_PARSE_MODEL_LADDER, modelKeyFor } from './model-ids';
 import { DonationParseSchema } from './food-parse-schema';
 import { FOOD_PARSE_SYSTEM, foodParseUserMessage } from './food-parse-prompt';
 import { recordAiUsage, type AiProcess } from './metered';
-import {
-  SUGGEST_MAX_ATTEMPTS,
-  SUGGEST_MIN_RETRY_MS,
-  isOverloadedFailure,
-  isRetryableFailure,
-  isTimeoutFailure,
-  retryBackoffMsFor,
-  walkModelLadder,
-} from './suggest-budget';
+import { describeFailure, retryWithinDeadline, walkModelLadder } from './suggest-budget';
 import type { RawParsedDonation } from '../food-parse';
 
 export { FOOD_PARSE_MODEL_LADDER } from './model-ids';
@@ -28,15 +20,23 @@ export { FOOD_PARSE_MODEL_LADDER } from './model-ids';
  * only obtains the answer.
  *
  * ── Budget ──────────────────────────────────────────────────────────────────
- * Reuses the intake route's measured envelope: `walkModelLadder` holds ONE
- * deadline of `SUGGEST_TOTAL_BUDGET_MS` (50 s) across the whole walk, under
- * Firebase Hosting's 60 s ceiling. A short text on Flash-Lite answers in a few
- * seconds, so each attempt gets `FOOD_PARSE_ATTEMPT_TIMEOUT_MS` and a timeout
- * or an overload gets one retry on the same model, exactly as intake does.
+ * Reuses the intake route's measured envelope, and its CODE rather than a copy
+ * of it: `walkModelLadder` holds ONE deadline of `SUGGEST_TOTAL_BUDGET_MS`
+ * (50 s) across the whole walk, under Firebase Hosting's 60 s ceiling, and
+ * `retryWithinDeadline` gives a timeout or an overload one retry on the same
+ * model, exactly as intake and card extraction do.
+ *
+ * ⚠️ Until 2026-09-13 this file carried its own copy of that retry loop. A
+ * second copy of a retry policy is how the 2026-08-30 "retry that could never
+ * run" bug gets reintroduced, in the copy nobody remembered to fix.
+ * `food-parse.test.ts` fails if the loop comes back.
  *
  * ── No tools, no grounding ─────────────────────────────────────────────────
  * Grounded search is ruled out project-wide. Nothing here needs the web.
  */
+
+/** Log prefix, for the retry and the ladder alike. */
+const LOG = '[food-parse]';
 
 /**
  * Per attempt. Not measured on this path yet — the eval harness prints the
@@ -50,22 +50,19 @@ export interface FoodParseOptions {
   models?: readonly string[];
   /** Budget line. Defaults to the shelter's own; the eval passes `food_parse_eval`. */
   process?: AiProcess;
+  /**
+   * An EARLIER deadline than the walk would start for itself — see
+   * `walkModelLadder`. The route passes request arrival + the total budget,
+   * because Hosting's 60 s runs from there and the token check and the body
+   * read come first. A later value is ignored.
+   */
+  deadline?: number;
 }
 
 export interface FoodParseResult {
   parsed: RawParsedDonation;
   /** Stable model KEY for provenance, never the raw id. */
   modelKey: string;
-}
-
-function describeFailure(err: unknown): string {
-  if (isTimeoutFailure(err)) return 'timed out';
-  if (isOverloadedFailure(err)) return 'reported overload';
-  return 'failed';
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Throws on failure; the route decides what a failure means (blank lines to type). */
@@ -76,13 +73,10 @@ export async function parseDonationText(
   const ladder = options.models ?? FOOD_PARSE_MODEL_LADDER;
   const proc = options.process ?? 'food_parse';
 
-  // ⚠️ `walkModelLadder` is shared with production photo intake and is used
-  // here UNCHANGED. Its fallback log line says "[intake-suggest]"; with today's
-  // one-tier ladder that line is unreachable, because a fallback needs a second
-  // tier. Give the ladder a second tier and its fallback will log under that
-  // name — change the log there on purpose rather than in passing.
   return walkModelLadder(ladder, (model, deadline) => parseWith(model, text, deadline, proc), {
     describe: describeFailure,
+    label: LOG,
+    deadline: options.deadline,
   });
 }
 
@@ -92,49 +86,31 @@ async function parseWith(
   deadline: number,
   proc: AiProcess
 ): Promise<FoodParseResult> {
-  let lastErr: unknown;
-
-  for (let attempt = 1; attempt <= SUGGEST_MAX_ATTEMPTS; attempt++) {
-    const started = Date.now();
-    try {
-      const { object, usage, providerMetadata } = await generateObject({
+  const { object, usage, providerMetadata } = await retryWithinDeadline(
+    deadline,
+    FOOD_PARSE_ATTEMPT_TIMEOUT_MS,
+    (budgetMs) =>
+      generateObject({
         model: google(modelId),
         schema: DonationParseSchema,
         system: FOOD_PARSE_SYSTEM,
         prompt: foodParseUserMessage(text),
-        // A FRESH signal per attempt, trimmed to what is left of the one
-        // shared deadline — the lesson of 2026-08-30, where one signal across
-        // attempts made the retry unreachable.
-        abortSignal: AbortSignal.timeout(Math.min(FOOD_PARSE_ATTEMPT_TIMEOUT_MS, deadline - started)),
-        // This loop owns retrying; nesting the SDK's own would make timing
-        // impossible to reason about.
+        // A FRESH signal per attempt, sized by retryWithinDeadline to what is
+        // left of the one shared deadline. Hoisting it out of this callback
+        // would restore the single budget that made a retry unreachable on
+        // 2026-08-30.
+        abortSignal: AbortSignal.timeout(budgetMs),
+        // retryWithinDeadline owns retrying; nesting the SDK's own policy would
+        // make the timing impossible to reason about.
         maxRetries: 0,
-      });
+      }),
+    { describe: describeFailure, label: LOG }
+  );
 
-      // void, never awaited: metering must not be able to break or slow the
-      // thing it measures.
-      void recordAiUsage({ process: proc, model: modelId, usage, providerMetadata });
+  // void, never awaited: metering must not be able to break or slow the thing
+  // it measures.
+  void recordAiUsage({ process: proc, model: modelId, usage, providerMetadata });
 
-      const parsed: RawParsedDonation = object;
-      return { parsed, modelKey: String(modelKeyFor(modelId)) };
-    } catch (err) {
-      lastErr = err;
-      if (!isRetryableFailure(err) || attempt === SUGGEST_MAX_ATTEMPTS) throw err;
-
-      const backoffMs = retryBackoffMsFor(err);
-      const left = deadline - Date.now() - backoffMs;
-      const elapsed = Date.now() - started;
-      if (left < SUGGEST_MIN_RETRY_MS) {
-        console.warn(
-          `[food-parse] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describeFailure(err)} after ${elapsed}ms; only ${left}ms left, not retrying`
-        );
-        throw err;
-      }
-      console.warn(
-        `[food-parse] attempt ${attempt}/${SUGGEST_MAX_ATTEMPTS} ${describeFailure(err)} after ${elapsed}ms; retrying in ${backoffMs}ms with ${left}ms left`
-      );
-      if (backoffMs > 0) await sleep(backoffMs);
-    }
-  }
-  throw lastErr;
+  const parsed: RawParsedDonation = object;
+  return { parsed, modelKey: String(modelKeyFor(modelId)) };
 }
