@@ -73,6 +73,7 @@ scanned chip resolves to a name and a phone call.
 | **First API route in the project** | ✅ `/api/intake/suggest`, deployed 2026-08-26. ⚠️ **A new surface class: it sits OUTSIDE `firestore.rules`**, so it verifies the ID token and admin claim itself. Auth boundary proven in production — 401/401/405 |
 | LLM vaccination-card parsing | ⬜ **Planned in full**, plan §4. **Gemini via AI Studio, never Vertex** — [`gemini-api-playbook.md`](docs/gemini-api-playbook.md) |
 | **Medical records (step 7)** | ✅ **MERGED + DEPLOYED + SERVING 2026-08-27** (PR #16, `365cbd0`) — `MedicalPanel.tsx`, `src/lib/medical.ts` (27 tests), `medical-admin.ts`. The **first writer `pets/{petId}/medical` has ever had**. Rules and both indexes were written 2026-08-02/08-16 and had never had a caller. ⛔ **No human has saved a record** — it is behind `AdminGate` |
+| **Weight + body condition (step 10)** | ✅ **MERGED + DEPLOYED + SERVING 2026-09-12** (PR #43, `3ee9750`) — `MeasurementPanel.tsx`, `src/lib/measurements.ts` (32 tests), `measurements-admin.ts`. The **first writer `pets/{petId}/measurements` has ever had**; **no rules or index change**. Built on the owner's answer to plan §11 #7: a scale exists, animals are weighed when sick or at a vet visit, the vet scores BCS. **Nothing is copied onto `Pet`** (reverses plan §2.7). Steps 11 and 13 read a weight through `latestWeight()` only. ⛔ **No human has saved a measurement** — behind `AdminGate`, and no pet exists |
 | **Voice dictation — model layer (step 11)** | ✅ **MERGED + DEPLOYED 2026-08-27** (PR #16) — `src/lib/dictation.ts` (29 tests), `src/lib/ai/dictate.ts`. Transcript + **two independent extractors that each read the AUDIO**. ⛔ **No model has heard one second of audio**, and there is **no review UI** |
 | LLM veterinary voice dictation | ⬜ Planned, plan §4.7. **Highest-risk path in the system** — mandatory two-extractor consensus on dosages |
 | Arrival pipeline + shelter areas | ⬜ Planned, plan §13. Placement intervals for outbreak tracing, not a current-area field |
@@ -2000,6 +2001,173 @@ scanned chip resolves to a name and a phone call.
   leak guard passes on the new prompt. **No pet, draft or photo was created** —
   `pets` does not exist, the only draft is Lobita, the bucket still holds her 4
   objects — and eval spend was 14 metered calls, $0.15.
+
+- **2026-09-12** — **Built step 10, weight and body condition (PR #43). It is
+  the first writer `pets/{petId}/measurements` has ever had, and the owner's
+  answer to plan §11 #7 shaped it before any code was written.** The rule
+  (`read: signedIn`, `write: isAdmin`) and `PetMeasurement` date from
+  2026-08-16 and had no caller. **No rules change and no index change**:
+  `measuredAt desc` on one pet's subcollection is a single-field ordering, and
+  `firestore.indexes.json` already records why it must not be declared. That is
+  the fifth decision in this project found already made and never called.
+
+  ── **The answer, asked first** ─────────────────────────────────────────────
+
+  | Owner's answer | What it decided |
+  |---|---|
+  | The shelter **has a scale** | A saved weight is shown as a measurement, plainly |
+  | Weighed **when sick or at a vet visit**, not on a schedule | **No overdue logic.** Only the age of the latest reading, clamped at zero |
+  | **The vet scores body condition** | `measuredBy` (free text; the vet usually has no account) is kept apart from `recordedBy` (the admin account) |
+
+  `PetMeasurement.measuredBy` became nullable and `recordedBy` was added. That
+  changes a stored shape, which cost nothing only because `measurements` holds 0
+  documents.
+
+  ── **Plan §2.7 reversed: nothing is copied onto `Pet`** ─────────────────────
+
+  The plan said the latest values "get denormalised onto `Pet`". That was
+  **not** built, for three reasons:
+  - `pets/{petId}` is public-read while this tier is authenticated. A copy would
+    break the rule that a new tier is a new document, never a new field.
+  - A dose needs the weight's DATE as much as its number, and the subcollection
+    carries both.
+  - `Pet` already holds the photo estimate, and a measured weight beside it is
+    how the two get confused.
+
+  Dosing (step 11) and rations (step 13) must read through `latestWeight()`,
+  which returns `{ kg, measuredAt }`.
+
+  **Two comments described behaviour nothing implemented.** `types.ts` said the
+  estimated range is "null until someone weighs the animal". `pets-admin.ts`
+  said `weightIsEstimate` "turns false only when someone weighs the animal". No
+  code did either, and flipping the flag without the range would make the
+  photo's 18–26 kg read as a measurement. Both comments are corrected. This is
+  the third recorded case of **a comment stating intent as though it were
+  behaviour** (the rules comment on 2026-08-23, `revalidate` on 2026-08-24).
+
+  ── **The decimal separator is this path's dosing hazard** ───────────────────
+
+  Bolivia writes 12,5, and `parseFloat('12,5')` is **12**: the half kilogram
+  disappears silently. So `parseWeightInput` reads both separators and
+  **refuses three decimals**. In es-BO, `12.500` is either a scale display or
+  twelve thousand five hundred, and guessing is the wrong move on a number that
+  feeds mg/kg. One thing here was **measured rather than assumed**: this Node's
+  ICU formats `1250` in es-BO as **`"1.250"`**, grouping even four digits. So
+  `useGrouping: false` in `formatKgInput` is load-bearing, since a grouped value
+  would not survive being edited, and the test for it can actually fail.
+
+  Warnings never block. A new weight at least ×2 or at most ×0.5 of the
+  previous one warns: a slipped decimal is ×10 and pounds typed as kilograms
+  are ×2.2, while a growing puppy moves by tens of percent. So does a weight
+  over a per-species ceiling (dog 90, cat 12, rabbit 12). A record being edited
+  is excluded from its own comparison. Otherwise, correcting "125" to "12,5"
+  would warn that the fix is a tenth of the typo.
+
+  ── **A layout defect only a measurement could find** ────────────────────────
+
+  At 360px against the real stylesheet, `MedicalPanel`'s history rows turned
+  out to have **no CSS at all**. `MeasurementPanel` copied the same markup and
+  would have inherited the problem:
+  - `.t-data` is `inline`, so every detail ran into the headline and into the
+    next line ("12,5 KG · CONDICIÓN 5 · IDEAL9 SEP 2026…").
+  - `.admin-list__actions` had no rule, so **`Editar` sat flush against
+    `Borrar` with a 0px gap** (x 24→138, 138→260). On a phone, a mis-tap there
+    deletes a medical record.
+
+  It survived since 2026-08-27 because **no medical record has ever been
+  rendered**. That is the same shape as the `pastParticiple` bug: UI that only
+  exists when data exists is untested by construction. The fix is
+  `.admin-list__item--record` plus flex on `.admin-list__actions`. Re-measured
+  afterwards: rows stack, a 64-character email wraps inside 282px, there is an
+  8px gap, and overflow is 0. The draft-list anchor rows are unchanged, used as
+  a control.
+
+  ── **Verification** ─────────────────────────────────────────────────────────
+
+  - **414 tests** (382 before). Typecheck and build clean, and every static
+    route keeps `Revalidate 5m`.
+  - **Deliberate-break probe: 21/21 caught by the expected test name**, two of
+    them in `es.ts`. A clean run was validated first, then a guaranteed-fatal
+    control. Both files were restored and checked by sha256. Every threshold
+    test uses a **literal**, so no test compares a function against the
+    constant it reads, which was the 2026-08-27 tautology.
+  - **Client-SDK rules probe: 14/14, zero documents created.** This one
+    **extends the 2026-08-23 read technique to writes**. For an admin, an
+    allowed `updateDoc` on an absent document returns **`not-found`**, not
+    `permission-denied`, and an allowed `deleteDoc` on one simply resolves. The
+    allow branch of a write rule is therefore provable without writing
+    anything. Signed out and non-admin were denied create, update and delete.
+    Non-admin reads, including the panel's exact `orderBy` query, returned
+    empty snapshots. `areas` and `identity` served as denial controls. The
+    probe account was deleted, and a read-back confirmed it is gone, with no
+    `users/{uid}` document and 0 in the `measurements` collection group.
+
+  ── **Found in passing** ─────────────────────────────────────────────────────
+
+  - **A voseo imperative survived both sweeps.** "Guardalo igual si así fue",
+    in the rabies age warning, is fixed to "Guárdalo" in its own commit. The
+    #31 and #42 tripwires list specific forms, and an unaccented clitic
+    imperative is on neither list. A clitic scan of `es.ts` found no others.
+  - **`es.ts` already declared `SPECIES_PLURAL`**, as diminutives
+    ("perritos"). The second declaration failed **four** test files at
+    esbuild's transform, not just the new one, because everything importing
+    `es.ts` fails with it. Mine is `SPECIES_PLURAL_PLAIN`, since "poco común en
+    perritos" is the wall's warmth misplaced in a dosing note.
+  - **Auth holds 3 accounts while `users` holds 2 documents**, read by the
+    probe *before* it created anything. It did not come from this session and
+    was not investigated. Recorded so that "2 users" in this file is read as
+    documents, not accounts.
+  - **The rabbit gap:** WSAVA's 9-point BCS is published for dogs and cats, and
+    rabbits are usually scored on a 5-point scale. The field does not model
+    that. It is noted in `measurements.ts`.
+
+  ── **⛔ Not verified** ──────────────────────────────────────────────────────
+
+  - **No browser has rendered the real panel with data.**
+    `/admin/pets/{id}` needs a published pet and an admin sign-in, and `pets`
+    holds 0 documents. The 360px check injected the panel's markup into
+    `/about` and measured it against the real stylesheet. That audits layout,
+    not the component.
+  - **The admin *create* branch** is inferred from `allow write`, because
+    proving it takes a real write.
+  - **The comment claiming a `type="number"` input can drop "12,5" in an es
+    locale was reasoned, not measured.** The input is `type="text"
+    inputMode="decimal"` either way.
+
+  ── **Deployed and verified in production** ─────────────────────────────────
+
+  Merged at `3ee9750`:
+  - **Deploy run.** It concluded **`success`** on both jobs. That was read off
+    the run itself rather than inferred from "not failed", because a
+    *cancelled* run skips the deploy silently.
+  - **Cloud Run.** Tag `app:3ee97504…` **equals `git rev-parse master`**, on
+    revision `00041-25g` at 100% of traffic.
+  - **Routes.** All ten return 200 on both hosts. Static routes send
+    `s-maxage=300`, and `/admin/pets/{id}` sends
+    `private, no-cache, no-store`.
+  - **Auth boundary.** 401 / 401 / 405 on both hosts.
+  - **Served `/admin/pets/{id}` bundle** (13 chunks, 1346 KB). It carries
+    `Agregar medición`, `Peso y condición corporal`, `no para calcular una
+    dosis`, the three-decimal refusal and **`Guárdalo`**, and it does **not**
+    carry `Guardalo`. That absence means something only because the probe
+    first confirmed the old needle was present in `03561e4`'s `es.ts`. The
+    stylesheet carries `admin-list__item--record`.
+  - **Leaks.** `GEMINI_API_KEY`, `generativelanguage` and
+    `createGoogleGenerativeAI` are absent. The homepage has no Firebase SDK
+    fingerprint and no measurement copy.
+
+  **Two sizes differ from this file's last record, and neither is explained.**
+  - The homepage is **8 chunks / 579 KB**; 2026-08-27 recorded 9 / 635 KB.
+  - `/admin/pets/{id}` is **1346 KB**; 2026-08-27 recorded 1391 KB, even
+    though this PR added a panel to it.
+
+  Nothing in PR #43 touches the homepage, so the likeliest cause is the `next`
+  16.2.12 → 16.3.5 bump in PR #40. That is an inference, not a measurement.
+  Take these as the new baselines.
+
+  **This session wrote nothing lasting to Firestore.** The probe's read-back
+  showed 0 documents in the `measurements` collection group, that the probe pet
+  id never existed, and no `users/{uid}` for the deleted probe account.
 
 ---
 
