@@ -29,6 +29,7 @@
  */
 
 import type { MedicalRecordKind } from './types';
+import { isDateAfterToday } from './date-input';
 import { CLOCK_SKEW_TOLERANCE_MS } from './placements';
 import { awaitingReview, confirmedOnly, isConfirmed, type Confirmable } from './review-gate';
 
@@ -105,10 +106,13 @@ export type MedicalError =
   | 'valid-until-before-valid-from';
 
 /**
- * ⚠️ Clock skew is real here. Firestore's clock measured 2.7 s AHEAD of the dev
- * machine on 2026-08-24, and a browser clock drifts by minutes. Without the
- * tolerance, a vet entering "today" would sometimes be told the date is in the
- * future.
+ * ⚠️ Compares CALENDAR DAYS, not instants — see `isDateAfterToday` in
+ * `date-input.ts`. `parseDateInput` stamps a picked date at local noon, so an
+ * instant comparison told a vet entering "today" it hadn't arrived yet for
+ * every save made before local noon. Clock skew is layered on top of that:
+ * Firestore's clock measured 2.7 s AHEAD of the dev machine on 2026-08-24, and
+ * a browser clock drifts by minutes, so `CLOCK_SKEW_TOLERANCE_MS` is added
+ * before the day comparison too.
  */
 export function validateMedicalDraft(
   draft: MedicalRecordDraft,
@@ -121,7 +125,7 @@ export function validateMedicalDraft(
 
   if (draft.performedAt === null) {
     errors.push('performed-required');
-  } else if (draft.performedAt > now + CLOCK_SKEW_TOLERANCE_MS) {
+  } else if (isDateAfterToday(draft.performedAt, now, CLOCK_SKEW_TOLERANCE_MS)) {
     errors.push('performed-in-future');
   }
 
