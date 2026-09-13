@@ -9,6 +9,10 @@
 import type { Messages } from './messages';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
+import type { MedicalReviewCopy } from './messages';
+import type { FieldEvidence, MedicalExtractionSource, WithheldReason } from '@/lib/types';
+import type { CardField } from '@/lib/card-extraction';
+import type { CardExtractFailure } from '@/lib/card-extract-client';
 import type {
   AreaKind,
   MedicalRecordKind,
@@ -509,4 +513,129 @@ export const es: Messages = {
     const whole = Math.floor(days);
     return `${whole} ${whole === 1 ? 'día' : 'días'} juntos`;
   },
+
+  // ── the medical review gate, and reading a vaccination card (step 9) ──────
+
+  medicalReview: {
+    unconfirmedBadge: 'Sin confirmar',
+    notCounted:
+      'Todavía no cuenta: no aparece en las próximas dosis, los vencimientos ni las alertas hasta que alguien lo confirme mirando la tarjeta.',
+    confirm: 'Confirmar',
+    correctAndConfirm: 'Corregir y confirmar',
+    saveAndConfirm: 'Guardar y confirmar',
+    discard: 'Descartar',
+    confirmNeedsEdit:
+      'Falta completar lo marcado antes de confirmar. Usa «Corregir y confirmar».',
+    showCard: 'Ver tarjeta',
+    hideCard: 'Ocultar tarjeta',
+    cardAlt: 'Foto de la tarjeta de vacunación',
+    unknownKind: 'Tipo sin leer',
+    unknownName: 'Nombre sin leer',
+    unknownDate: 'Fecha sin leer',
+    reviewingNotice:
+      'Estás revisando datos leídos de una tarjeta. Compara cada uno con la foto: al guardar, tu nombre queda como quien los confirmó.',
+    captureTitle: 'Leer una tarjeta de vacunación',
+    captureHint:
+      'Fotografía la tarjeta completa, de frente y con buena luz. Cada registro que se lea queda sin confirmar hasta que lo revises.',
+    captureTakePhoto: 'Fotografiar tarjeta',
+    captureGallery: 'Galería',
+    captureRetry: 'Leer otra vez',
+    captureUploading: 'Guardando la foto de la tarjeta…',
+    captureUploadFailed:
+      'No pudimos guardar la foto de la tarjeta. Revisa tu conexión e inténtalo de nuevo.',
+    captureUnreadable:
+      'No pudimos abrir esa foto. Prueba tomarla con la cámara desde aquí, o elige una en JPG.',
+    captureReading: 'Leyendo la tarjeta…',
+    captureSavedNote: 'la foto de la tarjeta ya se guardó y queda aunque la lectura falle.',
+  } satisfies MedicalReviewCopy,
+
+  extractionSourceLabel(source: MedicalExtractionSource | null) {
+    if (source === 'vaccination-card') return 'Leído de una tarjeta de vacunación';
+    if (source === 'dictation') return 'Dictado en consulta';
+    return 'Extraído automáticamente';
+  },
+
+  cardFieldLabel(field: CardField) {
+    const labels: Record<CardField, string> = {
+      kind: 'Tipo',
+      name: 'Qué se aplicó',
+      performedAt: 'Fecha',
+      nextDueAt: 'Próxima dosis',
+      batch: 'Lote',
+      manufacturer: 'Laboratorio',
+      veterinarian: 'Veterinario',
+      clinic: 'Clínica o campaña',
+    };
+    return labels[field];
+  },
+
+  evidenceLine({ snippet, confidence, withheld }: FieldEvidence) {
+    // "92 %", with the space the RAE recommends.
+    const pct = `${Math.round(confidence * 100)} %`;
+    const read = snippet === null ? null : `«${snippet}»`;
+    const reason: WithheldReason | null = withheld;
+    switch (reason) {
+      case 'low-confidence':
+        return read
+          ? `Leído con dudas: ${read} (${pct}). No se completó: revísalo en la tarjeta.`
+          : 'No se pudo leer con seguridad. Revísalo en la tarjeta.';
+      case 'unreadable-date':
+        return `Leído: ${read ?? '—'}, pero no se entiende como fecha. No se completó.`;
+      case 'implausible-date':
+        return `Leído: ${read ?? '—'}, pero esa fecha no es posible. No se completó.`;
+      case 'too-long':
+        return 'Lo leído es demasiado largo para ser un solo dato. No se completó.';
+      case 'disputed':
+        return 'Las dos lecturas no coinciden. No se completó.';
+      default:
+        return read ? `Leído: ${read} (${pct})` : 'No se leyó nada en la tarjeta.';
+    }
+  },
+
+  cardExtractFailure(failure: CardExtractFailure) {
+    const messages: Record<CardExtractFailure, string> = {
+      'not-configured':
+        'La lectura automática de tarjetas no está disponible ahora. La foto quedó guardada; puedes cargar los registros a mano.',
+      unauthorized:
+        'No tienes permiso para leer tarjetas. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+      'already-extracted': 'Esta tarjeta ya se leyó: sus registros están en la lista.',
+      'photo-rejected':
+        'No pudimos usar esa foto. Prueba con otra foto de la tarjeta, de frente y con buena luz.',
+      'pet-missing': 'Esta ficha ya no existe.',
+      timeout:
+        'La lectura tardó demasiado y la cortamos. La foto ya está guardada: puedes intentar otra vez.',
+      failed:
+        'No pudimos leer la tarjeta. La foto ya está guardada: puedes intentar otra vez o cargar los registros a mano.',
+    };
+    return messages[failure];
+  },
+
+  cardExtractSummary({ written, droppedRows, notACard }) {
+    if (notACard) {
+      return 'Esa foto no parece una tarjeta de vacunación ni de desparasitación, así que no se cargó nada.';
+    }
+    if (written === 0) {
+      return droppedRows > 0
+        ? 'No se pudo leer con seguridad ninguna fila. Cárgalas a mano mirando la foto.'
+        : 'No se encontró ningún registro legible en la tarjeta.';
+    }
+    const read =
+      written === 1
+        ? 'Se leyó 1 registro. Queda sin confirmar: revísalo con la tarjeta a la vista.'
+        : `Se leyeron ${written} registros. Quedan sin confirmar: revísalos uno por uno con la tarjeta a la vista.`;
+    if (droppedRows === 0) return read;
+    const dropped =
+      droppedRows === 1
+        ? 'Una fila no se pudo leer y hay que cargarla a mano.'
+        : `${droppedRows} filas no se pudieron leer y hay que cargarlas a mano.`;
+    return `${read} ${dropped}`;
+  },
+
+  awaitingReviewCount(count: number) {
+    return count === 1 ? '1 registro espera revisión' : `${count} registros esperan revisión`;
+  },
+
+  confirmedByLabel: (by: string) => `Confirmado por ${by}`,
+
+  nextDueSummary: (name: string, dateText: string) => `Lo próximo: ${name}, el ${dateText}.`,
 };
