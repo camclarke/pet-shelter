@@ -67,6 +67,10 @@ export const PROCESS_LABELS = {
    * benchmarking must never read as the shelter's own spend.
    */
   card_extract_eval: 'Evaluación de lectura de tarjetas (banco de pruebas)',
+  /** Donation text → line items, on the Flash-Lite ladder. Plan §12.1. */
+  food_parse: 'Lectura de donaciones de comida',
+  /** `npm run eval:food-parse`, kept apart for the reason given above. */
+  food_parse_eval: 'Evaluación de lectura de donaciones (banco de pruebas)',
 } as const;
 
 export type AiProcess = keyof typeof PROCESS_LABELS;

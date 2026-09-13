@@ -89,6 +89,9 @@ export function AdminDashboard() {
           <Link href="/admin/applications" className="btn btn--muted">
             {t.applications.queueLink}
           </Link>
+          <Link href="/admin/food" className="btn btn--muted">
+            {t.food.navLabel}
+          </Link>
           <Link href="/admin/intake" className="btn btn--action">
             + Nuevo ingreso
           </Link>
