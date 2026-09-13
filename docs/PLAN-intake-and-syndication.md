@@ -347,12 +347,15 @@ clinical quantity. Drug dosing is `mg/kg` and energy requirement is a function o
 export interface PetMeasurement {
   id: string;
   weightKg: number | null;
-  /** WSAVA 9-point Body Condition Score. 1 emaciated, 5 ideal, 9 obese. */
+  /** WSAVA 9-point Body Condition Score. 1 emaciated, 4–5 ideal, 9 obese. */
   bcs: number | null;
   /** WSAVA Muscle Condition Score — separate axis from fat. */
-  mcs: 'normal' | 'leve' | 'moderada' | 'marcada' | null;
+  mcs: 'normal' | 'mild' | 'moderate' | 'marked' | null;
   measuredAt: Timestamp;
-  measuredBy: string;
+  /** Who weighed or scored — usually the vet, who usually has no account. */
+  measuredBy: string | null;
+  /** The admin account that typed it in. Never overwritten by an edit. */
+  recordedBy: string;
   note: string | null;
 }
 ```
@@ -360,8 +363,20 @@ export interface PetMeasurement {
 **Why a subcollection and not two fields on `Pet`.** "The fat ones are reduced,
 the slim are increased" is a **feedback loop**, and a feedback loop needs a
 trend, not a current value. One BCS reading tells you a dog is thin; a sequence
-tells you whether the extra ladle is working. Latest values get denormalised onto
-`Pet` for the wall and for dose calculation, the way `coverPhoto` already is.
+tells you whether the extra ladle is working.
+
+~~Latest values get denormalised onto `Pet` for the wall and for dose
+calculation, the way `coverPhoto` already is.~~ **Reversed 2026-09-12, when this
+was built: nothing is copied onto `Pet`.** Three reasons. `pets/{petId}` is
+public-read while `measurements` is authenticated, so a copy would move an
+authenticated-tier value into the public tier — which this project's rule that a
+new tier is a new document, never a new field, exists to prevent. A dose needs
+the weight's DATE as much as its number, because an animal weighed months ago is
+not that weight now, and the subcollection already carries both. And `Pet`
+already holds the intake photo's estimated range (`weightKgMin`/`weightKgMax`,
+`weightIsEstimate`); writing a measured weight into the same neighbourhood is how
+the two get confused. Dosing and rations read `latestWeight()` from
+`src/lib/measurements.ts` instead — one extra read, on an internal page.
 
 **BCS is a real standard, not an ad-hoc field.** The
 [WSAVA Global Nutrition Guidelines](https://wsava.org/global-guidelines/global-nutrition-guidelines/)
@@ -1090,6 +1105,11 @@ in this plan.
    exists. If it does not, every `mg/kg` dose and every RER figure is an estimate
    built on an estimate, and that should be visible in the UI rather than hidden
    behind a computed number. This is worth asking before building step 10.
+   **Answered by the owner 2026-09-12:** yes, the shelter has a scale; animals
+   are weighed when sick or at a vet visit, not on a schedule; and the
+   veterinarian scores body condition. So a weight is shown as measured, there
+   is no overdue logic (only the age of the latest reading), and who weighed or
+   scored is recorded apart from who typed it in. Step 10 built on that.
 8. **Who dictates — the vet, or a volunteer relaying?** §4.7 assumes the vet
    speaks and confirms their own record. If a volunteer transcribes on their
    behalf, `dictatedByUid` and professional responsibility come apart, and the

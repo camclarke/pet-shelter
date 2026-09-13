@@ -22,6 +22,7 @@
 import type {
   AreaKind,
   MedicalRecordKind,
+  MuscleCondition,
   PetSex,
   PetSize,
   PetStatus,
@@ -34,6 +35,7 @@ import type { MicrochipError } from '@/lib/microchip';
 import type { AuthError } from '@/lib/auth';
 import type { IntakeError } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
+import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
 
 export interface Messages {
   /** BCP 47 tag, e.g. "es-BO". */
@@ -158,6 +160,32 @@ export interface Messages {
    * recording a campaign dose it did not administer and cannot change.
    */
   medicalWarning(warning: MedicalWarning): string;
+
+  /** Why a weight or body-condition reading cannot be saved. Structural only. */
+  measurementError(error: MeasurementError): string;
+
+  /**
+   * A reason to look twice at a weight that must NOT block saving. The person
+   * with the animal on the scale is the one who knows whether it is real.
+   */
+  measurementWarning(warning: MeasurementWarning): string;
+
+  /** A WSAVA body-condition score with its band: "5 · Ideal". */
+  bodyConditionLabel(score: number): string;
+
+  muscleConditionLabel(condition: MuscleCondition): string;
+
+  /** A weight for READING, with its unit: "12,5 kg". */
+  formatKg(kg: number): string;
+
+  /** An estimated range for reading: "18–26 kg". */
+  formatKgRange(minKg: number, maxKg: number): string;
+
+  /**
+   * A weight as an INPUT's value: "12,5", no unit and no grouping, so that
+   * `parseWeightInput` reads back exactly the number it was given.
+   */
+  formatKgInput(kg: number): string;
 
   /** Validation message for a rejected microchip code. */
   microchipError(error: MicrochipError): string;

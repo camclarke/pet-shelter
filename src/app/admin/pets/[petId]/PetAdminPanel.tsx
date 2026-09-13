@@ -28,6 +28,7 @@ import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
 import { formatDate, parseDateInput, todayInputValue } from '@/lib/date-input';
 import MedicalPanel from './MedicalPanel';
+import MeasurementPanel from './MeasurementPanel';
 import {
   placementWarnings,
   summarizeArea,
@@ -358,6 +359,16 @@ export function PetAdminPanel({ petId }: { petId: string }) {
       <MedicalPanel
         petId={petId}
         birthdateApprox={pet?.birthdateApprox ? pet.birthdateApprox.toMillis() : null}
+      />
+
+      {/* ── weight and body condition: build-order step 10 ────────────────
+          The estimate is passed only when the pet document says it IS one,
+          so the panel can label it as unfit for a dose. */}
+      <MeasurementPanel
+        petId={petId}
+        species={pet?.species ?? null}
+        estimatedKgMin={pet?.weightIsEstimate ? (pet.weightKgMin ?? null) : null}
+        estimatedKgMax={pet?.weightIsEstimate ? (pet.weightKgMax ?? null) : null}
       />
 
       {/* ── the history ──────────────────────────────────────────────────── */}
