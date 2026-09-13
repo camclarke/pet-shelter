@@ -119,6 +119,8 @@ export interface TagMessages {
   readonly sheetTitle: string;
   readonly sheetIntro: string;
   readonly sheetEmpty: string;
+  /** The sheet lists a capped number of animals; say so when the cap bites. `total` null = count unknown. */
+  sheetTruncated(shown: number, total: number | null): string;
   readonly sheetLink: string;
   readonly noTag: string;
   readonly selectAll: string;

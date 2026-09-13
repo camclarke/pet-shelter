@@ -39,7 +39,13 @@ function failureMessage(caught: unknown, fallback: string): string {
 }
 
 export function QrTagPanel({ petId, petName }: { petId: string; petName: string }) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  // Gated on the admin CLAIM, not on being signed in. Today this component
+  // only mounts inside AdminGate, so the two coincide — but the view below is
+  // exported to render on its own, and a button offering a write the rules
+  // will refuse is the "gate quietly believed to be authorization" mistake
+  // one level down. The rules remain the boundary either way.
+  const canWrite = isAdmin && user !== null;
   const [tokens, setTokens] = useState<QrTokenView[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,13 +91,13 @@ export function QrTagPanel({ petId, petName }: { petId: string; petName: string 
       busy={busy}
       error={error}
       confirming={confirming}
-      canWrite={user !== null}
+      canWrite={canWrite}
       onConfirm={setConfirming}
-      onIssue={() => user && void run(() => issueQrToken(petId, user), t.tag.issueFailed)}
+      onIssue={() => canWrite && user && void run(() => issueQrToken(petId, user), t.tag.issueFailed)}
       onReissue={() =>
-        user && active && void run(() => issueQrToken(petId, user, [active.token]), t.tag.issueFailed)
+        canWrite && user && active && void run(() => issueQrToken(petId, user, [active.token]), t.tag.issueFailed)
       }
-      onRevoke={() => active && void run(() => revokeQrToken(active.token), t.tag.revokeFailed)}
+      onRevoke={() => canWrite && active && void run(() => revokeQrToken(active.token), t.tag.revokeFailed)}
     />
   );
 }
@@ -170,7 +176,7 @@ export function QrTagPanelView({
               type="button"
               className="btn btn--action"
               onClick={confirming === 'revoke' ? onRevoke : onReissue}
-              disabled={busy}
+              disabled={busy || !canWrite}
             >
               {busy ? t.tag.issuing : confirming === 'revoke' ? t.tag.confirmRevoke : t.tag.confirmReissue}
             </button>
@@ -190,10 +196,10 @@ export function QrTagPanelView({
               <Link href={`/admin/pets/${petId}/qr`} className="btn btn--action">
                 {t.tag.print}
               </Link>
-              <button type="button" className="btn btn--muted" onClick={() => onConfirm('reissue')} disabled={busy}>
+              <button type="button" className="btn btn--muted" onClick={() => onConfirm('reissue')} disabled={busy || !canWrite}>
                 {t.tag.reissue}
               </button>
-              <button type="button" className="btn btn--muted" onClick={() => onConfirm('revoke')} disabled={busy}>
+              <button type="button" className="btn btn--muted" onClick={() => onConfirm('revoke')} disabled={busy || !canWrite}>
                 {t.tag.revoke}
               </button>
             </>

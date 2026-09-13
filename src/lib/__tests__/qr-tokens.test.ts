@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   CROCKFORD_ALPHABET,
   PUBLIC_TAG_PET_FIELDS,
+  QR_SHEET_PET_LIMIT,
   QR_TOKEN_LENGTH,
   QR_TOKEN_PATTERN,
   activeTokenOf,
@@ -16,6 +17,7 @@ import {
   qrTagDisplayUrl,
   qrTagUrl,
   resolveTag,
+  sheetTruncation,
   tagTone,
   toPublicTagPet,
   tokenRecordFrom,
@@ -348,6 +350,17 @@ test('a pet id that cannot name a document is never handed to the reader', async
     assert.deepEqual(await resolveTag('ABCDEFGHJK', deps), { kind: 'unknown' }, petId);
     assert.deepEqual(calls.pet, [], petId);
   }
+});
+
+test('the batch sheet says when its list was capped, and only then', () => {
+  assert.equal(sheetTruncation(12, 12, 50), null);
+  assert.equal(sheetTruncation(50, 50, 50), null);
+  assert.deepEqual(sheetTruncation(50, 51, 50), { shown: 50, total: 51 });
+  assert.deepEqual(sheetTruncation(50, 380, 50), { shown: 50, total: 380 });
+  // Count unknown: a full page is treated as capped, a short one is not.
+  assert.deepEqual(sheetTruncation(50, null, 50), { shown: 50, total: null });
+  assert.equal(sheetTruncation(49, null, 50), null);
+  assert.equal(QR_SHEET_PET_LIMIT, 50);
 });
 
 test('the admin screen shows the newest ACTIVE token, never a revoked one', () => {

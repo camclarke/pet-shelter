@@ -613,6 +613,12 @@ export const es: Messages = {
     sheetIntro:
       'Para un ingreso de varios animalitos a la vez: marca los que necesitan placa, emite las que falten e imprime una sola hoja.',
     sheetEmpty: 'Todavía no hay animalitos publicados.',
+    sheetTruncated: (shown, total) =>
+      `${
+        total === null
+          ? `Solo se muestran los ${shown} registros más recientes.`
+          : `Se muestran los ${shown} registros más recientes de ${total}.`
+      } Si un animalito no aparece, emite e imprime su placa desde su ficha interna.`,
     sheetLink: 'Placas QR',
     noTag: 'sin placa',
     selectAll: 'Marcar todos',
