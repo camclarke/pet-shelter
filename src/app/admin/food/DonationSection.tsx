@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
-import { formatDate, parseDateInput, toDateInput, todayInputValue } from '@/lib/date-input';
+import { dayToInstant, formatDate, parseDateInput, toDateInput, todayInputValue } from '@/lib/date-input';
 import { listRecentDonations, saveDonation, type DonationView } from '@/lib/food-admin';
 import {
   emptyDonationLine,
@@ -14,7 +14,7 @@ import {
   type DonationLineDraft,
 } from '@/lib/food-parse';
 import { requestDonationParse } from '@/lib/food-parse-client';
-import { FOOD_CATEGORIES, dayToInstant } from '@/lib/food-stock';
+import { FOOD_CATEGORIES } from '@/lib/food-stock';
 import type { FoodCategory } from '@/lib/types';
 import { loadErrorText } from './FoodPanel';
 

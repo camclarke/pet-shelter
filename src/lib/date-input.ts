@@ -36,27 +36,38 @@ export function todayInputValue(): string {
 }
 
 /**
- * Is `dateMs` after today, comparing LOCAL CALENDAR DAYS rather than exact
- * instants?
+ * The instant a picked day stands for: `now` when the day is today, otherwise
+ * the day as given — `parseDateInput`'s local midday.
  *
- * ⚠️ A validator that compares instants (`dateMs > now`) rejects a record
- * dated TODAY from local midnight until `now`'s clock time catches up to
- * `dateMs`'s. `parseDateInput` stamps a picked date at local NOON, so a form
- * defaulting to `todayInputValue()` produced a `performedAt`/`measuredAt` in
- * the caller's future for every save made before local noon — a shelter
- * recording a morning vaccination or weighing was told the date "hasn't
- * arrived yet" and had to backdate to yesterday to save at all. Comparing the
- * CALENDAR DAY instead accepts today at any hour and rejects only a
- * genuinely later day.
+ * ⚠️ `parseDateInput` returns LOCAL MIDDAY, which protects the calendar day
+ * across timezones and is wrong for "today" before noon: 12:00 is then hours in
+ * the caller's future. A shelter recording a morning vaccination, weighing or
+ * donation was told the date "hasn't arrived yet".
  *
- * `toleranceMs` is added to `now` before the comparison so the existing
- * clock-skew allowance still works across midnight: a browser clock a few
- * minutes behind the real day must not have "today" (its real today, our
- * tomorrow) refused. `toDateInput` zero-pads, so the `YYYY-MM-DD` strings
- * compare correctly as strings — no `Date` arithmetic needed here.
+ * Until 2026-09-13 that bug was fixed twice, two different ways: this function
+ * in the food forms, and a calendar-day comparison in the medical and weight
+ * validators. This is the one kept, because it is the only one that works where
+ * FIRESTORE RULES check the stored instant — `notInFuture()` on the food
+ * collections compares instants, and rules cannot know the caller's local day.
+ * Two uses, one definition of "today":
+ *
+ *  - Before STORING a day the rules time-check (food): store
+ *    `dayToInstant(picked)`, so the rule sees an instant that is not ahead.
+ *  - Inside a VALIDATOR for a collection the rules do not time-check (medical
+ *    records, measurements): refuse when
+ *    `dayToInstant(value, now + tolerance) > now + tolerance`. That accepts
+ *    today at any hour and refuses only a later day, however the date reached
+ *    the form — typed, defaulted, or read off a vaccination card as UTC
+ *    midday, which is 08:00 in Bolivia.
+ *
+ * Passing `now + tolerance` as `now` keeps the clock-skew allowance working
+ * across midnight: at 23:57 with five minutes of tolerance, "tomorrow" is the
+ * tolerant today, so a browser clock a few minutes behind the real day does not
+ * refuse the real today. A past day keeps its midday, and so does a genuinely
+ * future day, which the comparison then refuses.
  */
-export function isDateAfterToday(dateMs: number, now: number, toleranceMs: number): boolean {
-  return toDateInput(dateMs) > toDateInput(now + toleranceMs);
+export function dayToInstant(dayMs: number, now: number = Date.now()): number {
+  return toDateInput(dayMs) === toDateInput(now) ? now : dayMs;
 }
 
 /** Epoch ms as Bolivian-readable text. */
