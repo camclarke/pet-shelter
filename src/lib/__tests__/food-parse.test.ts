@@ -318,3 +318,40 @@ test('LADDER: donation parsing never touches a Flash-tier quota, and every tier 
     assert.equal(hasPricingRow(model), true, `${model} has no pricing row`);
   }
 });
+
+// ─── wiring: one retry policy, one clock ─────────────────────────────────────
+//
+// `src/lib/ai/food-parse.ts` imports `server-only` and cannot be loaded here, so
+// these read its source. Crude, and evadable by indirection; they exist so the
+// hand-rolled retry loop removed on 2026-09-13 cannot quietly come back.
+
+/** Source with comments removed, so a comment naming a call cannot satisfy a check. */
+function code(file: string): string {
+  return readFileSync(join(process.cwd(), file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+test('WIRING: donation parsing retries through retryWithinDeadline, with no retry loop of its own', () => {
+  const src = code('src/lib/ai/food-parse.ts');
+  assert.match(src, /retryWithinDeadline\(/, 'must retry through retryWithinDeadline');
+  assert.match(src, /walkModelLadder\(/, 'must walk the ladder under one deadline');
+  assert.match(src, /abortSignal:\s*AbortSignal\.timeout\(budgetMs\)/, 'each attempt gets the budget retryWithinDeadline sizes');
+  assert.match(src, /maxRetries:\s*0/, "the SDK's own retries must stay off");
+  for (const piece of ['for (let attempt', 'SUGGEST_MAX_ATTEMPTS', 'retryBackoffMsFor', 'isRetryableFailure', 'SUGGEST_MIN_RETRY_MS']) {
+    assert.equal(src.includes(piece), false, `${piece} belongs to retryWithinDeadline, not to food-parse.ts`);
+  }
+});
+
+test('WIRING: the parse route counts the deadline from the moment the request arrived', () => {
+  const src = code('src/app/api/food/parse/route.ts');
+  const arrived = src.indexOf('const arrivedAt = Date.now()');
+  const firstAwait = src.indexOf('await ');
+  assert.ok(arrived >= 0, 'the route must note when the request arrived');
+  assert.ok(arrived < firstAwait, 'arrivedAt must be taken before the first await');
+  assert.match(
+    src,
+    /parseDonationText\(text,\s*\{\s*deadline:\s*arrivedAt\s*\+\s*SUGGEST_TOTAL_BUDGET_MS/,
+    'the route must pass that deadline to parseDonationText'
+  );
+});

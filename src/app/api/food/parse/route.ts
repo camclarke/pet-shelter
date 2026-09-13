@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 
-import { getAdminAuth } from '@/lib/firebase-admin';
+import { verifyAdminIdToken } from '@/lib/firebase-admin';
+import { requireAdmin } from '@/lib/require-admin';
 import { aiIsConfigured } from '@/lib/ai/google';
 import { parseDonationText } from '@/lib/ai/food-parse';
-import { isTimeoutFailure } from '@/lib/ai/suggest-budget';
+import { SUGGEST_TOTAL_BUDGET_MS, isTimeoutFailure } from '@/lib/ai/suggest-budget';
 import { DONATION_TEXT_MAX_CHARS, reviewParsedDonation } from '@/lib/food-parse';
 import { FOOD_PARSE_FAILURE_HEADER } from '@/lib/food-parse-client';
 
@@ -36,20 +37,16 @@ function fail(error: string, status: number): NextResponse {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  // ── 1. authenticate — BEFORE anything else, so an anonymous caller learns
-  //       nothing, not even whether the feature is configured ──────────────
-  const header = request.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!token) return fail('unauthenticated', 401);
+  // Firebase Hosting's 60 s started when this request reached the edge. The
+  // closest we can get is now, before any await — so the model's deadline is
+  // counted from here, not from after the token check and the body read.
+  const arrivedAt = Date.now();
 
-  let isAdmin = false;
-  try {
-    const decoded = await getAdminAuth().verifyIdToken(token, true);
-    isAdmin = decoded.admin === true;
-  } catch {
-    return fail('unauthenticated', 401);
-  }
-  if (!isAdmin) return fail('forbidden', 403);
+  // ── 1. authenticate — BEFORE anything else, so an anonymous caller learns
+  //       nothing, not even whether the feature is configured.
+  //       `require-admin.ts` verifies with checkRevoked ────────────────────────
+  const auth = await requireAdmin(request, verifyAdminIdToken);
+  if (!auth.ok) return fail(auth.error, auth.status);
 
   // ── 2. configured ──────────────────────────────────────────────────────────
   if (!aiIsConfigured()) return fail('ai-not-configured', 503);
@@ -69,7 +66,9 @@ export async function POST(request: Request): Promise<Response> {
   // ── 4. parse, then apply the policy SERVER-side ───────────────────────────
   const started = Date.now();
   try {
-    const { parsed, modelKey } = await parseDonationText(text);
+    const { parsed, modelKey } = await parseDonationText(text, {
+      deadline: arrivedAt + SUGGEST_TOTAL_BUDGET_MS,
+    });
     const review = reviewParsedDonation(text, parsed);
     console.info(
       `[food-parse] ok in ${Date.now() - started}ms chars=${text.length} items=${parsed.items.length} grounded=${review.lines.filter((l) => l.grounded).length}`
