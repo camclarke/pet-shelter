@@ -257,7 +257,7 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
             <div className="answer">
               <dt>{copy.phoneLabel}</dt>
               <dd>
-                <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="auth__link">
+                <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="auth__link answer__link">
                   {phone}
                 </a>
               </dd>
