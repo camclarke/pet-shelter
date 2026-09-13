@@ -1852,6 +1852,64 @@ textarea {
   background: var(--cream-2);
 }
 
+/* ---- food, step 13 ------------------------------------------------------ */
+/* Built from the admin console's existing pieces: tabs are the step rail, rows
+   are record rows, warnings are placement warnings. Only three things are new:
+   a 44px floor on the two controls below it (the step rail's 9px padding is
+   ~40px, fine for a desktop wizard and short of the phone target this screen
+   is for), a coral edge that marks a TOXIC warning apart from an ordinary one,
+   and the pantry list. Coral stays a fill or an edge, never body text. */
+.food-tabs .admin-steps__item,
+.food-check {
+  min-height: 44px;
+}
+
+.food-lines {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.place-warnings li.is-toxic,
+.auth__error.is-toxic {
+  border-color: var(--coral);
+  border-left-width: 6px;
+  font-weight: 600;
+}
+
+.food-stock {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.food-stock li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px var(--space-2);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  overflow-wrap: anywhere;
+}
+
+.food-stock li.is-negative {
+  border-left: 4px solid var(--coral);
+}
+
+.food-stock__note {
+  flex-basis: 100%;
+}
+
+.food-notice {
+  opacity: 0.85;
+}
+
 .place-now {
   margin-top: var(--space-1);
   font-size: 16px;
