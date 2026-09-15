@@ -36,6 +36,8 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/
+# The maintainer's local project log.
+CLAUDE.md
 
 # seed data
 # Real pet files and their photos are the shelter's own content, not the
