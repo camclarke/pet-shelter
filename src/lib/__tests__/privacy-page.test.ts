@@ -3,8 +3,8 @@
  *
  * The page is prose about the code, so no type checks it. These tests pin the
  * claims that would otherwise turn false silently: a tracking script added
- * while the page says there is none, or account deletion starting to remove
- * the adoption applications the page says are kept.
+ * while the page says there is none, or an adoption application becoming
+ * erasable while the page says it is kept.
  */
 
 import { test } from 'node:test';
@@ -12,7 +12,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const read = (path: string) => readFileSync(path, 'utf8');
+// LF-normalised, so a CRLF checkout on Windows reads the same as CI.
+const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -20,6 +21,15 @@ function sourceFiles(dir: string): string[] {
     if (entry.isDirectory()) return entry.name === '__tests__' ? [] : sourceFiles(path);
     return /\.(ts|tsx|js|mjs)$/.test(entry.name) ? [path] : [];
   });
+}
+
+/** The top-level `match /adoptionApplications/{applicationId}` block, nested matches included. */
+function applicationRules(): string {
+  const rules = read('firestore.rules');
+  const start = rules.indexOf('\n    match /adoptionApplications/{applicationId} {');
+  assert.ok(start >= 0, 'firestore.rules no longer has the adoptionApplications block');
+  const end = rules.indexOf('\n    match /', start + 1);
+  return rules.slice(start, end === -1 ? undefined : end);
 }
 
 test('the privacy page keeps the revalidate that stops a year-long Hosting cache', () => {
@@ -37,8 +47,34 @@ test('the page says there is no analytics, so no analytics or ad script may exis
   assert.deepEqual(offenders, [], 'update src/app/privacy/page.tsx in the same change that adds tracking');
 });
 
-test('the page says applications survive account deletion, and the deletion handler agrees', () => {
-  assert.match(read('src/app/privacy/page.tsx'), /la conservamos como registro/);
-  const handler = read('src/lib/account-delete.ts');
-  assert.doesNotMatch(handler, /adoptionApplications|deleteApplication/, 'deleting an account now removes applications: update the privacy page');
+test('the page says an application survives account deletion, and no handler or rule can erase it', () => {
+  assert.match(read('src/app/privacy/page.tsx'), /no se borra cuando\s+borras tu cuenta/);
+
+  for (const file of ['src/lib/account-delete.ts', 'src/app/api/account/delete/route.ts']) {
+    assert.doesNotMatch(
+      read(file),
+      /adoptionApplications|['"]adoptions['"]|deleteApplication|deleteAdoption/,
+      `${file} now touches adoption records: update the privacy page`,
+    );
+  }
+
+  // The application's own rules sit six spaces deep; nested blocks sit deeper.
+  // Any delete or write grant there other than `if false` makes it erasable.
+  const block = applicationRules();
+  assert.match(block, /^ {6}allow delete: if false;$/m);
+  assert.doesNotMatch(
+    block,
+    /^ {6}allow [a-z, ]*\b(?:delete|write)\b[a-z, ]*: if (?!false;)/m,
+    'the rules now let someone erase an application: update the privacy page',
+  );
+});
+
+test('the page lists what an application stores, and the rules still ask for it', () => {
+  assert.match(read('src/app/privacy/page.tsx'), /Guarda tu nombre, tu WhatsApp, tu correo/);
+  const keys = applicationRules().match(/applicationAnswerKeys\(\) \{\s*return \[([^\]]*)\]/);
+  const listed = keys?.[1];
+  assert.ok(listed, 'applicationAnswerKeys() not found in firestore.rules');
+  for (const key of ['fullName', 'whatsapp']) {
+    assert.ok(listed.includes(`'${key}'`), `the application no longer asks for ${key}: update the privacy page`);
+  }
 });

@@ -17,13 +17,22 @@ export const revalidate = 300;
 /**
  * DRAFT for the shelter to review before it is published.
  *
- * Every statement below describes what the code and the deployment do today.
+ * Every statement below describes what the code, the deployment and the
+ * shelter team do today. Keeping adoption applications is the owner's policy
+ * (2026-09-15). The app enforces the part it can: no screen or rule erases an
+ * application, and deleting an account leaves it in place. The team applies
+ * the rest (when an erasure request is granted, legal hold, refused adopters)
+ * when someone asks.
+ *
  * Update this page in the same change as any of these:
  *   - the online adoption application is switched on
- *     (`SHELTER.adoptionApplications.enabled` and `applicationsEnabled()`);
+ *     (`SHELTER.adoptionApplications.enabled` and `applicationsEnabled()`), or
+ *     its questions stop asking for a name or a WhatsApp number;
  *   - an analytics, advertising or other tracking script is added;
  *   - personal data is stored somewhere new, or a new provider receives it;
  *   - what deleting an account removes or keeps (`src/lib/account-delete.ts`);
+ *   - a screen, script or rule starts erasing adoption applications, or a
+ *     legal hold or refused-adopter list is built into the app;
  *   - the auth-email sender moves off Resend, or the server-log retention
  *     changes.
  *
@@ -163,13 +172,32 @@ export default function PrivacyPage() {
             y tu contraseña.
           </li>
           <li>
-            Desde ahí mismo puedes borrar tu cuenta. Se borran tu perfil, las fotos que subiste y la
-            cuenta.
+            Desde ahí mismo puedes borrar tu cuenta cuando quieras. Se borran tu perfil, las fotos
+            que subiste y tu acceso.
+          </li>
+        </ul>
+      </section>
+
+      <section style={section}>
+        <h2 style={heading}>Postulaciones de adopción y retención legal</h2>
+        <p style={para}>
+          Si postulas en línea para adoptar, tu postulación es un registro del refugio sobre lo que
+          pasó con un animalito. Guarda tu nombre, tu WhatsApp, tu correo y tus respuestas. Solo tú y
+          el equipo del refugio pueden verla, y no se borra cuando borras tu cuenta.
+        </p>
+        <ul style={list}>
+          <li>
+            Puedes pedirnos que la borremos por <a href={whatsapp}>WhatsApp</a>. Si adoptaste, solo
+            lo hacemos cuando el animalito volvió al refugio y ninguna obligación legal nos pide
+            conservarla. Mientras tanto, queda bajo retención legal.
           </li>
           <li>
-            Si alguna vez envías una postulación de adopción en línea, la conservamos como registro
-            del refugio aunque borres tu cuenta. Puedes pedirnos que la borremos por{' '}
-            <a href={whatsapp}>WhatsApp</a>.
+            El equipo del refugio también puede ponerla bajo retención legal en casos como maltrato o
+            la muerte del animalito.
+          </li>
+          <li>
+            Si hubo maltrato, la conservamos aunque hayas devuelto al animalito, para no volver a
+            entregarte uno en adopción.
           </li>
         </ul>
       </section>
