@@ -1,69 +1,59 @@
 /**
- * The account panel — sign in, create an account, recover a password, sign out.
+ * The account page. Signed out: sign in (email and password, or Google),
+ * create an account, recover a password. Signed in: `AccountSettings`.
  *
- * All visitor-facing wording here is inline, matching every other page in
- * `src/app`. The one thing that is NOT inline is the failure message: those
- * arrive as an `AuthError` from `src/lib/auth.ts` and are rendered through
- * `t.authError()`, because a lib module must never carry Spanish.
+ * Every word comes from `t.account`; failures arrive as an `AuthError` from
+ * `src/lib/auth.ts` and are worded by `t.authError()`.
  *
  * ── Returning to an adoption application ──────────────────────────────────
  * `/adopt/{slug}/apply` sends a signed-out visitor here with `?next=…`. After a
  * SUCCESSFUL sign-in or sign-up they are sent back; after a failure nothing
- * changes, so the enumeration protections below hold exactly as before — the
+ * changes, so the enumeration protections hold exactly as before — the
  * redirect only ever follows an outcome the visitor already knows. `next` goes
  * through `safeReturnPath`, an allowlist, so this cannot become an open
  * redirect to a look-alike page.
+ *
+ * ── The Google button ──────────────────────────────────────────────────────
+ * `signInWithGoogle()` is called synchronously from the click, before any
+ * await, because Safari blocks a popup opened later. Inside Facebook's or
+ * Instagram's built-in browser — where most of this site's visitors arrive —
+ * Google refuses to sign anyone in, so the button is replaced with a sentence
+ * saying so, and the email form below keeps working.
  */
 
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
+import { GoogleMark } from '@/components/GoogleMark';
+import { AuthFailure, prepareBotProtection, requestPasswordReset, signIn, signInWithGoogle, signUp } from '@/lib/auth';
 import {
-  AuthFailure,
-  requestPasswordReset,
-  resendVerification,
-  signIn,
-  signOut,
-  signUp,
-} from '@/lib/auth';
+  DISPLAY_NAME_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  isEmbeddedBrowser,
+  validateDisplayName,
+} from '@/lib/profile';
 import { safeReturnPath } from '@/lib/return-path';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
-import { MyApplications } from './MyApplications';
+import { AccountSettings } from './AccountSettings';
 
 type Mode = 'signin' | 'signup' | 'reset';
 
-const HEADING: Record<Mode, string> = {
-  signin: 'Iniciar sesión',
-  signup: 'Crear una cuenta',
-  reset: 'Recuperar contraseña',
-};
-
-const SUBMIT: Record<Mode, string> = {
-  signin: 'Entrar',
-  signup: 'Crear cuenta',
-  reset: 'Enviar enlace',
-};
-
-const INTRO: Record<Mode, string> = {
-  signin: 'Entra para ver la historia completa de cada animalito.',
-  signup:
-    'Con una cuenta puedes ver la historia completa de cada animalito, sus fotos, su historial médico y su plan de alimentación.',
-  reset: 'Escribe tu correo y te enviamos un enlace para crear una contraseña nueva.',
-};
+/** Where a message belongs: next to the Google button, or next to the form's submit. */
+type Status = { at: 'google' | 'form'; kind: 'error' | 'notice'; text: string };
 
 export function AccountPanel() {
-  const { user, loading, isAdmin, refresh } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
+  const copy = t.account;
 
   const [mode, setMode] = useState<Mode>('signin');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   /**
    * Where to go after signing in, when a form sent the visitor here. Read from
@@ -71,86 +61,93 @@ export function AccountPanel() {
    * force this statically-rendered page into a client-side bailout.
    */
   const [returnTo, setReturnTo] = useState<string | null>(null);
+  const [embedded, setEmbedded] = useState(false);
+  const [googleAnyway, setGoogleAnyway] = useState(false);
 
   useEffect(() => {
     setReturnTo(safeReturnPath(new URLSearchParams(window.location.search).get('next')));
+    setEmbedded(isEmbeddedBrowser(navigator.userAgent));
   }, []);
+
+  // Only on the signed-out screen: no other page loads the reCAPTCHA script.
+  useEffect(() => {
+    if (!loading && !user) prepareBotProtection();
+  }, [loading, user]);
 
   function switchTo(next: Mode) {
     setMode(next);
-    setError(null);
-    setNotice(null);
+    setStatus(null);
     setPassword('');
   }
 
   /** Every failure path funnels here, so no branch can forget to translate. */
-  function report(caught: unknown) {
+  function report(at: Status['at'], caught: unknown) {
     if (caught instanceof AuthFailure) {
-      setError(t.authError(caught.reason));
+      setStatus({ at, kind: 'error', text: t.authError(caught.reason) });
       if (caught.reason === 'unknown') console.error('[account]', caught.cause);
       return;
     }
     console.error('[account]', caught);
-    setError(t.authError('unknown'));
+    setStatus({ at, kind: 'error', text: t.authError('unknown') });
+  }
+
+  function handleGoogle() {
+    setStatus(null);
+    setBusy(true);
+    // No await before this call — see the popup note at the top.
+    signInWithGoogle()
+      .then((signedIn) => {
+        if (signedIn && returnTo) router.replace(returnTo);
+      })
+      .catch((caught) => report('google', caught))
+      .finally(() => setBusy(false));
   }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setError(null);
-    setNotice(null);
-    setBusy(true);
+    setStatus(null);
 
+    if (mode === 'signup') {
+      const nameProblem = validateDisplayName(name);
+      if (nameProblem) {
+        setStatus({ at: 'form', kind: 'error', text: copy.profileError(nameProblem, DISPLAY_NAME_MAX_LENGTH) });
+        return;
+      }
+      if (password.length < PASSWORD_MIN_LENGTH) {
+        setStatus({
+          at: 'form',
+          kind: 'error',
+          text: copy.newPasswordError('password-too-short', PASSWORD_MIN_LENGTH),
+        });
+        return;
+      }
+    }
+
+    setBusy(true);
     try {
       if (mode === 'signin') {
         await signIn(email.trim(), password);
         if (returnTo) router.replace(returnTo);
       } else if (mode === 'signup') {
-        await signUp(email.trim(), password);
+        await signUp(email.trim(), password, name);
         if (returnTo) router.replace(returnTo);
       } else {
         await requestPasswordReset(email.trim());
-        // Phrased as a condition, not a confirmation — see the enumeration
-        // note in src/lib/auth.ts. We are not told whether the account exists,
-        // so we must not imply that we are.
-        setNotice(
-          'Si existe una cuenta con ese correo, te llegará un enlace para cambiar la contraseña. Revisa también la carpeta de spam.',
-        );
+        setStatus({ at: 'form', kind: 'notice', text: copy.resetSent });
       }
     } catch (caught) {
-      report(caught);
+      report('form', caught);
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleSignOut() {
-    setBusy(true);
-    try {
-      await signOut();
-      setEmail('');
-      setPassword('');
-      setNotice(null);
-      setError(null);
-      setMode('signin');
-    } catch (caught) {
-      report(caught);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleResend() {
-    if (!user) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await resendVerification(user);
-      setNotice('Te reenviamos el correo de verificación.');
-    } catch (caught) {
-      report(caught);
-    } finally {
-      setBusy(false);
-    }
+  function handleSignedOut(message: string | null) {
+    setName('');
+    setEmail('');
+    setPassword('');
+    setMode('signin');
+    setStatus(message ? { at: 'form', kind: 'notice', text: message } : null);
   }
 
   // The provider loads Firebase after hydration, so this state is real and
@@ -159,101 +156,86 @@ export function AccountPanel() {
   if (loading) {
     return (
       <div className="auth" aria-busy="true">
-        <p className="auth__loading">Cargando…</p>
+        <p className="auth__loading">{copy.loading}</p>
       </div>
     );
   }
 
   if (user) {
-    return (
-      <div className="auth">
-        <h1 className="t-title">Mi cuenta</h1>
-        <p className="auth__identity">
-          Sesión iniciada como <strong>{user.email}</strong>
-        </p>
-
-        {returnTo && (
-          <p className="account-return">
-            <Link href={returnTo} className="btn btn--brand">
-              {t.applications.continueApplication}
-            </Link>
-          </p>
-        )}
-
-        {!user.emailVerified && (
-          <div className="auth__notice auth__notice--warn" role="status">
-            <p>Todavía no verificas tu correo. Te enviamos un enlace cuando creaste la cuenta.</p>
-            <button type="button" className="auth__link" onClick={handleResend} disabled={busy}>
-              Reenviar el correo
-            </button>
-            {' · '}
-            <button type="button" className="auth__link" onClick={refresh} disabled={busy}>
-              Ya lo verifiqué
-            </button>
-          </div>
-        )}
-
-        {notice && (
-          <p className="auth__notice" role="status">
-            {notice}
-          </p>
-        )}
-        {error && (
-          <p className="auth__error" role="alert">
-            {error}
-          </p>
-        )}
-
-        <p className="auth__prose">
-          Estamos preparando tu sección: las historias completas, el historial médico y los planes
-          de alimentación de cada animalito llegarán aquí.
-        </p>
-
-        {/* Renders nothing for someone who has never applied online. */}
-        <MyApplications user={user} />
-
-        <div className="auth__actions">
-          {/* Only shown to admins, and only as a shortcut — /admin gates itself,
-              and firestore.rules gates everything behind it. Hiding the link is
-              tidiness, not access control. `isAdmin` comes from the cached ID
-              token here, so a just-promoted admin may not see it until the
-              token rotates; navigating to /admin directly still works, because
-              AdminGate forces a refresh on mount. */}
-          {isAdmin && (
-            <Link href="/admin" className="btn btn--action">
-              Panel del refugio
-            </Link>
-          )}
-          <Link href="/adopt" className="btn btn--brand">
-            Ver el muro
-          </Link>
-          <button type="button" className="btn btn--muted" onClick={handleSignOut} disabled={busy}>
-            Cerrar sesión
-          </button>
-        </div>
-      </div>
-    );
+    return <AccountSettings user={user} returnTo={returnTo} onSignedOut={handleSignedOut} />;
   }
+
+  const heading = { signin: copy.signInTitle, signup: copy.signUpTitle, reset: copy.resetTitle }[mode];
+  const intro = { signin: copy.signInIntro, signup: copy.signUpIntro, reset: copy.resetIntro }[mode];
+  const submit = { signin: copy.signInSubmit, signup: copy.signUpSubmit, reset: copy.resetSubmit }[mode];
+
+  const statusAt = (at: Status['at']) =>
+    status?.at === at ? (
+      <p className={status.kind === 'error' ? 'auth__error' : 'auth__notice'} role={status.kind === 'error' ? 'alert' : 'status'}>
+        {status.text}
+      </p>
+    ) : null;
+
+  const notice = copy.recaptchaNotice;
 
   return (
     <div className="auth">
-      <h1 className="t-title">{HEADING[mode]}</h1>
-      <p className="auth__prose">{INTRO[mode]}</p>
+      <h1 className="t-title">{heading}</h1>
+      <p className="auth__prose">{intro}</p>
       {returnTo && mode !== 'reset' && (
         <p className="auth__notice" role="status">
           {t.applications.returnNotice}
         </p>
       )}
 
+      {mode !== 'reset' && (
+        <div className="auth__providers">
+          {embedded && !googleAnyway ? (
+            <div className="auth__notice auth__notice--warn" role="note">
+              <p>{copy.embeddedBrowser}</p>
+              <button type="button" className="auth__link" onClick={() => setGoogleAnyway(true)}>
+                {copy.embeddedBrowserTryAnyway}
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="auth__google" onClick={handleGoogle} disabled={busy}>
+              <GoogleMark />
+              <span>{copy.continueWithGoogle}</span>
+            </button>
+          )}
+          {statusAt('google')}
+          <p className="auth__divider">
+            <span>{copy.orWithEmail}</span>
+          </p>
+        </div>
+      )}
+
       <form className="auth__form" onSubmit={handleSubmit} noValidate>
+        {mode === 'signup' && (
+          <label className="auth__field">
+            <span className="t-label">{copy.nameLabel}</span>
+            <input
+              type="text"
+              name="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoComplete="name"
+              autoCapitalize="words"
+              required
+              disabled={busy}
+            />
+            <small className="auth__hint">{copy.nameHint}</small>
+          </label>
+        )}
+
         <label className="auth__field">
-          <span className="t-label">Correo</span>
+          <span className="t-label">{copy.emailLabel}</span>
           <input
             type="email"
             name="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
+            autoComplete={mode === 'signup' ? 'email' : 'username'}
             required
             disabled={busy}
           />
@@ -261,34 +243,28 @@ export function AccountPanel() {
 
         {mode !== 'reset' && (
           <label className="auth__field">
-            <span className="t-label">Contraseña</span>
+            <span className="t-label">{copy.passwordLabel}</span>
             <input
               type="password"
               name="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              minLength={6}
+              // Only on sign-up: an account created before the 8-character
+              // minimum may still have a 6-character password, and signing in
+              // with it must keep working.
+              minLength={mode === 'signup' ? PASSWORD_MIN_LENGTH : undefined}
               required
               disabled={busy}
             />
-            {mode === 'signup' && <small className="auth__hint">Mínimo 6 caracteres.</small>}
+            {mode === 'signup' && <small className="auth__hint">{copy.passwordHint(PASSWORD_MIN_LENGTH)}</small>}
           </label>
         )}
 
-        {error && (
-          <p className="auth__error" role="alert">
-            {error}
-          </p>
-        )}
-        {notice && (
-          <p className="auth__notice" role="status">
-            {notice}
-          </p>
-        )}
+        {statusAt('form')}
 
         <button type="submit" className="btn btn--action auth__submit" disabled={busy}>
-          {busy ? 'Un momento…' : SUBMIT[mode]}
+          {busy ? copy.working : submit}
         </button>
       </form>
 
@@ -296,23 +272,37 @@ export function AccountPanel() {
         {mode === 'signin' ? (
           <>
             <button type="button" className="auth__link" onClick={() => switchTo('signup')}>
-              Crear una cuenta
+              {copy.createAccountLink}
             </button>
             {' · '}
             <button type="button" className="auth__link" onClick={() => switchTo('reset')}>
-              Olvidé mi contraseña
+              {copy.forgotPasswordLink}
             </button>
           </>
         ) : (
           <button type="button" className="auth__link" onClick={() => switchTo('signin')}>
-            ← Volver a iniciar sesión
+            {copy.backToSignIn}
           </button>
         )}
       </div>
 
+      {/* Google's terms allow hiding the floating reCAPTCHA badge — which on a
+          phone covers the bottom-right of the form — only if this attribution
+          is shown instead, on the page where reCAPTCHA runs. */}
+      <p className="auth__recaptcha">
+        {notice.before}
+        <a href="https://policies.google.com/privacy?hl=es" target="_blank" rel="noopener noreferrer">
+          {notice.privacy}
+        </a>
+        {notice.between}
+        <a href="https://policies.google.com/terms?hl=es" target="_blank" rel="noopener noreferrer">
+          {notice.terms}
+        </a>
+        {notice.after}
+      </p>
+
       <p className="auth__help">
-        ¿Problemas para entrar? Escríbenos por{' '}
-        <a href={`https://wa.me/${SHELTER.whatsapp}`}>WhatsApp {SHELTER.whatsappDisplay}</a>.
+        {copy.helpPrefix} <a href={`https://wa.me/${SHELTER.whatsapp}`}>WhatsApp {SHELTER.whatsappDisplay}</a>.
       </p>
     </div>
   );

@@ -93,9 +93,19 @@ const UNAUTHENTICATED_ROUTES: Record<string, string> = {
     'reads nothing and answers identically for any well-formed token (qr-guards.test.ts)',
 };
 
+/**
+ * Routes any signed-in account may call, each acting on the caller ALONE.
+ * These go through `requireUser` instead of `requireAdmin`, and must never
+ * read the request body — the uid they act on comes from the verified token.
+ */
+const USER_ROUTES: Record<string, string> = {
+  'src/app/api/account/delete/route.ts': 'a person deleting their own account (account-delete.ts)',
+};
+
 /** Routes whose whole handler lives in a pure, injectable module. */
 const DELEGATED_ROUTES: Record<string, string> = {
   'src/app/api/food/cook-batch/route.ts': 'src/lib/cook-batch-handler.ts',
+  'src/app/api/account/delete/route.ts': 'src/lib/account-delete.ts',
 };
 
 /** Nothing on this list may run before `requireAdmin(`. */
@@ -145,22 +155,39 @@ test('every API route authenticates through requireAdmin before it reads the bod
 
     const file = handler ?? route;
     const src = code(file);
-    const auth = src.indexOf('requireAdmin(');
+    const guard = route in USER_ROUTES ? 'requireUser(' : 'requireAdmin(';
+    const auth = src.indexOf(guard);
     assert.ok(
       auth >= 0,
-      `${file} must call requireAdmin() — a route handler sits outside firestore.rules, so that check is its entire boundary`
+      `${file} must call ${guard}) — a route handler sits outside firestore.rules, so that check is its entire boundary`
     );
     for (const work of WORK_BEFORE_AUTH) {
       const at = src.indexOf(work);
-      assert.ok(at < 0 || at > auth, `${file} calls ${work} before requireAdmin()`);
+      assert.ok(at < 0 || at > auth, `${file} calls ${work} before ${guard})`);
     }
   }
 });
 
 test('every exemption names a route that exists, so a stale one cannot hide a new route', () => {
   const routes = routeFiles();
-  for (const file of [...Object.keys(UNAUTHENTICATED_ROUTES), ...Object.keys(DELEGATED_ROUTES)]) {
+  for (const file of [
+    ...Object.keys(UNAUTHENTICATED_ROUTES),
+    ...Object.keys(DELEGATED_ROUTES),
+    ...Object.keys(USER_ROUTES),
+  ]) {
     assert.ok(routes.includes(file), `${file} is listed as an exemption but does not exist`);
+  }
+});
+
+test('a route open to any signed-in account never reads the request body', () => {
+  // Such a route acts on the caller's own uid. A body is the one place a
+  // different uid could arrive from, so there must be no way to read one.
+  for (const route of Object.keys(USER_ROUTES)) {
+    for (const file of [route, DELEGATED_ROUTES[route]].filter((f): f is string => Boolean(f))) {
+      for (const read of ['request.json(', 'request.formData(', 'request.text(', 'request.arrayBuffer(', 'request.body']) {
+        assert.equal(code(file).includes(read), false, `${file} reads ${read}`);
+      }
+    }
   }
 });
 
