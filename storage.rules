@@ -99,6 +99,31 @@ service firebase.storage {
       allow update, delete: if isAdmin();
     }
 
+    // ── profile photos ─────────────────────────────────────────────────────
+    // A person's own photo, uploaded from /account after the same EXIF strip
+    // as every pet photo (src/lib/image-strip.ts) — a photo taken at home
+    // carries the home's GPS.
+    //
+    // Only the owner writes; the owner and admins read. The upload path does
+    // call getDownloadURL(), whose token bypasses these rules for anyone
+    // holding the URL — accepted for a profile photo only, see uploadAvatar()
+    // in src/lib/auth.ts.
+    //
+    // No `update`: every upload gets a fresh name, so a replaced photo is a
+    // new object plus a delete, never an overwrite a cached URL keeps showing.
+    // The name pattern mirrors AVATAR_FILE_NAME in src/lib/profile.ts.
+    // Deleting the account removes the whole users/{uid}/ prefix through the
+    // Admin SDK, which bypasses these rules.
+    match /users/{uid}/avatar/{fileName} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && fileName.matches('^[A-Za-z0-9-]{1,64}[.]jpg$')
+        && request.resource.contentType == 'image/jpeg'
+        && request.resource.size < 2 * 1024 * 1024;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
     // ── medical documents: vaccination cards, lab results ──────────────────
     // Never public, and never in the merely-authenticated tier either. These
     // scans carry a veterinarian's details and, very often, the owner's name,

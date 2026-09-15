@@ -270,6 +270,38 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
 
+      // Null, or 1–60 characters. Mirrors DISPLAY_NAME_MAX_LENGTH in
+      // src/lib/profile.ts, which cuts a longer Google name before writing.
+      function validProfileName(data) {
+        return !('displayName' in data)
+          || data.displayName == null
+          || (data.displayName is string
+              && data.displayName.size() > 0
+              && data.displayName.size() <= 60);
+      }
+
+      // ⚠️ `photoURL` is rendered by an ADMIN's browser (getUserLabels reads
+      // this document). An arbitrary URL would be a tracking pixel aimed at
+      // whoever opens a timeline, so only two kinds are accepted: a Google
+      // account photo, or this person's OWN upload under users/{uid}/avatar/.
+      // Mirrors safeAvatarUrl() in src/lib/profile.ts, and
+      // account-wiring.test.ts fails if the two ever accept different URLs.
+      function validProfilePhoto(data) {
+        return !('photoURL' in data)
+          || data.photoURL == null
+          || (data.photoURL is string
+              && data.photoURL.size() <= 2048
+              && (data.photoURL.matches('^https://lh[3-6][.]googleusercontent[.]com/.+$')
+                  || data.photoURL.matches('^https://firebasestorage[.]googleapis[.]com/v0/b/[^/]+/o/users%2F' + uid + '%2Favatar%2F[A-Za-z0-9-]{1,64}[.]jpg([?].*)?$')));
+      }
+
+      // The address Identity Platform put in the caller's own token. Before
+      // 2026-09-15 a person could create this document naming ANY address, and
+      // admin screens label people by it.
+      function isOwnTokenEmail(email) {
+        return email == request.auth.token.get('email', '');
+      }
+
       // A user may create and maintain their own profile, but may not invent
       // privileges. Admin lives in a custom claim set server-side; should a
       // stray `role` field ever appear here, it must never be self-assigned.
@@ -277,13 +309,25 @@ service cloud.firestore {
         && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(
              ['uid', 'email', 'displayName', 'photoURL', 'createdAt'])
-        && request.resource.data.uid == uid;
+        && request.resource.data.uid == uid
+        && isOwnTokenEmail(request.resource.data.email)
+        && validProfileName(request.resource.data)
+        && validProfilePhoto(request.resource.data);
 
+      // `email` may change only to the token's address, which is how the
+      // profile follows a confirmed email change (ensureProfile in auth.ts).
       allow update: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['displayName', 'photoURL']);
+             .hasOnly(['displayName', 'photoURL', 'email'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email'])
+            || isOwnTokenEmail(request.resource.data.email))
+        && validProfileName(request.resource.data)
+        && validProfilePhoto(request.resource.data);
 
+      // A person deletes their own account through /api/account/delete, which
+      // uses the Admin SDK and removes this document, their photos and the
+      // Auth user together. A client-side delete would orphan the other two.
       allow delete: if isAdmin();
     }
 
