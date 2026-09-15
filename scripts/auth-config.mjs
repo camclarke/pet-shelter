@@ -5,7 +5,7 @@
  *   npm run auth:config -- --emails --password-policy     DRY RUN: show what would change
  *   npm run auth:config -- --emails --password-policy --apply
  *   npm run auth:config -- --recaptcha audit --apply
- *   npm run auth:config -- --smtp --sender no-responder@wawitas.org --apply
+ *   npm run auth:config -- --smtp --sender no-reply@wawitas.org --apply
  *   npm run auth:config -- --default-sender --apply       back to Firebase's own sender
  *
  * Flags, combinable:
