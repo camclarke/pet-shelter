@@ -74,13 +74,13 @@ test('a template that still points at firebaseapp.com is refused', () => {
 // ─── SMTP ────────────────────────────────────────────────────────────────────
 
 test('SMTP goes to Resend over implicit TLS, from the site domain', () => {
-  const p = smtpPatch({ senderEmail: 'no-responder@wawitas.org', password: KEY, siteUrl: SITE });
+  const p = smtpPatch({ senderEmail: 'no-reply@wawitas.org', password: KEY, siteUrl: SITE });
   assert.deepEqual(p.body, {
     notification: {
       sendEmail: {
         method: 'CUSTOM_SMTP',
         smtp: {
-          senderEmail: 'no-responder@wawitas.org',
+          senderEmail: 'no-reply@wawitas.org',
           host: 'smtp.resend.com',
           port: 465,
           username: 'resend',
@@ -146,7 +146,7 @@ test('the password policy enforces the minimum without forcing existing accounts
 test('patches merge deeply, so templates and SMTP can travel in one request', () => {
   const merged = mergePatches(
     emailTemplatesPatch({ copy: COPY, siteUrl: SITE, locale: 'es' }),
-    smtpPatch({ senderEmail: 'no-responder@wawitas.org', password: KEY, siteUrl: SITE }),
+    smtpPatch({ senderEmail: 'no-reply@wawitas.org', password: KEY, siteUrl: SITE }),
     recaptchaPatch('ENFORCE')
   );
   assert.ok(merged.updateMask.includes('notification.sendEmail.callbackUri'));
@@ -197,7 +197,7 @@ test('readback compares every sent leaf, and reports a normalised value as NOT a
 });
 
 test('readback never compares or returns the SMTP password', () => {
-  const sent = smtpPatch({ senderEmail: 'no-responder@wawitas.org', password: KEY, siteUrl: SITE });
+  const sent = smtpPatch({ senderEmail: 'no-reply@wawitas.org', password: KEY, siteUrl: SITE });
   const fields = appliedFields(sent, { notification: { sendEmail: { smtp: {} } } });
   const password = fields.find((f) => f.path === 'notification.sendEmail.smtp.password');
   assert.deepEqual(password, { path: 'notification.sendEmail.smtp.password', ok: true });

@@ -155,7 +155,7 @@ are low volume, but a sign-up spike counts against the daily cap.
 ## 7. Send through Resend
 
 ```bash
-GOOGLE_CLOUD_PROJECT=wawitas npm run auth:config -- --smtp --sender no-responder@wawitas.org --apply
+GOOGLE_CLOUD_PROJECT=wawitas npm run auth:config -- --smtp --sender no-reply@wawitas.org --apply
 ```
 
 Paste the API key when asked (it reads stdin, so the key stays out of argv and
@@ -166,7 +166,7 @@ not in Terraform state, and not in the repo. To rotate: create a new key at
 Resend, run this step again, then delete the old key at Resend.
 
 **Proof:** request a reset for your own address. The email arrives from
-`no-responder@wawitas.org`, and its headers show `dkim=pass` for
+`no-reply@wawitas.org`, and its headers show `dkim=pass` for
 `wawitas.org`. It also appears in Resend's *Emails* list.
 
 **Rollback:** `npm run auth:config -- --default-sender --apply`.
