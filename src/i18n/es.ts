@@ -26,7 +26,11 @@ import type {
 import type { AreaError, PlacementWarning } from '@/lib/areas';
 import { MS_PER_DAY, type Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
-import type { AuthError } from '@/lib/auth';
+import type { AuthError } from '@/lib/auth-errors';
+import type { AuthEmailCopy } from '@/lib/auth-config';
+import { PASSWORD_MIN_LENGTH } from '@/lib/profile';
+import { SHELTER } from '@/config/shelter';
+import type { AccountCopy } from './messages';
 import type { IntakeError } from '@/lib/intake';
 import type { ApplicationStatus } from '@/lib/types';
 import type {
@@ -437,15 +441,288 @@ const AUTH_ERROR: Record<AuthError, string> = {
   'invalid-email': 'Ese correo no parece válido. Revísalo e intenta de nuevo.',
   'missing-password': 'Escribe tu contraseña.',
   'invalid-credentials': 'El correo o la contraseña no coinciden. Intenta de nuevo.',
-  'email-in-use': 'Ya existe una cuenta con ese correo. Inicia sesión o recupera tu contraseña.',
-  'weak-password': 'La contraseña es muy corta. Usa al menos 6 caracteres.',
+  'email-in-use':
+    'Ya existe una cuenta con ese correo. Inicia sesión (con tu contraseña o con Google) o recupera tu contraseña.',
+  'weak-password': `La contraseña es muy corta. Usa al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
   'user-disabled': 'Esta cuenta está desactivada. Escríbenos por WhatsApp y lo revisamos.',
   'too-many-requests':
     'Demasiados intentos seguidos. Espera unos minutos antes de volver a probar.',
   network: 'No pudimos conectarnos. Revisa tu internet e intenta de nuevo.',
-  'provider-disabled': 'El inicio de sesión con correo no está habilitado en este momento.',
+  'provider-disabled': 'Esa forma de entrar no está habilitada en este momento.',
+  'captcha-failed': 'No pudimos confirmar que eres una persona. Recarga la página e intenta de nuevo.',
+  'popup-blocked':
+    'Tu navegador bloqueó la ventana de Google. Permite las ventanas emergentes para este sitio e intenta de nuevo.',
+  'account-exists-with-different-credential':
+    'Ya existe una cuenta con ese correo. Entra con tu correo y contraseña, y después conecta Google desde «Mi cuenta».',
+  'credential-already-in-use': 'Esa cuenta de Google ya está conectada a otra cuenta de este sitio.',
+  'provider-already-linked': 'Google ya está conectado a tu cuenta.',
+  'requires-recent-login': 'Por seguridad, confirma que eres tú y vuelve a intentarlo.',
+  'user-mismatch': 'Esa no es la cuenta con la que entraste. Confirma con la misma cuenta.',
+  'unauthorized-domain': `Desde esta dirección no se puede entrar con Google. Entra desde ${new URL(SHELTER.siteUrl).host}.`,
+  'browser-unsupported': 'Este navegador no permite iniciar sesión así. Abre la página en Chrome o Safari.',
+  'session-expired': 'Tu sesión venció. Vuelve a iniciar sesión.',
+  'action-code-invalid': 'Este enlace ya no sirve: puede que ya lo hayas usado. Pide uno nuevo.',
+  'action-code-expired': 'Este enlace venció. Pide uno nuevo.',
   unknown: 'Algo salió mal. Intenta de nuevo en un momento.',
 };
+
+/**
+ * `/account` and `/account/action`.
+ *
+ * ⚠️ Neutral Spanish, tuteo: "Escribe", "Revisa", never "Escribí", "Revisá".
+ * `account-copy.test.ts` runs the voseo tripwire over every string here.
+ */
+const ACCOUNT_COPY: AccountCopy = {
+  signInTitle: 'Iniciar sesión',
+  signUpTitle: 'Crear una cuenta',
+  resetTitle: 'Recuperar contraseña',
+  signInIntro: 'Entra para ver la historia completa de cada animalito.',
+  signUpIntro:
+    'Con una cuenta puedes ver la historia completa de cada animalito, sus fotos, su historial médico y su plan de alimentación.',
+  resetIntro: 'Escribe tu correo y te enviamos un enlace para crear una contraseña nueva.',
+  signInSubmit: 'Entrar',
+  signUpSubmit: 'Crear cuenta',
+  resetSubmit: 'Enviar enlace',
+  working: 'Un momento…',
+  loading: 'Cargando…',
+  nameLabel: 'Tu nombre',
+  nameHint: 'Así te saludamos y así te ve el equipo del refugio. Puedes cambiarlo después.',
+  emailLabel: 'Correo',
+  passwordLabel: 'Contraseña',
+  passwordHint: (minLength) => `Mínimo ${minLength} caracteres.`,
+  createAccountLink: 'Crear una cuenta',
+  forgotPasswordLink: 'Olvidé mi contraseña',
+  backToSignIn: '← Volver a iniciar sesión',
+  // Phrased as a condition, not a confirmation: we are not told whether the
+  // account exists, so we must not imply that we are.
+  resetSent:
+    'Si existe una cuenta con ese correo, te llegará un enlace para cambiar la contraseña. Revisa también la carpeta de spam.',
+  helpPrefix: '¿Problemas para entrar? Escríbenos por',
+  continueWithGoogle: 'Continuar con Google',
+  orWithEmail: 'o con tu correo',
+  embeddedBrowser:
+    'Estás viendo esta página dentro de otra app (por ejemplo, Facebook o Instagram), y ahí Google no deja iniciar sesión. Para usar Google, ábrela en Chrome o Safari. También puedes entrar con tu correo aquí abajo.',
+  embeddedBrowserTryAnyway: 'Probar con Google de todos modos',
+  recaptchaNotice: {
+    before: 'Este sitio está protegido por reCAPTCHA y se aplican la ',
+    privacy: 'Política de Privacidad',
+    between: ' y las ',
+    terms: 'Condiciones del Servicio',
+    after: ' de Google.',
+  },
+
+  title: 'Mi cuenta',
+  unverified: 'Todavía no verificas tu correo. Te enviamos un enlace cuando creaste la cuenta.',
+  resendVerification: 'Reenviar el correo',
+  alreadyVerified: 'Ya lo verifiqué',
+  verificationResent: 'Te reenviamos el correo de verificación. Revisa también la carpeta de spam.',
+  stillUnverified:
+    'Todavía aparece sin verificar. Si ya abriste el enlace, espera un momento y vuelve a intentarlo.',
+  comingSoon:
+    'Estamos preparando tu sección: las historias completas, el historial médico y los planes de alimentación de cada animalito llegarán aquí.',
+  adminPanel: 'Panel del refugio',
+  seeWall: 'Ver el muro',
+  signOut: 'Cerrar sesión',
+
+  profileTitle: 'Tu perfil',
+  nameRowLabel: 'Nombre',
+  noName: 'Todavía sin nombre',
+  change: 'Cambiar',
+  add: 'Agregar',
+  save: 'Guardar',
+  cancel: 'Cancelar',
+  nameSaved: 'Guardamos tu nombre.',
+  photoRowLabel: 'Foto',
+  uploadPhoto: 'Subir una foto',
+  changePhoto: 'Cambiar la foto',
+  useGooglePhoto: 'Usar mi foto de Google',
+  removePhoto: 'Quitar la foto',
+  photoSaved: 'Listo, ya está tu foto.',
+  photoRemoved: 'Quitamos tu foto.',
+  photoUnreadable:
+    'No pudimos leer esa foto. Si la tomaste con un iPhone, prueba con otra o con una captura de pantalla.',
+  photoPrivacy: 'Tu foto no aparece en el muro ni en ninguna página pública.',
+
+  methodsTitle: 'Cómo entras',
+  googleRowLabel: 'Google',
+  googleConnected: (email) => (email ? `Conectada con ${email}` : 'Conectada'),
+  googleNotConnected: 'Sin conectar',
+  connectGoogle: 'Conectar',
+  disconnectGoogle: 'Desconectar',
+  googleConnectedNotice: 'Listo: ahora también puedes entrar con Google.',
+  googleDisconnectedNotice: 'Desconectamos Google. Desde ahora entras con tu correo y tu contraseña.',
+  disconnectNeedsPassword: 'Para poder desconectar Google algún día, primero crea una contraseña.',
+  passwordRowLabel: 'Contraseña',
+  passwordIsSet: 'Creada',
+  passwordNotSet: 'Sin contraseña: por ahora entras solo con Google.',
+  changePassword: 'Cambiar',
+  createPassword: 'Crear una',
+  currentPassword: 'Contraseña actual',
+  newPassword: 'Contraseña nueva',
+  repeatPassword: 'Repite la contraseña nueva',
+  // True of Identity Platform: a password change revokes the account's other
+  // sessions, so another phone signed in to it is signed out.
+  passwordChanged:
+    'Cambiamos tu contraseña. Si tenías la sesión abierta en otro teléfono, allí tendrás que volver a entrar.',
+  passwordCreated: 'Creamos tu contraseña. Ahora también puedes entrar con tu correo.',
+  emailRowLabel: 'Correo',
+  changeEmail: 'Cambiar',
+  newEmail: 'Correo nuevo',
+  emailChangeSent: (newEmail) =>
+    `Te enviamos un enlace a ${newEmail}. Tu correo cambia cuando lo abras; mientras tanto sigues entrando con el actual.`,
+  emailFromGoogle: 'Viene de tu cuenta de Google.',
+  sameEmail: 'Ese ya es tu correo.',
+
+  confirmIdentityPassword: 'Por seguridad, escribe tu contraseña para seguir.',
+  confirmIdentityGoogle: 'Por seguridad, vuelve a confirmar con Google para seguir.',
+  confirm: 'Confirmar',
+  confirmWithGoogle: 'Confirmar con Google',
+
+  deleteTitle: 'Borrar mi cuenta',
+  deleteIntro:
+    'Se borran tu perfil, tu foto y tu acceso. Las solicitudes de adopción que enviaste se quedan en los registros del refugio; si también quieres que las borren, escríbenos por WhatsApp.',
+  deleteStart: 'Quiero borrar mi cuenta',
+  deleteConfirmPassword: 'Escribe tu contraseña para confirmar. No se puede deshacer.',
+  deleteConfirmGoogle: 'Confirma con Google para borrarla. No se puede deshacer.',
+  deleteSubmit: 'Borrar mi cuenta',
+  deleted: 'Borramos tu cuenta. Gracias por acompañar a los animalitos.',
+  adminCannotDelete:
+    'Esta es una cuenta del equipo del refugio, así que no se borra desde aquí. Pide que primero le quiten el acceso de administración.',
+  deleteError(failure) {
+    switch (failure) {
+      case 'requires-recent-login':
+        return 'Pasó demasiado tiempo desde que confirmaste. Vuelve a intentarlo.';
+      case 'admin-account':
+        return ACCOUNT_COPY.adminCannotDelete;
+      case 'unauthenticated':
+        return 'Tu sesión venció. Vuelve a iniciar sesión e intenta de nuevo.';
+      // The server deletes the Auth user LAST, so a failure part-way always
+      // leaves an account that still signs in. This sentence depends on that.
+      case 'delete-failed':
+        return 'No pudimos terminar de borrar la cuenta. Tu acceso sigue funcionando; intenta de nuevo en un momento.';
+      case 'network':
+        return 'No pudimos conectarnos. Revisa tu internet e intenta de nuevo.';
+      case 'unexpected':
+        return 'No pudimos borrar la cuenta. Intenta de nuevo en un momento.';
+    }
+  },
+
+  newPasswordError(error, minLength) {
+    switch (error) {
+      case 'password-too-short':
+        return `La contraseña necesita al menos ${minLength} caracteres.`;
+      case 'password-too-long':
+        return 'Esa contraseña es demasiado larga.';
+      case 'password-mismatch':
+        return 'Las dos contraseñas nuevas no coinciden.';
+      case 'password-same-as-email':
+        return 'La contraseña no puede ser tu correo.';
+    }
+  },
+
+  profileError(error, maxLength) {
+    return error === 'display-name-empty' ? 'Escribe tu nombre.' : `El nombre puede tener hasta ${maxLength} caracteres.`;
+  },
+
+  actionTitle: 'Tu cuenta',
+  actionChecking: 'Revisando el enlace…',
+  actionMalformed:
+    'Este enlace está incompleto. Si lo copiaste de un correo, revisa que esté entero, o pide uno nuevo.',
+  actionUnsupported: 'Este enlace no es para esta página.',
+  linkProblemTitle: 'Este enlace no funcionó',
+  requestNewLink: 'Pedir un enlace nuevo',
+  emailVerifiedTitle: '¡Correo verificado!',
+  emailVerified: 'Listo, tu correo quedó verificado.',
+  newPasswordTitle: 'Elige una contraseña nueva',
+  newPasswordFor: (email) => `Para la cuenta ${email}.`,
+  saveNewPassword: 'Guardar la contraseña',
+  passwordResetTitle: 'Contraseña cambiada',
+  passwordResetDone: 'Listo. Ya puedes iniciar sesión con tu contraseña nueva.',
+  emailRecoveredTitle: 'Recuperamos tu correo',
+  emailRecovered: (email) =>
+    email ? `Tu cuenta vuelve a usar ${email}.` : 'Tu cuenta vuelve a usar tu correo anterior.',
+  emailRecoveredAdvice:
+    'Si tú no pediste ese cambio, alguien pudo haber entrado a tu cuenta. Te conviene cambiar la contraseña ahora.',
+  sendMeResetLink: 'Enviarme un enlace para cambiarla',
+  resetLinkSentTo: (email) => `Te enviamos un enlace a ${email}. Revisa también la carpeta de spam.`,
+  emailChangedTitle: 'Correo cambiado',
+  emailChanged: (email) =>
+    email
+      ? `Tu cuenta ahora usa ${email}. Vuelve a iniciar sesión con ese correo.`
+      : 'Tu correo cambió. Vuelve a iniciar sesión con el nuevo.',
+  goToAccount: 'Ir a mi cuenta',
+  goToSignIn: 'Iniciar sesión',
+};
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+/**
+ * The three emails, as Identity Platform will send them.
+ *
+ * Plain, inline-styled HTML: mail clients strip `<style>` blocks and most CSS,
+ * and a phone's mail app is where these are read. Every template repeats
+ * `%LINK%` as text under the button, because some clients block links in mail
+ * from a sender they have not seen before — which, the first time, is us.
+ *
+ * ⚠️ Each sentence must be true. The reset link's lifetime is Identity
+ * Platform's to decide, so the copy says it expires "al poco tiempo" rather
+ * than naming a duration nobody here controls.
+ */
+function authEmailCopy(shelterName: string, siteUrl: string): AuthEmailCopy {
+  const name = escapeHtml(shelterName);
+  const origin = new URL(siteUrl).origin;
+  const host = escapeHtml(new URL(siteUrl).host);
+
+  const wrap = (inner: string) =>
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#12463b;max-width:520px">` +
+    inner +
+    `<p style="margin-top:28px;font-size:13px;color:#4a5f59">${name} · <a href="${origin}" style="color:#12463b">${host}</a></p>` +
+    `</div>`;
+
+  const button = (label: string) =>
+    `<p style="margin:24px 0"><a href="%LINK%" style="background:#12463b;color:#ffffff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">${label}</a></p>`;
+
+  const fallback =
+    `<p style="font-size:13px;color:#4a5f59">Si el botón no funciona, copia este enlace y pégalo en tu navegador:<br>` +
+    `<span style="word-break:break-all">%LINK%</span></p>`;
+
+  return {
+    senderDisplayName: shelterName,
+    verifyEmail: {
+      subject: `Confirma tu correo en ${shelterName}`,
+      body: wrap(
+        `<p>¡Hola!</p>` +
+          `<p>Gracias por crear tu cuenta en ${name}. Para confirmar que este correo es tuyo, abre el enlace:</p>` +
+          button('Confirmar mi correo') +
+          fallback +
+          `<p>Si no creaste esta cuenta, puedes ignorar este mensaje.</p>`
+      ),
+    },
+    resetPassword: {
+      subject: `Cambia tu contraseña de ${shelterName}`,
+      body: wrap(
+        `<p>¡Hola!</p>` +
+          `<p>Recibimos una solicitud para cambiar la contraseña de la cuenta %EMAIL% en ${name}. Si fuiste tú, abre el enlace para elegir una nueva:</p>` +
+          button('Elegir una contraseña nueva') +
+          fallback +
+          `<p>Si no lo pediste, ignora este mensaje: tu contraseña sigue igual. El enlace deja de funcionar al poco tiempo; si ya no sirve, pide otro desde la página.</p>`
+      ),
+    },
+    changeEmail: {
+      subject: `Cambió el correo de tu cuenta en ${shelterName}`,
+      body: wrap(
+        `<p>¡Hola!</p>` +
+          `<p>El correo con el que entras a ${name} cambió a %NEW_EMAIL%.</p>` +
+          `<p>Si no fuiste tú, abre este enlace para volver a tu correo anterior, y después cambia tu contraseña:</p>` +
+          button('Recuperar mi correo') +
+          fallback +
+          `<p>Si fuiste tú, no tienes que hacer nada.</p>`
+      ),
+    },
+  };
+}
 
 
 /**
@@ -907,6 +1184,10 @@ export const es: Messages = {
   intakeError: (error) => INTAKE_ERROR[error],
 
   authError: (error) => AUTH_ERROR[error],
+
+  account: ACCOUNT_COPY,
+
+  authEmails: authEmailCopy,
 
   adoptionInquiry: (petName) => `Hola, me interesa adoptar a ${petName}`,
 

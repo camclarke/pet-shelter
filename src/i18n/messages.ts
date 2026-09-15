@@ -32,7 +32,10 @@ import type {
 import type { AreaError, PlacementWarning } from '@/lib/areas';
 import type { Pathogen } from '@/lib/placements';
 import type { MicrochipError } from '@/lib/microchip';
-import type { AuthError } from '@/lib/auth';
+import type { AuthError } from '@/lib/auth-errors';
+import type { AuthEmailCopy } from '@/lib/auth-config';
+import type { NewPasswordError, ProfileError } from '@/lib/profile';
+import type { AccountDeleteFailure } from '@/lib/account-delete';
 import type { IntakeError } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
@@ -653,6 +656,18 @@ export interface Messages {
 
   readonly applications: ApplicationCopy;
 
+  // ── accounts: sign-in, the profile, the email link page ─────────────────
+
+  readonly account: AccountCopy;
+
+  /**
+   * The emails Identity Platform sends — verify, reset, email changed — as
+   * HTML. Applied to the project by `scripts/auth-config.mjs`, never at
+   * runtime. `%LINK%`, `%EMAIL%` and `%NEW_EMAIL%` are Identity Platform's
+   * placeholders and must survive translation untouched.
+   */
+  authEmails(shelterName: string, siteUrl: string): AuthEmailCopy;
+
   // ── food: donations, stock, the pot, rations — step 13 ────────────────────
 
   foodCategoryLabel(category: FoodCategory): string;
@@ -765,4 +780,154 @@ export interface MedicalReviewCopy {
   readonly candidateGone: string;
   readonly confirmFailed: string;
   readonly discardFailed: string;
+}
+
+/**
+ * Everything `/account` and `/account/action` say.
+ *
+ * ⚠️ Enumeration protection: nothing here may confirm or deny that an address
+ * has an account, except on the email-link page, whose link was delivered to
+ * that address. `resetSent` is a condition, not a confirmation.
+ *
+ * ⚠️ Deleting an account keeps the person's adoption applications in the
+ * shelter's records. `deleteIntro` must say so before anyone confirms.
+ */
+export interface AccountCopy {
+  // ── signed out ──────────────────────────────────────────────────────────
+  readonly signInTitle: string;
+  readonly signUpTitle: string;
+  readonly resetTitle: string;
+  readonly signInIntro: string;
+  readonly signUpIntro: string;
+  readonly resetIntro: string;
+  readonly signInSubmit: string;
+  readonly signUpSubmit: string;
+  readonly resetSubmit: string;
+  readonly working: string;
+  readonly loading: string;
+  readonly nameLabel: string;
+  readonly nameHint: string;
+  readonly emailLabel: string;
+  readonly passwordLabel: string;
+  passwordHint(minLength: number): string;
+  readonly createAccountLink: string;
+  readonly forgotPasswordLink: string;
+  readonly backToSignIn: string;
+  /** After a reset request. A CONDITION — we are not told whether the account exists. */
+  readonly resetSent: string;
+  /** Precedes the WhatsApp link. */
+  readonly helpPrefix: string;
+  /** Google's own button wording, as its branding guidelines give it in this language. */
+  readonly continueWithGoogle: string;
+  readonly orWithEmail: string;
+  /** In place of the Google button inside an app's built-in browser. */
+  readonly embeddedBrowser: string;
+  readonly embeddedBrowserTryAnyway: string;
+  /** The attribution Google requires when the reCAPTCHA badge is hidden, in parts around its two links. */
+  readonly recaptchaNotice: {
+    readonly before: string;
+    readonly privacy: string;
+    readonly between: string;
+    readonly terms: string;
+    readonly after: string;
+  };
+
+  // ── signed in ───────────────────────────────────────────────────────────
+  readonly title: string;
+  readonly unverified: string;
+  readonly resendVerification: string;
+  readonly alreadyVerified: string;
+  readonly verificationResent: string;
+  readonly stillUnverified: string;
+  readonly comingSoon: string;
+  readonly adminPanel: string;
+  readonly seeWall: string;
+  readonly signOut: string;
+
+  readonly profileTitle: string;
+  readonly nameRowLabel: string;
+  readonly noName: string;
+  readonly change: string;
+  readonly add: string;
+  readonly save: string;
+  readonly cancel: string;
+  readonly nameSaved: string;
+  readonly photoRowLabel: string;
+  readonly uploadPhoto: string;
+  readonly changePhoto: string;
+  readonly useGooglePhoto: string;
+  readonly removePhoto: string;
+  readonly photoSaved: string;
+  readonly photoRemoved: string;
+  readonly photoUnreadable: string;
+  /** Must stay true: a profile photo appears on no public page. */
+  readonly photoPrivacy: string;
+
+  readonly methodsTitle: string;
+  readonly googleRowLabel: string;
+  googleConnected(email: string | null): string;
+  readonly googleNotConnected: string;
+  readonly connectGoogle: string;
+  readonly disconnectGoogle: string;
+  readonly googleConnectedNotice: string;
+  readonly googleDisconnectedNotice: string;
+  readonly disconnectNeedsPassword: string;
+  readonly passwordRowLabel: string;
+  readonly passwordIsSet: string;
+  readonly passwordNotSet: string;
+  readonly changePassword: string;
+  readonly createPassword: string;
+  readonly currentPassword: string;
+  readonly newPassword: string;
+  readonly repeatPassword: string;
+  readonly passwordChanged: string;
+  readonly passwordCreated: string;
+  readonly emailRowLabel: string;
+  readonly changeEmail: string;
+  readonly newEmail: string;
+  emailChangeSent(newEmail: string): string;
+  readonly emailFromGoogle: string;
+  readonly sameEmail: string;
+
+  readonly confirmIdentityPassword: string;
+  readonly confirmIdentityGoogle: string;
+  readonly confirm: string;
+  readonly confirmWithGoogle: string;
+
+  readonly deleteTitle: string;
+  readonly deleteIntro: string;
+  readonly deleteStart: string;
+  readonly deleteConfirmPassword: string;
+  readonly deleteConfirmGoogle: string;
+  readonly deleteSubmit: string;
+  readonly deleted: string;
+  readonly adminCannotDelete: string;
+  deleteError(failure: AccountDeleteFailure | 'unexpected' | 'network'): string;
+
+  newPasswordError(error: NewPasswordError, minLength: number): string;
+  profileError(error: ProfileError, maxLength: number): string;
+
+  // ── /account/action, the page every email links to ─────────────────────
+  readonly actionTitle: string;
+  readonly actionChecking: string;
+  readonly actionMalformed: string;
+  readonly actionUnsupported: string;
+  readonly linkProblemTitle: string;
+  readonly requestNewLink: string;
+  readonly emailVerifiedTitle: string;
+  readonly emailVerified: string;
+  readonly newPasswordTitle: string;
+  newPasswordFor(email: string): string;
+  readonly saveNewPassword: string;
+  readonly passwordResetTitle: string;
+  readonly passwordResetDone: string;
+  readonly emailRecoveredTitle: string;
+  emailRecovered(email: string | null): string;
+  readonly emailRecoveredAdvice: string;
+  readonly sendMeResetLink: string;
+  resetLinkSentTo(email: string): string;
+  readonly emailChangedTitle: string;
+  emailChanged(email: string | null): string;
+  readonly goToAccount: string;
+  readonly goToSignIn: string;
 }

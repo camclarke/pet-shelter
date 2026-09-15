@@ -81,7 +81,7 @@ Full research notes, including regulatory requirements by jurisdiction:
 |---|---|
 | App server (Next.js SSR) | Cloud Run 2nd gen, scales to zero |
 | CDN + custom domain | Firebase Hosting, rewriting to Cloud Run |
-| Auth | Firebase Authentication (email + Google) |
+| Auth | Firebase Authentication with Identity Platform (email + Google), reCAPTCHA Enterprise, emails sent through Resend — see [docs/account-and-email-setup.md](docs/account-and-email-setup.md) |
 | Database | Firestore (Native mode) |
 | Images | Cloud Storage for Firebase |
 | Maps | Maps JavaScript API |

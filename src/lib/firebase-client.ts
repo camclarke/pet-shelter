@@ -11,6 +11,7 @@ import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, type Auth } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator, type FirebaseStorage } from 'firebase/storage';
+import { SHELTER } from '@/config/shelter';
 
 const config = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -33,6 +34,9 @@ function init() {
 
   app = getApps().length ? getApps()[0]! : initializeApp(config);
   authInstance = getAuth(app);
+  // The language of the Google sign-in window and of Firebase's own messages.
+  // Without it the Google account chooser opens in the browser's language.
+  authInstance.languageCode = SHELTER.locale.split('-')[0] ?? 'es';
   dbInstance = getFirestore(app);
   storageInstance = getStorage(app);
 

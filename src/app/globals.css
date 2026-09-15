@@ -992,6 +992,240 @@ textarea {
   }
 }
 
+/* ── sign in with Google ─────────────────────────────────────────────────────
+   The one control on this site that does NOT use the palette. Google's
+   branding guidelines require its neutral fill and its four-colour G on any
+   button that signs in with Google; a jade one would read as an imitation. */
+.auth__providers {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.auth__google {
+  --google-fill: #ffffff;
+  --google-stroke: #747775;
+  --google-text: #1f1f1f;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 10px 20px;
+  border: 1px solid var(--google-stroke);
+  border-radius: 999px;
+  background: var(--google-fill);
+  color: var(--google-text);
+  font: 600 15px/1.2 Roboto, Arial, system-ui, sans-serif;
+  cursor: pointer;
+}
+.auth__google:hover {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.auth__google:disabled {
+  opacity: 0.55;
+  cursor: default;
+  box-shadow: none;
+}
+.auth__google .google-mark {
+  flex: none;
+}
+:root[data-theme='dark'] .auth__google {
+  --google-fill: #131314;
+  --google-stroke: #8e918f;
+  --google-text: #e3e3e3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .auth__google {
+    --google-fill: #131314;
+    --google-stroke: #8e918f;
+    --google-text: #e3e3e3;
+  }
+}
+
+.auth__divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+.auth__divider::before,
+.auth__divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--line);
+}
+
+.auth__recaptcha {
+  margin-top: var(--space-3);
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.7;
+}
+.auth__recaptcha a {
+  color: inherit;
+}
+
+/* Hidden ONLY because .auth__recaptcha carries Google's required attribution
+   on the one page where reCAPTCHA runs. On a phone the floating badge sits on
+   top of the form's bottom-right corner. Remove this and the notice together. */
+.grecaptcha-badge {
+  visibility: hidden;
+}
+
+/* ── profile photo ─────────────────────────────────────────────────────────── */
+.avatar {
+  display: inline-block;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--cream);
+  border: 1px solid var(--line);
+}
+.avatar--initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--jade-deep);
+}
+.header__avatar {
+  border-width: 0;
+}
+
+/* ── account settings ────────────────────────────────────────────────────── */
+.account__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.account__head-text {
+  min-width: 0;
+}
+.account__name {
+  margin-top: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.account__email {
+  font-size: 14px;
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+
+.account__section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.account__heading {
+  font-family: var(--display);
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.account__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.account__row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 14rem;
+}
+.account__value {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.account__label-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.account__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 18px;
+}
+/* Thumb-sized targets: these are text links, tapped one-handed on a phone. */
+.account__row-actions .auth__link,
+.account__form-actions .auth__link,
+.account__delete-start {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.account__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.account__form .auth__field input {
+  background: var(--cream-2);
+}
+.account__form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+/* A label around a visually-hidden (NOT display:none, NOT [hidden]) input, so
+   the native picker opens from a trusted tap — see AccountSettings.tsx. */
+.account__file {
+  position: relative;
+}
+.account__file.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.account__file:focus-within {
+  outline: 2px solid var(--jade);
+  outline-offset: 3px;
+}
+.account__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.account__delete {
+  border-color: var(--coral);
+}
+
+@media (max-width: 760px) {
+  .auth__google {
+    align-self: stretch;
+  }
+}
+
 
 /* ===========================================================================
    Admin surface - the panel and the intake wizard.
