@@ -14,7 +14,14 @@
  */
 
 import { normalizeMicrochipCode, type MicrochipStandard } from './microchip';
-import type { PetPhotoSlot, PetSex, PetSize, PetStatus, Species } from './types';
+import type {
+  PetPhotoSlot,
+  PetSex,
+  PetSize,
+  PetStatus,
+  RegisterLinkConfidence,
+  Species,
+} from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The draft
@@ -138,6 +145,48 @@ export interface PetDraft {
 
   /** Derived from `name`, editable, and checked for collisions before publish. */
   slug: string;
+
+  /**
+   * The row this animal occupies in the shelter's paper register, when the
+   * draft was created from it — or null for an animal nobody has written down
+   * yet, which is every ordinary intake.
+   *
+   * On the draft rather than fetched on demand for the same reason
+   * `chipConflict` is: the wizard renders it beside the fields it explains
+   * ("el registro dice hembra"), and provenance a reload can erase is not
+   * provenance.
+   */
+  register: RegisterRef | null;
+}
+
+/**
+ * What the register says about this animal, carried on the draft.
+ *
+ * Plain serialisable values only — no Timestamps — because `PetDraft` is
+ * passed through pure functions that must not import Firestore, and
+ * `loadDraft` strips the one Timestamp the document has.
+ */
+export interface RegisterRef {
+  no: number;
+  /** The name cell verbatim, so the wizard can show what the paper says. */
+  nameRaw: string;
+  /** `YYYY-MM-DD`, or null when the register recorded only a year. */
+  intakeDay: string | null;
+  /** The age as written: "DE 8 ANOS", "NACIDA 02/11/24". Never parsed into `ageYears`. */
+  ageText: string | null;
+  /**
+   * The sex the register records, kept ALONGSIDE `draft.sex` rather than
+   * replacing it. When a genital photograph disagrees, both are shown and a
+   * person decides — a handwritten H/M is wrong often enough, and sex inflects
+   * every Spanish sentence the site will write about this animal.
+   */
+  sexPerRegister: PetSex | null;
+  sterilizedPerRegister: boolean;
+  /** How many medical records the import wrote under this animal's id. */
+  medicalCount: number;
+  /** Which import created this draft. */
+  batch: string;
+  linkConfidence: RegisterLinkConfidence;
 }
 
 export type IntakeStep = 'identity' | 'media' | 'story';
@@ -213,6 +262,9 @@ export function draftDefaults(id: string): PetDraft {
     goodWithChildren: null,
     goodWithOtherPets: null,
     slug: '',
+    // Null for an ordinary intake. The importer sets it, and the roster sets
+    // it when a volunteer links a returning animal to its old register row.
+    register: null,
   };
 }
 
@@ -396,4 +448,178 @@ export function draftProgress(draft: PetDraft): { done: number; total: number } 
     draft.story.trim().length > 0,
   ].filter(Boolean).length;
   return { done, total: 3 };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What a photograph is allowed to overwrite
+//
+// Analysis used to be applied straight onto the draft: `patch.species =
+// s.species` and four more like it, with nothing asking what the field already
+// held. That was survivable while every draft started blank and was analysed
+// once. It stops being survivable now, for two reasons that arrived together:
+//
+//   1. Analysis is an explicit button, so a second press is normal — and the
+//      second reading would silently replace whatever the person had corrected
+//      between the two.
+//   2. A draft can now START with answers, from the paper register. An import
+//      that a photograph overwrites is a transcription of the shelter's own
+//      record being discarded by a guess about a photograph.
+//
+// The rule below is one sentence: a model may fill a field that is EMPTY, or
+// re-fill one the model itself filled last. Everything a person or the register
+// put there is protected, without anyone having to remember to protect it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Which draft keys one suggestible field owns, and whether the draft holds an
+ * answer for it yet.
+ *
+ * Keyed by the PROVENANCE name — the value that lands in
+ * `draft.suggestedFields`, which is `SuggestedField` in `intake-suggestion.ts`
+ * — because that is the name the guard has to compare against. Several of them
+ * own more than one key: an age is five fields on the draft and one fact about
+ * the animal, and prefilling half of it would leave bounds describing a
+ * different estimate than the number beside them.
+ *
+ * ⚠️ `sterilized` is deliberately ABSENT, so it can never be prefilled. It is a
+ * boolean that defaults to false, which means "no" and "nobody has said" are
+ * the same stored value — there is no empty state to detect, so the only safe
+ * treatment is the one `SUGGESTION_POLICY` already gives it: offered, accepted
+ * by a person, never written by this function.
+ */
+const PREFILLABLE: Readonly<
+  Record<string, { keys: readonly (keyof PetDraft)[]; isEmpty: (draft: PetDraft) => boolean }>
+> = {
+  species: { keys: ['species'], isEmpty: (d) => d.species === null },
+  name: { keys: ['name'], isEmpty: (d) => d.name.trim().length === 0 },
+  sex: { keys: ['sex'], isEmpty: (d) => d.sex === null },
+  size: { keys: ['size'], isEmpty: (d) => d.size === null },
+  breed: { keys: ['breed'], isEmpty: (d) => d.breed.trim().length === 0 },
+  colorPattern: { keys: ['colorPattern'], isEmpty: (d) => d.colorPattern.trim().length === 0 },
+  coatType: { keys: ['coatType'], isEmpty: (d) => d.coatType.trim().length === 0 },
+  ageMonths: {
+    keys: ['ageYears', 'ageMonthsPart', 'ageMonthsMin', 'ageMonthsMax', 'ageUnknown'],
+    // `ageUnknown` is an ANSWER, not a blank. `PetDraft` says so explicitly:
+    // "we don't know" and "we haven't filled this in yet" are different facts.
+    // So a ticked "No sabemos la edad" is a decision a photograph may not
+    // quietly reverse.
+    isEmpty: (d) => !d.ageUnknown && d.ageYears === null && d.ageMonthsPart === null,
+  },
+  weightKg: {
+    keys: ['weightKgMin', 'weightKgMax'],
+    isEmpty: (d) => d.weightKgMin === null && d.weightKgMax === null,
+  },
+};
+
+/**
+ * Whether a model's reading may be written into this field.
+ *
+ * True when the field is empty, or when the only thing in it is what a model
+ * put there — which is what makes re-analysing a photograph still work while a
+ * typed or imported value survives it.
+ *
+ * ⚠️ An unknown field name returns FALSE. The failure direction matters: a name
+ * this table does not recognise is a field whose empty state nobody has
+ * defined, and guessing "probably empty" would mean the guard silently stops
+ * guarding the day someone adds a prefillable field and forgets this list.
+ */
+export function shouldPrefill(field: string, draft: PetDraft): boolean {
+  const spec = PREFILLABLE[field];
+  if (!spec) return false;
+  if (spec.isEmpty(draft)) return true;
+  // Written by a model last time, so re-writing it loses nothing a person said.
+  return draft.suggestedFields.includes(field);
+}
+
+/**
+ * Apply a photo analysis to the draft, field by field, under `shouldPrefill`.
+ *
+ * `fields` names what each part of `patch` IS — the provenance names, not the
+ * draft keys — and the table above decides which keys each of those names is
+ * allowed to touch. So a patch carrying a key its field does not own writes
+ * nothing: the guard cannot be walked around by widening the object literal at
+ * the call site, which is exactly how this kind of rule normally erodes.
+ *
+ * Returns the SAME draft object when nothing survived the guard. The caller
+ * compares by reference to decide whether to save, so a re-analysis that
+ * confirms what is already there costs no Firestore write and shows no
+ * "guardado" that would suggest something changed.
+ */
+export function applyPhotoPrefill(
+  draft: PetDraft,
+  patch: Partial<PetDraft>,
+  fields: readonly string[],
+  model: string | null,
+): PetDraft {
+  // `undefined` is not a value here — a key present but undefined would spread
+  // over a real answer and erase it, which is the opposite of the point.
+  const provided = new Set(
+    Object.entries(patch)
+      .filter(([, value]) => value !== undefined)
+      .map(([key]) => key),
+  );
+
+  const applied: string[] = [];
+  const allowed = new Set<string>();
+
+  for (const field of fields) {
+    const spec = PREFILLABLE[field];
+    if (!spec) continue;
+    if (!shouldPrefill(field, draft)) continue;
+    const keys = spec.keys.filter((key) => provided.has(key));
+    if (keys.length === 0) continue;
+    for (const key of keys) allowed.add(key);
+    applied.push(field);
+  }
+
+  if (applied.length === 0) return draft;
+
+  const accepted = Object.fromEntries(
+    Object.entries(patch).filter(([key, value]) => value !== undefined && allowed.has(key)),
+  ) as Partial<PetDraft>;
+
+  return {
+    ...draft,
+    ...accepted,
+    suggestedFields: [...new Set([...draft.suggestedFields, ...applied])],
+    // Keep the previous key rather than erasing provenance when the caller has
+    // no model name to give.
+    suggestedByModel: model ?? draft.suggestedByModel,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The register against the photograph
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The two independent readings of this animal's sex, when they disagree.
+ *
+ * Null whenever there is nothing to compare: no register row, a register that
+ * left the sex blank, or a photograph the model refused to read a sex from.
+ * Non-null is therefore a real contradiction between two sources that were
+ * produced without knowing about each other — a handwritten H/M in a paper
+ * column, and a genital photograph — and it is worth a person's attention
+ * precisely because neither is reliably right. Handwriting is misread; so is a
+ * puppy.
+ *
+ * ⚠️ `suggestedSex` must be the DECIDED sex from `decideSex()`, never the
+ * model's raw claim. A sex inferred from build rather than seen is not a second
+ * reading, and pitting one against the register would manufacture a
+ * disagreement out of a guess.
+ *
+ * ⚠️ Deliberately does NOT look at `draft.sex`, and therefore keeps reporting
+ * the disagreement after someone resolves it. That is the intent: the two
+ * sources still disagree, and the record should keep saying so. What the UI
+ * stops offering is the switch, once the draft already holds what the
+ * photograph read.
+ */
+export function sexConflict(
+  draft: PetDraft,
+  suggestedSex: PetSex | null,
+): { register: PetSex; photo: PetSex } | null {
+  const register = draft.register?.sexPerRegister ?? null;
+  if (register === null || suggestedSex === null) return null;
+  if (register === suggestedSex) return null;
+  return { register, photo: suggestedSex };
 }

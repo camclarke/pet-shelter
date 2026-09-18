@@ -156,6 +156,23 @@ export interface Pet {
   coverPhoto: string | null;
 
   /**
+   * The row this animal occupies in the shelter's own paper intake register,
+   * or null for an animal that was never written there.
+   *
+   * On the PUBLIC tier deliberately. It is an ordinal, not personal data — it
+   * reveals only the animal's position in the shelter's intake order — and
+   * `publishDraft` writes the public tier as one object, so a field here
+   * survives publish for free while one in `detail` would cost an extra read
+   * in every list view.
+   *
+   * ⚠️ It is the ONLY key that separates two animals the register names
+   * almost identically (n.º 215 "Dana" and n.º 216 "Duna": same sex, same
+   * intake day, both black). Nothing in a photograph separates them, so any
+   * screen that offers a choice between register rows must show this number.
+   */
+  registerNo: number | null;
+
+  /**
    * Which of this document’s fields a vision model influenced, by field
    * name — e.g. `["species", "ageMonths"]`. Empty for a pet typed in by
    * hand, which is the default and should stay the common case.
@@ -705,6 +722,19 @@ export interface MedicalRecord {
   extractionEvidence: Record<string, FieldEvidence> | null;
 
   recordedBy: string;
+
+  /**
+   * Set only on a record transcribed from the shelter's paper register by the
+   * importer. Absent on every record typed in the app or confirmed from a
+   * card, which is why it is optional rather than nullable: a writer that
+   * predates the importer must not have to say "not imported".
+   *
+   * `source` stays `'manual'` for these — a person read paper and typed it,
+   * which is exactly what manual means here, and `isConfirmed()` deliberately
+   * ignores `source` anyway. What this adds is WHICH cell, so a wrong date can
+   * be traced back to the row it was read from rather than argued about.
+   */
+  importRef?: ImportRef | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1217,6 +1247,151 @@ export interface FeedingLog {
   shortfallNote: string | null;
   updatedBy: string;
   updatedAt: Timestamp;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// registerEntries/{no} — ADMIN READ AND WRITE
+//
+// The shelter's own paper intake register, transcribed. One document per
+// numbered row, 225 of them at the first import: the animals living here, the
+// ones adopted, the ones returned to their street or their owner, the ones
+// that died, and the ones handed to someone else.
+//
+// Why a collection of its own rather than 225 `pets` documents. `pets` is
+// `allow read: if true` and `/adopt/{slug}` serves any status, so publishing
+// the register as pets would create a public dossier — with a WhatsApp
+// "adóptame" button — for every dead and adopted animal in it. And the admin
+// dashboard reads the 50 most recent pets, so 225 rows would bury the ones
+// that need photographs.
+//
+// Why admin-only READ rather than `signedIn()`: this is the shelter's internal
+// operating history. An adopter with an account has no reason to enumerate
+// twenty dead animals, and `responsible` names volunteers.
+//
+// ⚠️ The register's adopter column — names, phone numbers and the coordinates
+// of people's homes — is NEVER imported. It is the most sensitive data the
+// project touches and it has no place in Firestore.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What became of the animal, as the register records it.
+ *
+ * The spreadsheet encodes this as a ROW FILL COLOUR against a legend of
+ * ADOPTADO / DEVUELTO / MUERTO, with no colour meaning "still here". Those
+ * three plus the observations column produce five outcomes: `returned` is
+ * "went back to its street or its owner", while `transferred` is "someone took
+ * it" without an adoption being recorded — a distinction the colour cannot
+ * make and the observations can.
+ */
+export type RegisterStatus =
+  | 'in-shelter'
+  | 'adopted'
+  | 'returned'
+  | 'died'
+  | 'transferred'
+  | 'unknown';
+
+/** How sure we are that `RegisterEntry.petId` points at the right animal. */
+export type RegisterLinkConfidence = 'confirmed' | 'provisional';
+
+export interface RegisterEntry {
+  /** The register number. Also the document id, as a string. */
+  no: number;
+
+  /** Display name, accents restored. */
+  name: string;
+  /** The name cell verbatim, so a transcription can always be audited. */
+  nameRaw: string;
+  /**
+   * False when the register holds a description rather than a name — "BB2 de
+   * Johana, café con blanco". 47 of the 225 rows are like this, and inventing
+   * a name for them would put a fiction on a public page later.
+   */
+  hasRealName: boolean;
+  /** Other names in the same cell: a former name, a litter tag, a nickname. */
+  aliases: string[];
+
+  /** Null when the register gives no evidence either way. */
+  species: Species | null;
+  speciesWhy: string | null;
+  sex: PetSex | null;
+
+  intakeDate: Timestamp | null;
+  /** The intake cell verbatim: it often holds only a year, or an age too. */
+  intakeRaw: string;
+  ageAtIntakeRaw: string | null;
+  ageAtIntakeMinMonths: number | null;
+  ageAtIntakeMaxMonths: number | null;
+
+  status: RegisterStatus;
+  /** One short Spanish sentence a volunteer would recognise. */
+  statusWhy: string;
+  statusDate: Timestamp | null;
+  /**
+   * ⚠️ False until a person has actually seen the animal. Every status in the
+   * first import comes from a fill colour in a spreadsheet, which is a record
+   * of intent, not a headcount. A roster that shows unconfirmed rows as facts
+   * is how a photograph gets attached to an animal that left months ago.
+   */
+  statusConfirmed: boolean;
+
+  sterilizedPerRegister: boolean;
+  /** The most recent date written anywhere in the row's medical columns. */
+  lastRecordedDate: Timestamp | null;
+
+  /** Colour/coat words the register itself wrote. Only 2 of 43 residents have one. */
+  colourNote: string | null;
+  /** Breed words the register wrote — "husky", "cocker". Never a model's guess. */
+  breedWords: string[];
+
+  /**
+   * The rescuer or group responsible, as written. Often the single most useful
+   * thing on a confirm card, because that person knows which dog is which.
+   * Phone numbers are stripped at import.
+   */
+  responsible: string | null;
+
+  /** Set when the name marks a litter: "BB3-AURORA" → tag Aurora, index 3. */
+  litter: { tag: string | null; index: number | null; mother: string | null } | null;
+
+  /**
+   * The pet (or draft, which shares the id) this row is linked to, or null.
+   * The back-pointer is `Pet.registerNo`; both are written in one batch.
+   */
+  petId: string | null;
+  /**
+   * `provisional` when a person could not tell two rows apart and said so —
+   * unnamed litter siblings admitted the same day. A provisional link that
+   * announces itself is worth more than a confident wrong one.
+   */
+  linkConfidence: RegisterLinkConfidence | null;
+
+  /** Anything odd about the row: an impossible date, a name used twice. */
+  flags: string[];
+
+  /** Which import wrote this, e.g. "registro-2026-09-18". The rollback key. */
+  importBatch: string;
+  importedAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/**
+ * Where an imported record came from, down to the cell.
+ *
+ * On every medical record the importer writes, so that a reader months later
+ * can tell a transcription of the shelter's paper register from something a
+ * vet typed or a model read — and so `--delete` can find exactly what one
+ * import wrote and nothing else.
+ */
+export interface ImportRef {
+  batch: string;
+  registerNo: number;
+  /** The register column: "octavalentDose1", "deworming", "rabies"… */
+  column: string;
+  /** The cell contents verbatim, e.g. "20/12/24". */
+  raw: string;
+  /** Which sheet the value was read from. */
+  sheet: 'xlsx' | 'pdf' | 'both';
 }
 
 /** Geographic bounds for the Cochabamba region, enforced in security rules. */

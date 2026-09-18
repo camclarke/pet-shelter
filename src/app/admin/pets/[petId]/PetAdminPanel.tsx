@@ -49,8 +49,10 @@ import {
   type OutbreakTrace,
   type PlacementRecord,
 } from '@/lib/areas-admin';
+import { loadDraft } from '@/lib/pets-admin';
 import { INCUBATION_MAX_DAYS, type Pathogen, type PlacementInterval } from '@/lib/placements';
 import { t } from '@/i18n';
+import type { PetDraft } from '@/lib/intake';
 import type { Area, Pet, PlacementReason } from '@/lib/types';
 
 const REASONS: PlacementReason[] = [
@@ -70,6 +72,12 @@ export function PetAdminPanel({ petId }: { petId: string }) {
   const { user } = useAuth();
 
   const [pet, setPet] = useState<Pet | null | 'missing'>(null);
+  /**
+   * Only read when `pets/{id}` turns out not to exist. A register-imported
+   * animal is a draft with a medical history and no published document yet —
+   * see `PendingDraftPanel`.
+   */
+  const [draft, setDraft] = useState<PetDraft | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [records, setRecords] = useState<PlacementRecord[] | null>(null);
   const [movers, setMovers] = useState<Map<string, string>>(new Map());
@@ -97,6 +105,12 @@ export function PetAdminPanel({ petId }: { petId: string }) {
         listAreas(),
         getPetPlacementRecords(petId),
       ]);
+
+      // Read BEFORE committing to 'missing', not after: setting the state
+      // first and then fetching would flash "esa ficha ya no existe" for an
+      // animal whose record is one collection away, and that sentence is
+      // exactly the thing a person acts on.
+      if (!found) setDraft(await loadDraft(petId));
 
       setPet(found ?? 'missing');
       setAreas(areaList);
@@ -207,6 +221,9 @@ export function PetAdminPanel({ petId }: { petId: string }) {
   }
 
   if (pet === 'missing') {
+    // A draft at this id is not a missing record, it is an unfinished one.
+    if (draft) return <PendingDraftPanel petId={petId} draft={draft} />;
+
     return (
       <div className="admin">
         <p className="auth__error">Esa ficha ya no existe.</p>
@@ -457,6 +474,119 @@ export function PetAdminPanel({ petId }: { petId: string }) {
 
         {trace && <TraceResult trace={trace} pets={tracedNames} />}
       </section>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * An animal that exists as a draft and not yet as a published pet.
+ *
+ * ── Why this screen exists ────────────────────────────────────────────────
+ * The paper register is imported before anybody photographs anything: it
+ * creates `petDrafts/{id}` and writes the vaccinations and treatments it read
+ * off paper under `pets/{id}/medical` — the same id the wizard will publish
+ * under, so nothing has to move later. Until the photo session happens there
+ * is no `pets/{id}` document at all, and this page answered "esa ficha ya no
+ * existe" for every resident whose history was sitting one collection away.
+ * That is the worst kind of wrong answer: confident, and about data we have.
+ *
+ * ── What is deliberately absent ───────────────────────────────────────────
+ * The areas board, the QR tag and the outbreak trace all need a PUBLISHED
+ * pet. A placement snapshots the animal, a tag resolves to the public tier,
+ * and the trace answers a question about a record the wall knows. Showing
+ * them here would either fail or — worse — quietly write a placement against
+ * an id no public document has claimed yet, which is an outbreak ledger
+ * pointing at nothing.
+ *
+ * Medical and weight are a different case, and that is why they stay: both
+ * are per-id subcollections whose rules gate on the admin claim rather than
+ * on the parent existing, and the medical one is precisely what the import
+ * brought. A vet visit does not wait for a photo session.
+ */
+function PendingDraftPanel({ petId, draft }: { petId: string; draft: PetDraft }) {
+  // `petId` rather than `draft.id` for every path and link. They are the same
+  // by construction, but one is the key the document was read under and the
+  // other is a cast from a stored field — and these paths decide which
+  // animal's medical history is on screen.
+  const register = draft.register ?? null;
+  const needsPhotos = (draft.media ?? []).length === 0;
+  const imported = register?.medicalCount ?? 0;
+
+  return (
+    <div className="admin">
+      <header className="admin__header">
+        <div>
+          {/* The register's own spelling is the fallback, not "Sin nombre":
+              on an imported row it is the only name anybody wrote down. */}
+          <h1 className="t-title">
+            {draft.name?.trim() || register?.nameRaw?.trim() || 'Sin nombre'}
+          </h1>
+          <p className="admin__sub">
+            {register && `Del registro n.º ${register.no} · `}
+            {needsPhotos ? 'Falta fotografiar' : 'Falta publicar'}
+          </p>
+        </div>
+        <div className="admin__header-actions">
+          <Link href="/admin" className="btn btn--muted">
+            ← Panel
+          </Link>
+        </div>
+      </header>
+
+      <div className="auth__notice">
+        <p>
+          {register
+            ? 'Esta ficha salió del registro en papel y todavía no está publicada.'
+            : 'Esta ficha está a medio llenar y todavía no está publicada.'}{' '}
+          Aquí puedes ver y corregir lo médico y el peso. Las áreas, el código QR y el rastreo de
+          contactos necesitan la ficha publicada.
+        </p>
+        {imported > 0 && (
+          <p className="admin__sub">
+            El registro trajo {imported} dato{imported === 1 ? '' : 's'} médico
+            {imported === 1 ? '' : 's'}. Revísalos contra la tarjeta o el carnet antes de darlos
+            por buenos: salieron de una hoja escrita a mano.
+          </p>
+        )}
+      </div>
+
+      <section className="admin-list">
+        <h2 className="t-label">Para que aparezca en el muro</h2>
+        <p className="admin__sub">
+          Faltan las fotos y los datos que la ficha pública necesita. El asistente sigue desde
+          donde está y publica con este mismo id, así que lo médico que ya está aquí se queda con
+          el animalito.
+        </p>
+        <div className="admin__footer">
+          <div className="admin__footer-left" />
+          <div className="admin__footer-right">
+            <Link href={`/admin/intake?draft=${petId}`} className="btn btn--action">
+              Tomar fotos y completar
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ── the history the register brought: build-order step 7 ─────────── */}
+      <MedicalPanel petId={petId} />
+
+      {/* ── weight and body condition: build-order step 10 ─────────────────
+          `species` can still be null on a half-filled draft, and the panel is
+          built for that — it drops the per-species weight ceiling warning and
+          keeps every other check. Hiding the panel instead would refuse to
+          record a weight the vet just took because nobody has typed "perro"
+          yet, and the reading is real either way.
+
+          The draft's range only ever holds a photograph's estimate, which is
+          exactly what `weightIsEstimate` gates on the published document. */}
+      <MeasurementPanel
+        petId={petId}
+        species={draft.species ?? null}
+        estimatedKgMin={draft.weightKgMin ?? null}
+        estimatedKgMax={draft.weightKgMax ?? null}
+      />
     </div>
   );
 }

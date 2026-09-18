@@ -35,7 +35,6 @@ import {
   getDoc,
   getDocs,
   limit,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -123,20 +122,102 @@ export async function loadDraft(id: string): Promise<PetDraft | null> {
   return data as PetDraft;
 }
 
-export async function listDrafts(max = 50): Promise<PetDraft[]> {
+/**
+ * Every unfinished draft, newest first.
+ *
+ * ⚠️ This deliberately does NOT `orderBy('updatedAt')` in the query, and that
+ * is the point of the function rather than an oversight. Firestore drops a
+ * document that lacks the ordered field out of the result set entirely — not
+ * sorted last, ABSENT — with no error and no gap to notice. That is this
+ * repo's most-repeated failure shape (the same reason `publishDraft` insists
+ * on `createdAt`, which `getWall()` orders by), and here it loses an animal:
+ * the register import creates a draft per resident, and a draft is the only
+ * record some of them have until someone photographs them.
+ *
+ * The ordering therefore happens in memory, where a missing timestamp sorts
+ * as "oldest" instead of vanishing. What that costs is that `max` now
+ * truncates in document-id order rather than by recency — so the cap is set
+ * far above any plausible count (225 register rows is the hard ceiling, plus
+ * whatever intakes are open) and exists only to bound the read. Firestore
+ * bills per document RETURNED, not per the limit, so a high cap over ~45
+ * drafts is ~45 reads.
+ */
+export async function listDrafts(max = 500): Promise<PetDraft[]> {
   const { db } = getFirebase();
-  const snap = await getDocs(
-    query(collection(db, 'petDrafts'), orderBy('updatedAt', 'desc'), limit(max)),
-  );
-  return snap.docs.map((d) => {
-    const data = d.data();
-    delete data.updatedAt;
-    return data as PetDraft;
-  });
+  const snap = await getDocs(query(collection(db, 'petDrafts'), limit(max)));
+
+  return snap.docs
+    .map((d) => {
+      const data = d.data();
+      // Read before stripping. `updatedAt` is a Firestore Timestamp and has no
+      // place in the wizard's state — same reason `loadDraft` deletes it — but
+      // it is also the sort key, so it is pulled out first. A draft without it
+      // gets 0, which sorts it last and, crucially, still sorts it.
+      const updatedAt = data.updatedAt?.toMillis?.() ?? 0;
+      delete data.updatedAt;
+      // The document id rather than `data.id`: they are the same by
+      // construction, but one of them is a cast from a stored field and the
+      // other is the key we just read it under.
+      return { id: d.id, updatedAt, draft: data as PetDraft };
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
+    .map((row) => row.draft);
 }
 
+/**
+ * Only the drafts a register import created.
+ *
+ * Filtered in memory over the same single read rather than with a
+ * `where('register', '!=', null)`, because a Firestore inequality EXCLUDES
+ * documents where the field is missing — so a draft written before `register`
+ * existed would be dropped rather than simply not matching. Same
+ * silent-omission shape as the ordering above, one field over.
+ */
+export async function listDraftsWithRegister(max?: number): Promise<PetDraft[]> {
+  return (await listDrafts(max)).filter((draft) => draft.register != null);
+}
+
+/**
+ * Thrown when a draft is protected from deletion.
+ *
+ * ⚠️ No Spanish, like every other failure in this module — the component maps
+ * it. `code` is set so that a handler which only reads `error.code` says
+ * something other than "revisa tu conexión", which would point whoever is
+ * holding the phone at a problem that does not exist.
+ */
+export class RegisterLinkedDraftError extends Error {
+  readonly code = 'register-linked-draft';
+
+  constructor(readonly registerNo: number) {
+    super(`draft is linked to register entry ${registerNo} and cannot be discarded`);
+    this.name = 'RegisterLinkedDraftError';
+  }
+}
+
+/**
+ * Throw away an unfinished draft.
+ *
+ * ⚠️ Refuses a draft that came from the paper register, because discarding it
+ * would not delete the animal's history — it would ORPHAN it. The import
+ * writes the vaccinations and treatments it read off paper under
+ * `pets/{draftId}/medical`, at the same id the wizard will publish under so
+ * nothing has to move later. Firestore does not cascade, so deleting the
+ * draft leaves those records under a key nothing points at any more, while
+ * the register row goes back to reading "sin ficha". Both halves then look
+ * fine and the history is gone.
+ *
+ * The draft is read from the SERVER rather than taken from the caller's
+ * in-memory copy: one extra read on a rare, irreversible action, and a stale
+ * object cannot talk its way past the refusal. Deleting a draft that is
+ * already gone stays a no-op, as before.
+ */
 export async function discardDraft(id: string): Promise<void> {
   const { db } = getFirebase();
+
+  const snap = await getDoc(doc(db, 'petDrafts', id));
+  const register = (snap.data()?.register ?? null) as PetDraft['register'];
+  if (register) throw new RegisterLinkedDraftError(register.no);
+
   await deleteDoc(doc(db, 'petDrafts', id));
 }
 
@@ -379,6 +460,9 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
     // media[0] — media is in capture order and a genital shot can legitimately
     // be first, which would have put it on the public wall. See coverPhotoFrom.
     coverPhoto: coverPhotoFrom(draft.media),
+    // The paper register's row number, so the link survives publish. Null for
+    // an animal nobody wrote in the register — the ordinary intake.
+    registerNo: draft.register?.no ?? null,
     // Provenance: which fields a vision model influenced, if any. Empty for a
     // hand-typed animal. This records INFLUENCE, not unreviewed writing — an
     // admin accepted every value that reached here.
