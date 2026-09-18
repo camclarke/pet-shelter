@@ -323,7 +323,14 @@ export function IntakeWizard() {
         if (cancelled) return;
         if (existing) {
           setDraft(existing);
-          setSlugTouched(true); // a saved draft's slug is already decided
+          // A saved draft's slug is already decided — UNLESS it has none.
+          // Four of the imported register drafts arrive with an empty name and
+          // an empty slug on purpose, because the register holds a description
+          // where their name should be ("BB3, pomposo con negro"). Pinning the
+          // slug for those would mean the volunteer types a name, no slug is
+          // ever derived from it, and publishing fails with `slug-invalid` —
+          // an error about a field they were never shown.
+          setSlugTouched(existing.slug.trim().length > 0);
           return;
         }
         // The draft is gone — discarded, or already published from another

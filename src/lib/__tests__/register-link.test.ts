@@ -107,3 +107,31 @@ test('the wizard has a message for a draft it may not discard', () => {
     'RegisterLinkedDraftError falls through to "revisa tu conexión", which sends someone to the wrong problem',
   );
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A resumed draft with no slug must still get one
+//
+// Four imported drafts arrive with an empty name and an empty slug, because
+// the register holds a description where the name should be. Resuming a draft
+// used to pin `slugTouched` unconditionally, so a volunteer could type a name
+// and still be refused at publish with `slug-invalid` — an error about a field
+// nobody showed them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('resuming a draft only pins the slug when there is one', () => {
+  const source = wizardCode();
+  const at = source.indexOf('setSlugTouched(');
+  assert.ok(at >= 0, 'the slug-pinning logic is gone');
+
+  const line = source.slice(at, source.indexOf('\n', at));
+  assert.equal(
+    /setSlugTouched\(true\)/.test(line),
+    false,
+    'a resumed draft pins its slug unconditionally, so a draft with an empty slug can never get one',
+  );
+  assert.match(
+    line,
+    /existing\.slug/,
+    'the pin no longer depends on whether the draft actually has a slug',
+  );
+});
