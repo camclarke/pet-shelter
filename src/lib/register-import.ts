@@ -749,12 +749,16 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
           }
         : null,
 
-      // ⚠️ Null, deliberately, even for the 43 rows that get a draft in this
-      // same plan. The back-pointer `Pet.registerNo` is written on the draft,
-      // so provenance is not lost — but `RegisterEntry.petId` is the
-      // AUTHORITATIVE link, and nobody has yet stood in front of the animal.
-      // The photo session stamps it. An import that pre-links every row would
-      // make `linkConfidence` meaningless on the day it matters most.
+      // Filled in below for the rows that get a draft. It has to be: the
+      // roster reads `entry.petId` to decide whether to OPEN this animal's
+      // record or MINT A NEW ONE, so a row left null here would send the
+      // volunteer into a second draft while the imported medical history sat
+      // under the first — the exact duplicate this whole design exists to
+      // prevent. Measured on the canary import, which is what a canary is for.
+      //
+      // `linkConfidence` is where the doubt belongs, and it stays
+      // `provisional` until a person standing in front of the animal says the
+      // row and the dog are the same.
       petId: null,
       linkConfidence: null,
 
@@ -951,6 +955,12 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
       // block the camera from adding any. Species in particular inflects every
       // Spanish sentence the site writes about the animal.
     };
+
+    // Both halves of the link, written by the same plan. `entry` is the object
+    // already pushed onto `entries`, so setting it here is what reaches
+    // Firestore — the roster then opens THIS draft instead of minting another.
+    entry.petId = draftId;
+    entry.linkConfidence = 'provisional';
 
     drafts.push({ id: draftId, no, data: draft });
     medical.push(...plannedForThisAnimal);
