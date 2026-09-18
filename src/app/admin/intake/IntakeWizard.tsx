@@ -51,14 +51,18 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useAuth } from '@/components/AuthProvider';
 import {
+  applyPhotoPrefill,
   draftDefaults,
   publishBlockers,
+  sexConflict,
   slugify,
   validateStep,
   type IntakeError,
   type IntakeStep,
   type PetDraft,
+  type RegisterRef,
 } from '@/lib/intake';
+import { formatDate, parseDateInput } from '@/lib/date-input';
 import {
   deletePhotos,
   discardDraft,
@@ -88,7 +92,7 @@ import PhotoSuggestions, {
   SEX_WITHHELD_REASON,
   WITHHELD_REASON,
 } from './PhotoSuggestions';
-import EditableField from './EditableField';
+import EditableField, { type FieldOffer } from './EditableField';
 import GuidedPhotoCapture from './GuidedPhotoCapture';
 import { PetPhoto } from './PetPhoto';
 import { t } from '@/i18n';
@@ -164,6 +168,50 @@ function describeAge(
   if (years) parts.push(`${years} ${years === 1 ? 'año' : 'años'}`);
   if (months) parts.push(`${months} ${months === 1 ? 'mes' : 'meses'}`);
   return parts.length > 0 ? parts.join(' y ') : 'Menos de un mes';
+}
+
+/**
+ * "Esterilizada según el registro", agreeing with the sex the REGISTER wrote
+ * rather than with whatever the draft currently holds. This line quotes the
+ * paper, so it should read like the paper.
+ *
+ * The genderless fallback is not squeamishness. The register leaves the sex
+ * column blank on plenty of rows, so there is genuinely no word to agree with —
+ * and "esterilizado/a" on screen is worse than a sentence built to avoid the
+ * ending.
+ */
+function sterilizedPerRegisterLabel(sex: PetSex | null): string {
+  if (sex === 'female') return 'Esterilizada según el registro.';
+  if (sex === 'male') return 'Esterilizado según el registro.';
+  return 'Con esterilización según el registro.';
+}
+
+/**
+ * What the paper says about this animal, in one line.
+ *
+ * Every part is a quotation, never an interpretation: the age is shown as the
+ * register WROTE it ("DE 8 ANOS", "NACIDA 02/11/24") and is deliberately not
+ * parsed into the age field — a date nobody can read stays unread rather than
+ * becoming a number that looks certain.
+ */
+function describeRegister(register: RegisterRef): string {
+  const parts: string[] = [
+    register.intakeDay
+      ? `Ingresó el ${formatDate(parseDateInput(register.intakeDay).getTime())}.`
+      : 'El registro no anotó el día exacto de ingreso.',
+  ];
+  if (register.ageText) parts.push(`Edad anotada: «${register.ageText}».`);
+  if (register.sterilizedPerRegister) {
+    parts.push(sterilizedPerRegisterLabel(register.sexPerRegister));
+  }
+  if (register.medicalCount > 0) {
+    parts.push(
+      register.medicalCount === 1
+        ? '1 ficha médica ya cargada.'
+        : `${register.medicalCount} fichas médicas ya cargadas.`,
+    );
+  }
+  return parts.join(' ');
 }
 
 function toTristate(value: boolean | null): string {
@@ -396,6 +444,16 @@ export function IntakeWizard() {
     }
 
     const code = (caught as { code?: string })?.code;
+    if (code === 'register-linked-draft') {
+      // `discardDraft` refused: this draft carries imported medical records
+      // that deleting it would orphan. "Revisa tu conexión" would send someone
+      // to the wrong problem entirely.
+      setError(
+        'Esta ficha viene del registro en papel y tiene historia médica cargada, así que no se puede descartar. ' +
+          'Suelta el número del registro desde «En el refugio» si necesitas separarlos.',
+      );
+      return;
+    }
     if (code === 'permission-denied') {
       // The single most likely failure, and it is almost never a bug: the ID
       // token predates the claim grant. Say the fix, not the error code.
@@ -503,55 +561,65 @@ export function IntakeWizard() {
         })),
       );
 
+      // ⚠️ ONLY THE PHOTOGRAPHS TRAVEL. `draft.register` — the paper register's
+      // name, intake date, age text and sex — is deliberately NOT in this
+      // request, and must never be added to it, however helpful the extra
+      // context looks. The whole value of the model's reading here is that it
+      // is INDEPENDENT of the register: a photograph that already knows the
+      // register says "hembra" cannot then be a second opinion about it, and
+      // `sexConflict()` below would be comparing the register against an echo
+      // of itself. An independent check is the only kind worth having.
       const outcome = await requestSuggestion(user, photos);
       setSuggestOutcome(outcome);
 
       const s = outcome.suggestion;
       if (!s) return;
-      let next: PetDraft = draft;
 
-      // Only the two fields the policy marks `prefill` are applied here.
+      // Only the fields the policy marks `prefill` are proposed here.
       // Breed, size and names are buttons — see PhotoSuggestions.
+      //
+      // Each reading is PROPOSED, with the provenance name the guard will check
+      // it under, and nothing below touches the draft. `propose` takes the
+      // value and that name together on purpose: they used to be two
+      // statements, so it was possible to write a field without recording that
+      // a model wrote it — and a value with no provenance is indistinguishable
+      // from one a person typed, which is precisely what the guard reads.
       const patch: Partial<PetDraft> = {};
-      const applied: string[] = [];
+      const fields: string[] = [];
+      const propose = (field: string, values: Partial<PetDraft>) => {
+        Object.assign(patch, values);
+        fields.push(field);
+      };
 
-      if (s.species) {
-        patch.species = s.species;
-        applied.push('species');
-      }
+      if (s.species) propose('species', { species: s.species });
 
       // Colour and coat are prefilled rather than offered: anyone standing
       // next to the animal can check them in a second, and a wrong one is
       // embarrassing rather than harmful. Contrast breed, which reaches a
       // public listing as a claim.
-      if (s.colorPattern) {
-        patch.colorPattern = s.colorPattern;
-        applied.push('colorPattern');
-      }
-
-      if (s.coatType) {
-        patch.coatType = s.coatType;
-        applied.push('coatType');
-      }
+      if (s.colorPattern) propose('colorPattern', { colorPattern: s.colorPattern });
+      if (s.coatType) propose('coatType', { coatType: s.coatType });
 
       if (!s.age.refused && s.age.ageMonths !== null) {
-        patch.ageYears = Math.floor(s.age.ageMonths / 12);
-        patch.ageMonthsPart = s.age.ageMonths % 12;
-        // The bounds travel with it. Without them the public page would
-        // render the midpoint as though it were a known age.
-        patch.ageMonthsMin = s.age.ageMonthsMin;
-        patch.ageMonthsMax = s.age.ageMonthsMax;
-        patch.ageUnknown = false;
-        applied.push('ageMonths');
+        propose('ageMonths', {
+          ageYears: Math.floor(s.age.ageMonths / 12),
+          ageMonthsPart: s.age.ageMonths % 12,
+          // The bounds travel with it. Without them the public page would
+          // render the midpoint as though it were a known age.
+          ageMonthsMin: s.age.ageMonthsMin,
+          ageMonthsMax: s.age.ageMonthsMax,
+          ageUnknown: false,
+        });
       }
 
-      if (applied.length > 0) {
-        next = {
-          ...next,
-          ...patch,
-          suggestedFields: [...new Set([...next.suggestedFields, ...applied])],
-          suggestedByModel: outcome.modelKey,
-        };
+      // ⚠️ Nothing above writes to the draft. `applyPhotoPrefill` drops any
+      // field a person or the register already answered, so pressing Analizar
+      // twice, or analysing an animal that came from the register, can no
+      // longer replace what somebody knew with what a photograph guessed.
+      const next = applyPhotoPrefill(draft, patch, fields, outcome.modelKey);
+      // Same object back when the guard kept everything out — so a re-analysis
+      // that confirms what is already there costs no write and claims nothing.
+      if (next !== draft) {
         setDraft(next);
         await saveDraft(next);
       }
@@ -586,6 +654,53 @@ export function IntakeWizard() {
   // are read from onClick handlers. A plain const needs no narrowing.
   const resembles: string[] =
     suggestion && suggestion.breed.kind === 'mixed' ? suggestion.breed.resembles : [];
+
+  /** The paper register's row, when this draft was created from the import. */
+  const register = draft.register;
+
+  /**
+   * Two independent readings of this animal's sex that disagree — a
+   * handwritten H/M in a paper column against a genital photograph.
+   *
+   * Never resolved automatically, in either direction. Sex inflects every
+   * Spanish sentence this site will write about the animal, so picking a winner
+   * silently would either overwrite the shelter's own record with a guess about
+   * a photograph, or leave a photograph's clear reading buried under a
+   * transcription error. A person standing next to the animal settles it in one
+   * tap.
+   */
+  const sexDisagreement = sexConflict(draft, suggestion?.sex.sex ?? null);
+
+  /**
+   * The one-tap answers for Sexo.
+   *
+   * A disagreement takes precedence over the ordinary reading: both buttons
+   * would store the same value, so showing them together would be two controls
+   * doing one thing, next to a note explaining that the sources conflict.
+   */
+  const sexOffers: FieldOffer[] | undefined = (() => {
+    if (sexDisagreement) {
+      const { photo } = sexDisagreement;
+      // Already resolved — the note stays (the sources still disagree, and the
+      // record should keep saying so), the button has nothing left to do.
+      if (draft.sex === photo) return undefined;
+      return [
+        {
+          label: `Usar lo de la foto: ${t.sexLabel(photo)}`,
+          onAccept: () => acceptSuggested({ sex: photo }, 'sex'),
+        },
+      ];
+    }
+    if (!draft.sex && suggestion?.sex.sex) {
+      return [
+        {
+          label: t.sexLabel(suggestion.sex.sex),
+          onAccept: () => acceptSuggested({ sex: suggestion.sex.sex }, 'sex'),
+        },
+      ];
+    }
+    return undefined;
+  })();
 
   /** Wiring shared by every row, so a new field cannot forget half of it. */
   function fieldProps(key: string) {
@@ -646,6 +761,22 @@ export function IntakeWizard() {
    */
   async function handleReopen() {
     if (!user || !readmit) return;
+
+    // ⚠️ A register-imported draft cannot take this path. Reopening throws the
+    // draft away, and this one is the only thing holding the medical history
+    // the import wrote under `pets/{draftId}/medical` — `discardDraft` refuses
+    // it for that reason, and the refusal arrives AFTER the photos have
+    // already been deleted. So stop before anything is destroyed and hand the
+    // decision to a person: two records for one animal is exactly what the
+    // register roster exists to resolve, and it can unlink the row.
+    if (draft?.register) {
+      setError(
+        `Esta ficha viene del registro (n.º ${draft.register.no}) y ya tiene historia médica cargada, así que no se puede descartar desde aquí. ` +
+          'Resuélvelo desde «En el refugio»: suelta el número del registro y vuelve a vincularlo al animalito correcto.',
+      );
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -989,6 +1120,23 @@ export function IntakeWizard() {
       {/* ── step 1: identity ───────────────────────────────────────────────── */}
       {step === 'identity' && (
         <section className="admin-form">
+          {/* What the paper already says, above the fields it explains. An
+              imported animal arrives with answers, and without this the screen
+              would look like somebody had typed them and forgotten where they
+              came from. */}
+          {register && (
+            <aside className="auth__notice" role="note">
+              <strong>Del registro n.º {register.no}</strong>
+              <br />
+              {describeRegister(register)}
+              <br />
+              <small className="auth__hint">
+                Esto es lo que dice el registro en papel. Si las fotos dicen otra cosa,
+                decides tú: nada de esto se reemplaza solo.
+              </small>
+            </aside>
+          )}
+
           <GuidedPhotoCapture
             captured={draft.media.map((m) => ({
               slot: m.slot,
@@ -1094,25 +1242,21 @@ export function IntakeWizard() {
               label="Sexo"
               value={optionLabel(SEX_OPTIONS, draft.sex)}
               note={
-                draft.sex
-                  ? 'De él dependen todos los textos del sitio.'
-                  : suggestion
-                    ? (SEX_WITHHELD_REASON[suggestion.sex.refusedBecause ?? ''] ??
-                      (suggestion.sex.sex
-                        ? 'Leído en la foto de genitales. Confírmalo tú.'
-                        : undefined))
-                    : undefined
+                // The contradiction comes first, ahead of both the reassurance
+                // and the withheld reason: it is the only one of the three that
+                // asks the person for something.
+                sexDisagreement
+                  ? `La foto sugiere ${t.sexLabel(sexDisagreement.photo)}; el registro dice ${t.sexLabel(sexDisagreement.register)}. Decide tú, que de esto dependen todos los textos del sitio.`
+                  : draft.sex
+                    ? 'De él dependen todos los textos del sitio.'
+                    : suggestion
+                      ? (SEX_WITHHELD_REASON[suggestion.sex.refusedBecause ?? ''] ??
+                        (suggestion.sex.sex
+                          ? 'Leído en la foto de genitales. Confírmalo tú.'
+                          : undefined))
+                      : undefined
               }
-              offers={
-                !draft.sex && suggestion?.sex.sex
-                  ? [
-                      {
-                        label: t.sexLabel(suggestion.sex.sex),
-                        onAccept: () => acceptSuggested({ sex: suggestion.sex.sex }, 'sex'),
-                      },
-                    ]
-                  : undefined
-              }
+              offers={sexOffers}
               {...fieldProps('sex')}
             >
               <select
@@ -1773,9 +1917,29 @@ export function IntakeWizard() {
           >
             {busy ? 'Un momento…' : 'Guardar'}
           </button>
-          <button type="button" className="auth__link" onClick={() => void handleDiscard()} disabled={busy}>
-            Descartar
-          </button>
+          {/* ⚠️ No Descartar for a register draft, and this is not tidiness.
+              The importer wrote this animal's transcribed medical history to
+              `pets/{draftId}/medical` and pointed `registerEntries/{no}.petId`
+              at the same id. `discardDraft()` deletes the draft document and
+              nothing else — Firestore does not cascade — so discarding here
+              would leave those records parentless, with the register row still
+              claiming they belong to an animal that no longer exists. Undoing
+              an import is the importer's job, by batch, not a button on a form
+              whose author cannot see what it would orphan. */}
+          {!draft.register ? (
+            <button
+              type="button"
+              className="auth__link"
+              onClick={() => void handleDiscard()}
+              disabled={busy}
+            >
+              Descartar
+            </button>
+          ) : (
+            <span className="admin__blocked">
+              Esta ficha viene del registro en papel y no se descarta desde aquí.
+            </span>
+          )}
         </div>
 
         <div className="admin__footer-right">

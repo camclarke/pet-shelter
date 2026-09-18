@@ -609,6 +609,27 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ── registerEntries/{no} ───────────────────────────────────────────────
+    // The shelter's own paper intake register, transcribed: one document per
+    // numbered row. It is what a volunteer picks from when the animal in front
+    // of them was already written on paper, and what stops a second record
+    // being created for the same dog.
+    //
+    // Admin-only for READ as well as write, which is stricter than `medical`
+    // (signedIn) on purpose. This is internal operating history — who rescued
+    // an animal, what happened to twenty that died — and an adopter with an
+    // account has no reason to enumerate it. Nothing public reads it: the
+    // roster is an admin screen, and the public dossier reads `pets`.
+    //
+    // No field validation here, unlike `foodStock` or `adoptionApplications`.
+    // Every writer is an admin: the importer through the Admin SDK, which
+    // bypasses rules entirely, and the roster's link/unlink, which writes
+    // `petId` and `linkConfidence`. A field whitelist would have to be kept in
+    // step with a 30-field document for no gain in who can reach it.
+    match /registerEntries/{no} {
+      allow read, write: if isAdmin();
+    }
+
     // ── qrTokens/{tokenId} ─────────────────────────────────────────────────
     // A collar tag's printed code → the animal it belongs to. Plan §2.5, §7.
     //

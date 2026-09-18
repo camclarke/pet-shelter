@@ -18,6 +18,7 @@ import Link from 'next/link';
 import { draftProgress, type PetDraft } from '@/lib/intake';
 import { listDrafts } from '@/lib/pets-admin';
 import { getOccupancyForAreas, listAreas } from '@/lib/areas-admin';
+import { countRegisterEntries } from '@/lib/register-admin';
 import { shouldHaveOpenPlacement } from '@/lib/arrival';
 import { t } from '@/i18n';
 import type { Pet } from '@/lib/types';
@@ -25,6 +26,12 @@ import type { Pet } from '@/lib/types';
 export function AdminDashboard() {
   const [drafts, setDrafts] = useState<PetDraft[] | null>(null);
   const [pets, setPets] = useState<Pet[] | null>(null);
+  /**
+   * How many register rows still say the animal lives here. Null until it is
+   * known, and null again if the read fails — the card is worth showing
+   * without a number, and a number nobody could read is not worth guessing.
+   */
+  const [residents, setResidents] = useState<number | null>(null);
   /**
    * Every pet with an OPEN placement, derived from one query per area
    * rather than one per pet. Fifty animals would be fifty reads the other
@@ -70,6 +77,29 @@ export function AdminDashboard() {
     void load();
   }, [load]);
 
+  /**
+   * Read on its own, deliberately NOT inside `load()`.
+   *
+   * `registerEntries` may not exist at all — it does not until the paper
+   * register has been imported — and one shared try/catch would let that
+   * absence blank out the drafts and the published list too. A count
+   * aggregation rather than a query, so this is a handful of index reads
+   * instead of 43 documents.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    countRegisterEntries('in-shelter')
+      .then((count) => {
+        if (!cancelled) setResidents(count);
+      })
+      .catch((caught) => {
+        console.error('[admin] could not count the register', caught);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="admin">
       <header className="admin__header">
@@ -103,6 +133,29 @@ export function AdminDashboard() {
           {error}
         </p>
       )}
+
+      {/* FIRST, above the drafts, because during a photo session this is the
+          path: the animal in front of the volunteer is almost certainly one of
+          the 43 the paper register already knows about, and starting from
+          "+ Nuevo ingreso" instead is what produces a second record for it. */}
+      <section className="admin-list">
+        <h2 className="t-label">Registro en papel</h2>
+        <ul className="admin-list__items">
+          <li className="admin-list__item">
+            <Link href="/admin/register">
+              <span className="admin-list__thumb admin-list__thumb--empty" aria-hidden="true">
+                🐾
+              </span>
+              <span className="admin-list__text">
+                <strong>En el refugio{residents !== null && ` · ${residents}`}</strong>
+                <span className="t-data">
+                  Tomar fotos de un animalito que ya está en el registro
+                </span>
+              </span>
+            </Link>
+          </li>
+        </ul>
+      </section>
 
       <section className="admin-list">
         <h2 className="t-label">Fichas sin publicar</h2>

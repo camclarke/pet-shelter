@@ -3054,3 +3054,321 @@ textarea {
     margin-left: 0;
   }
 }
+
+/* ---- the paper register's roster ----------------------------------------
+   /admin/register: 225 transcribed rows, 43 of which still live here, and the
+   screen a volunteer opens with an animal in one arm and a phone in the other
+   hand. Measured at 390px against this stylesheet, where `.container` and
+   `.admin` together leave 290px of content.
+
+   Built on the tokens the rest of the admin console already uses. The only
+   new visual idea is the register NUMBER as a standing element rather than a
+   detail, because it is the single fact that separates two rows the register
+   names almost identically. See RegisterRoster.tsx. */
+
+.register-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+}
+
+.register-tab {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* 48px tall, above the 44px floor, because the tabs are the first thing a
+     thumb reaches on this screen. */
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.register-tab.is-current {
+  border-color: var(--jade);
+}
+
+.register-tab__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--line);
+  font-size: 12px;
+}
+
+/* ⚠️ NOT a scroll container, deliberately. Giving the list its own
+   `overflow-y: auto` was tried first and is worse: it makes the search sticky
+   only while the box's own top is on screen, and it puts two scroll contexts
+   on one phone screen, so a flick over the rows scrolls the list while a flick
+   two millimetres higher scrolls the page — and the "es un animalito nuevo"
+   action at the bottom becomes hard to reach. One scroll context, and the
+   search bar below pins under the site header instead. */
+.register-body {
+  margin-top: var(--space-2);
+}
+
+/* `top` is set INLINE from a measurement of the site header, which is itself
+   `position: sticky; top: 0; z-index: 50` — see RegisterRoster.tsx. The `0`
+   here is the fallback for the render before that measurement lands, and for
+   the case where the header is not on the page at all. `z-index` stays well
+   under the header's: the two never overlap, because the offset is exactly the
+   header's height. */
+.register-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-block: var(--space-1);
+  /* Must match `.admin` — rows scroll UNDER this, and a transparent bar would
+     show them through the search box. */
+  background: var(--cream-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.register-sticky input {
+  /* 16px, never smaller: below it iOS Safari zooms the whole page on focus,
+     and a typo then has to be corrected at 1.3x. Same rule as `.auth__field`. */
+  font-size: 16px;
+  min-height: 48px;
+  padding: 11px 13px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  color: inherit;
+  font-family: var(--text);
+  width: 100%;
+}
+
+/* Two chips today, and they scroll rather than wrap so a third and a fourth
+   can be added without the filter row pushing the first result off-screen. */
+.register-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.register-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.register-chip {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--cream);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.register-chip.is-on {
+  border-color: var(--jade);
+  background: var(--jade);
+  color: var(--cream);
+}
+
+.register-list {
+  list-style: none;
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A whole row is the tap target, and it is a <button> rather than a link
+   because tapping it opens a decision, not a page. 64px so a thumb cannot
+   land between two animals. */
+.register-row {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--space-1);
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.register-row:hover {
+  border-color: var(--jade);
+}
+
+/* ALWAYS on the row, never revealed by hover — a phone has no hover, and on
+   n.º 215 "Dana" against n.º 216 "Duna" this is the only difference a
+   photograph cannot settle. */
+.register-no {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  background: var(--cream-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.register-no--card {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 15px;
+}
+
+.register-row__text {
+  /* min-width:0 is what makes the ellipsis below work: without it a long name
+     grows the flex item and pushes the number off the screen instead of being
+     cut. The same rule the header account button needed. */
+  flex: 1 1 140px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.register-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-size: 16px;
+}
+
+/* `.t-data` is uppercase and tracked; a second line of it needs room to
+   breathe and must wrap rather than ellipsis — the intake date and the colour
+   are both worth reading in full. */
+.register-row__meta {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.register-row__tags {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* What the register says became of the animal. Sun is the palette's "look at
+   this" colour and is already the review gate's — it reads as "stop and
+   check", which is exactly right: this row is not an error, it is a row that
+   needs a second look before a photograph lands on it. */
+.register-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  background: var(--sun);
+  color: var(--charcoal);
+  white-space: nowrap;
+}
+
+/* An unresolved pair — two littermates nobody could tell apart. Outlined
+   rather than filled, so it is legible beside a status badge without the two
+   competing. */
+.register-badge--unsure {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--sun);
+}
+
+/* The second question, asked only when the register says the animal left.
+   Deliberately the loudest block on the confirm screen: a photograph landing
+   on a dead animal's record is silent and permanent, and everything else on
+   this screen is reversible. */
+.register-warning {
+  margin: var(--space-2) 0;
+  padding: var(--space-2);
+  border: 2px solid var(--coral);
+  border-radius: var(--radius);
+  background: var(--cream);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  line-height: 1.55;
+}
+
+/* The answers that are neither "yes" nor "no" — "I cannot tell these two
+   apart" and "this number is on the wrong animal". Recessed, because they are
+   real answers but not the common ones. */
+.register-unsure {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+/* ⚠️ AT THE BOTTOM. Moving this above the list makes "new animal" the path of
+   least resistance, the roster stops being used, and every photographed
+   animal gets a second record — the outcome the whole screen exists to
+   prevent. */
+.register-new {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+@media (max-width: 760px) {
+  /* Below the tablet break the two tabs stop sharing a line: "Buscar en todo
+     el registro" is long enough that side by side it wraps to three ragged
+     lines inside a 290px column. */
+  .register-tab {
+    flex: 1 0 100%;
+  }
+
+  /* A long name and its meta line already take the full width here, so the
+     badges get their own row underneath rather than squeezing the name into
+     an ellipsis on every row. */
+  .register-row__tags {
+    flex: 1 0 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .register-new .btn {
+    align-self: stretch;
+    justify-content: center;
+  }
+}
