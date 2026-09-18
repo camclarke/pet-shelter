@@ -196,11 +196,17 @@ test('statusConfirmed is false on every entry, with no way to set it', () => {
   for (const entry of result.entries) assert.equal(entry.data.statusConfirmed, false);
 });
 
-test('petId and linkConfidence are null even on a row that gets a draft', () => {
+test('a row that gets a draft is linked to it, provisionally', () => {
   const result = plan();
   assert.equal(result.drafts.length, 1, 'this row does get a draft');
-  assert.equal(result.entries[0]!.data.petId, null);
-  assert.equal(result.entries[0]!.data.linkConfidence, null);
+
+  // This test asserted the opposite until the canary import proved it wrong:
+  // the roster mints a NEW draft when `petId` is null, so leaving it null put
+  // the volunteer in a second record while the imported medical history stayed
+  // in the first. The uncertainty belongs in `linkConfidence`, not in a
+  // missing pointer.
+  assert.equal(result.entries[0]!.data.petId, result.drafts[0]!.id);
+  assert.equal(result.entries[0]!.data.linkConfidence, 'provisional');
 });
 
 test('the entry carries the import batch, which is the rollback key', () => {
@@ -1014,4 +1020,41 @@ test('a row that holds a real name still gets it, and a slug', () => {
   const draft = result.drafts[0]!.data;
   assert.equal(draft.name, 'Canela');
   assert.equal(draft.slug, 'canela');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The link points both ways
+//
+// The roster reads `entry.petId` to decide whether to OPEN this animal's
+// record or mint a new one. A row that gets a draft but keeps `petId: null`
+// therefore sends the volunteer into a SECOND draft while the imported medical
+// history stays under the first — the duplicate the register exists to
+// prevent. Found by the canary import, not by a test, which is why this test
+// exists now.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('a row that gets a draft carries the draft id back on the register entry', () => {
+  const result = plan();
+
+  const entry = result.entries[0]!;
+  const draft = result.drafts[0]!;
+  assert.equal(entry.data.petId, draft.id, 'the register row does not point at its own draft');
+  assert.equal(
+    entry.data.linkConfidence,
+    'provisional',
+    'the link claims more certainty than anybody has: nobody has seen the animal yet',
+  );
+  assert.equal(draft.data.register!.no, entry.no, 'the draft does not point back at its row');
+});
+
+test('a row with no draft keeps no link at all', () => {
+  const result = plan({
+    rows: [row(2)],
+    normalized: [normalized(2, { status: 'adopted' })],
+    medical: { animals: [] },
+  });
+
+  assert.equal(result.drafts.length, 0);
+  assert.equal(result.entries[0]!.data.petId, null, 'an adopted animal was linked to a draft');
+  assert.equal(result.entries[0]!.data.linkConfidence, null);
 });

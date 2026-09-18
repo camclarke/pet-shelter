@@ -1,373 +1,198 @@
 /**
- * Prove that the deployed `registerEntries` rules enforce, with the REAL client
- * SDK against LIVE Firestore.
+ * Prove that the deployed `registerEntries` rules enforce, against LIVE
+ * Firestore, with a real signed-in identity.
  *
- *   node --import tsx --env-file-if-exists=.env.local scripts/probe-register-rules.mjs
- *   ... --run
+ *   node --env-file-if-exists=.env.local scripts/probe-register-rules.mjs
  *
- * ── Why the client SDK, and not the Rules test API ──────────────────────────
- * `scripts/probe-card-rules.mjs` evaluates cases through `projects.test`, which
- * is the right instrument BEFORE a release: it answers what a ruleset would do
- * without deploying it. This answers a different question — what the ruleset
- * Firestore is actually serving does, to a real signed-in browser — and it is
- * the only instrument that can. Two things the test API cannot reach:
+ * ── Why REST and not the client SDK ─────────────────────────────────────────
+ * This probe was written against `firebase/auth` first, and it cannot work
+ * that way any more: reCAPTCHA Enterprise was turned on for this project on
+ * 2026-09-15, so the JS SDK answers `signInWithPassword` by starting a
+ * reCAPTCHA flow and throws `RecaptchaVerifier is only supported in browser`
+ * under Node. MEASURED 2026-09-18, and it applies to every client-SDK probe in
+ * this repo, not only this one.
  *
- *   • **`list` is a query, and the test API has no queries.** `allow read`
- *     covers `get` AND `list`, so a rule that looks admin-only per document can
- *     still be the difference between "an adopter cannot open row 47" and "an
- *     adopter can enumerate every animal this shelter has ever held". Only a
- *     real `getDocs` exercises it.
- *   • **A custom claim has to survive a token.** `isAdmin()` reads
- *     `request.auth.token.admin`, and the test API is handed that token as a
- *     literal. Here the claim is set with the Admin SDK, minted into an ID
- *     token by Identity Platform, and sent by the SDK — which is the path that
- *     actually runs, and the one with the hour-long staleness this project has
- *     measured before. `getIdToken(true)` forces the refresh.
+ * REST is the same enforcement path: Identity Platform mints the same ID
+ * token, and Firestore's REST API evaluates the same security rules as the
+ * SDK. What is lost is the SDK's own query builder, and nothing that matters
+ * here — `GET /documents/registerEntries` IS a list, so the `list` half of
+ * `allow read` is still exercised, which the Rules test API cannot do at all.
  *
  * ── The read technique: no fixtures, and none needed ────────────────────────
- * Firestore evaluates rules BEFORE it looks for the document. So an allowed
- * read of a document that does not exist returns an empty snapshot, while a
- * denied read of the same absent path throws `permission-denied` — and that
- * difference is the entire signal. This is how `firestore.rules` was first
- * proven on 2026-08-23 with `pets` holding zero documents, and it is why this
- * probe needs no register row, no pet and no seeded data.
+ * Firestore evaluates rules BEFORE it looks for the document. On an ABSENT
+ * path a permitted read returns 404 NOT_FOUND while a refused one returns 403
+ * PERMISSION_DENIED, and that difference is the entire signal. This is how
+ * `firestore.rules` was first proven on 2026-08-23 with `pets` holding zero
+ * documents.
  *
- * The same trick reaches the WRITE rules, from the 2026-09-12 measurement pass:
- * for a caller the rules ALLOW, `updateDoc` on an absent document fails
- * `not-found` rather than `permission-denied`. `not-found` therefore means the
- * rule said yes and the document simply was not there — an allow branch proven
- * without writing anything at all.
+ * ── Controls, because a probe of nothing but denials proves nothing ─────────
+ * A suite that only expects 403 passes just as well when the network is down,
+ * when the token is junk, or when the rules deny the entire database. Three
+ * controls rule those out — an anonymous ALLOW, a member ALLOW and an admin
+ * DENY — and each one fails if the thing it controls for is broken.
  *
  * ── What it creates ─────────────────────────────────────────────────────────
- * Two throwaway auth accounts, and ONE `registerEntries` document — see
- * `probeCreate` for why that one is worth its cleanup. Both accounts and the
- * document are deleted at the end, in a `finally`, and READ BACK at zero. Ids
- * carry `regprobe-<run>` so anything ever left behind is obviously this.
+ * Two throwaway accounts and ONE document, all deleted in a `finally` and read
+ * back at zero. The document id is `regprobe-<run>`, deliberately NOT a
+ * number: every real row is `registerEntries/{no}` with an integer id, so a
+ * probe document can never be mistaken for register row 226 by a person, by
+ * the roster, or by `import-register.mjs --delete`.
  *
- * ⚠️ The document id is `regprobe-…`, deliberately NOT a number. Every real row
- * is `registerEntries/{no}` with `no` an integer, so a probe document cannot be
- * mistaken for register row 226 by a person, by the roster, or by a `--delete`.
- *
- * ── Controls, because a broken probe denies everything ──────────────────────
- * A suite of nothing but DENY expectations passes just as well when the client
- * cannot reach Firestore, when the member account never signed in, and when the
- * rules deny the whole database. Three controls rule those out — an anonymous
- * ALLOW, a signed-in ALLOW, and an admin DENY — and every one of them is a case
- * that fails if the thing it controls for is broken. See `CONTROL` below.
- *
- * Needs GOOGLE_CLOUD_PROJECT, ADC for an account that can create users, and the
- * six NEXT_PUBLIC_FIREBASE_* values. Refuses if they name different projects.
- * No gcloud or Firebase CLI, and it releases nothing.
+ * Needs GOOGLE_CLOUD_PROJECT=wawitas, ADC for an account that may create
+ * users, and NEXT_PUBLIC_FIREBASE_API_KEY. Releases nothing, deploys nothing.
  */
 
 import { randomBytes } from 'node:crypto';
 
-import { initializeApp as initAdmin, getApps as adminApps } from 'firebase-admin/app';
-import { getAuth as adminAuthFor } from 'firebase-admin/auth';
-import { getFirestore as adminDbFor } from 'firebase-admin/firestore';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 
-import { initializeApp as initClient } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  limit,
-  query,
-  setDoc,
-  terminate,
-  updateDoc,
-} from 'firebase/firestore';
+const PROJECT = process.env.GOOGLE_CLOUD_PROJECT;
+const KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
-// ⚠️ NOTHING is imported from `src/lib` on purpose, and that is worth a line.
-// On 2026-09-13 a probe run under `node --import tsx` ended up holding TWO
-// instances of a `src/lib` module and of `firebase/firestore`, reached through
-// an extensionless import inside another module — and the deployed rules then
-// correctly refused writes that the app itself would have made correctly. Three
-// real-looking rule failures, all of them the harness. This probe writes its
-// own literal document instead, so there is no second module graph to diverge.
-
-const args = process.argv.slice(2);
-const RUN = args.includes('--run');
-
-const project = process.env.GOOGLE_CLOUD_PROJECT;
-const config = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
-
-if (!project) {
-  console.error('GOOGLE_CLOUD_PROJECT is not set. Refusing to guess.');
+if (PROJECT !== 'wawitas') {
+  console.error('GOOGLE_CLOUD_PROJECT must be `wawitas`. Refusing to guess.');
   process.exit(2);
 }
-if (config.projectId !== project) {
-  console.error(
-    `NEXT_PUBLIC_FIREBASE_PROJECT_ID (${config.projectId ?? 'unset'}) is not ` +
-      `GOOGLE_CLOUD_PROJECT (${project}). The Admin SDK would create the accounts in one ` +
-      'project and the client would sign in to the other, so every case would fail for a ' +
-      'reason that has nothing to do with the rules.',
+if (!KEY) {
+  console.error('NEXT_PUBLIC_FIREBASE_API_KEY is not set — it is what signs a probe account in.');
+  process.exit(2);
+}
+
+const RUN = randomBytes(3).toString('hex');
+const DOC = `regprobe-${RUN}`;
+const BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
+
+if (!getApps().length) initializeApp({ projectId: PROJECT });
+const adminAuth = getAuth();
+const adminDb = getFirestore();
+
+async function signIn(email, password) {
+  const r = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    },
   );
-  process.exit(2);
+  const body = await r.json();
+  if (!r.ok) throw new Error(`sign-in failed for ${email}: ${JSON.stringify(body)}`);
+  return body.idToken;
 }
 
-const RUN_ID = `regprobe-${randomBytes(3).toString('hex')}`;
-const PASSWORD = randomBytes(18).toString('base64url');
-const PEOPLE = {
-  member: `${RUN_ID}-member@example.com`,
-  admin: `${RUN_ID}-admin@example.com`,
-};
-
-/** Absent throughout: the target for every read and for the `not-found` technique. */
-const ABSENT = `${RUN_ID}-absent`;
-/** The one document that is genuinely created, by the admin, and then removed. */
-const CREATED = `${RUN_ID}-created`;
-
-console.log(`run: ${RUN_ID}  project: ${project}`);
-
-if (!RUN) {
-  console.log('\nDRY RUN. Would create:');
-  console.log(`  auth accounts          ${Object.values(PEOPLE).join(', ')}  (admin claim on the last)`);
-  console.log(`  registerEntries/${CREATED}   one document, deleted and read back at zero`);
-  console.log('\nReads and the write-allow technique need NO documents: Firestore evaluates');
-  console.log('rules before existence, so an allowed read of an absent path returns an empty');
-  console.log(`snapshot and a denied one throws. registerEntries/${ABSENT} is never created.`);
-  console.log('\nAdd --run to execute.');
-  process.exit(0);
+/** Status code only: what the rules decided is all this probe reads. */
+async function status(path, token, init = {}) {
+  const headers = { ...(init.headers ?? {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const r = await fetch(`${BASE}${path}`, { ...init, headers });
+  return r.status;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-const adminApp = adminApps()[0] ?? initAdmin({ projectId: project });
-const adminAuth = adminAuthFor(adminApp);
-const adminDb = adminDbFor(adminApp);
+const ALLOWED_ABSENT = [404]; // the rule said yes; the document is not there
+const DENIED = [403];
+const OK = [200];
 
 const results = [];
-function record(expect, name, outcome, detail = '') {
-  const ok = expect === outcome;
-  results.push({ ok, name, expect, outcome });
-  console.log(
-    `${ok ? 'ok  ' : 'FAIL'}  expect ${expect.padEnd(5)} got ${outcome.padEnd(5)}  ${name}` +
-      (detail ? `  (${detail})` : ''),
-  );
+function check(name, actual, expected, meaning) {
+  const ok = expected.includes(actual);
+  results.push({ ok, name, actual, expected });
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} → ${actual}  (${meaning})`);
 }
 
-/**
- * Run one client operation and classify it.
- *
- * `not-found` counts as ALLOW and that is the load-bearing line: it is what the
- * rules returning YES looks like when the document is absent. Anything that is
- * neither `permission-denied` nor a clean resolve nor `not-found` is reported as
- * ERROR rather than folded into either column — an `unavailable` scored as DENY
- * is a network problem reported as a security property.
- */
-async function expect(expected, name, operation) {
-  try {
-    await operation();
-    record(expected, name, 'ALLOW');
-  } catch (error) {
-    const code = error?.code ?? '';
-    if (code === 'permission-denied' || code === 'firestore/permission-denied') {
-      record(expected, name, 'DENY');
-    } else if (code === 'not-found' || code === 'firestore/not-found') {
-      record(expected, name, 'ALLOW', 'not-found: the rule allowed it, the document is absent');
-    } else {
-      record(expected, name, 'ERROR', code || String(error?.message ?? error));
-    }
-  }
-}
-
-const clients = {};
-async function clientFor(who) {
-  if (clients[who]) return clients[who];
-  const app = initClient(config, `${RUN_ID}-${who}`);
-  const db = getFirestore(app);
-  let user = null;
-  if (who !== 'anon') {
-    const auth = getAuth(app);
-    user = (await signInWithEmailAndPassword(auth, PEOPLE[who], PASSWORD)).user;
-    // ⚠️ Forced, not incidental. A custom claim is baked into the ID token when
-    // it is issued, and the token minted at sign-in can predate the claim this
-    // script set seconds earlier — the hour-long staleness recorded on
-    // 2026-08-23. Without this refresh the admin cases fail as DENY and the
-    // rules look broken.
-    await user.getIdToken(true);
-  }
-  clients[who] = { app, db, user };
-  return clients[who];
-}
-
-const uids = {};
-let exitCode = 0;
+let member = null;
+let admin = null;
 
 try {
-  for (const [who, email] of Object.entries(PEOPLE)) {
-    const user = await adminAuth.createUser({ email, password: PASSWORD, emailVerified: true });
-    uids[who] = user.uid;
-  }
-  await adminAuth.setCustomUserClaims(uids.admin, { admin: true });
+  console.log(`run: ${RUN}  project: ${PROJECT}\n`);
 
-  const anon = await clientFor('anon');
-  const member = await clientFor('member');
-  const admin = await clientFor('admin');
+  const password = `${randomBytes(12).toString('hex')}Aa1!`;
+  member = await adminAuth.createUser({ email: `regprobe-m-${RUN}@example.com`, password });
+  admin = await adminAuth.createUser({ email: `regprobe-a-${RUN}@example.com`, password });
+  await adminAuth.setCustomUserClaims(admin.uid, { admin: true });
 
-  const entryRef = (c, id) => doc(c.db, 'registerEntries', id);
-  const entryList = (c) => query(collection(c.db, 'registerEntries'), limit(1));
+  const memberToken = await signIn(`regprobe-m-${RUN}@example.com`, password);
+  const adminToken = await signIn(`regprobe-a-${RUN}@example.com`, password);
 
-  // ── controls, first, so a broken probe is caught before it "proves" anything ─
-  console.log('\n── controls ──');
-
-  // If this fails, the anonymous client cannot reach Firestore at all, and every
-  // signed-out DENY below is a connection error wearing a security result.
-  await expect('ALLOW', 'CONTROL signed out reads a public pet document', () =>
-    getDoc(doc(anon.db, 'pets', `${RUN_ID}-nonexistent`)),
+  // ── controls ──────────────────────────────────────────────────────────────
+  check(
+    'CONTROL anonymous may read a public pet',
+    await status('/pets/no-such-pet-probe', null),
+    ALLOWED_ABSENT,
+    'the endpoint and the network work at all',
   );
-
-  // If this fails, the member never actually signed in, and every member DENY
-  // below is really an anonymous DENY — the whole non-admin half proves nothing.
-  await expect('ALLOW', 'CONTROL a signed-in NON-admin reads the medical tier', () =>
-    getDoc(doc(member.db, 'pets', `${RUN_ID}-nonexistent`, 'medical', 'none')),
+  check(
+    'CONTROL a signed-in member may read the medical tier',
+    await status('/pets/no-such-pet-probe/medical/x', memberToken),
+    ALLOWED_ABSENT,
+    'the member token is real and carries a signed-in identity',
   );
-
-  // If this fails, the admin is allowed everywhere and the admin ALLOWs below
-  // say nothing about the registerEntries rule in particular.
-  await expect('DENY', 'CONTROL an admin reads an undeclared collection', () =>
-    getDoc(doc(admin.db, `${RUN_ID}-undeclared`, 'none')),
+  check(
+    'CONTROL even an admin is refused an undeclared collection',
+    await status('/noSuchCollection/x', adminToken),
+    DENIED,
+    'default-deny still applies, so a 404 elsewhere means a rule said yes',
   );
 
-  // ── signed out ────────────────────────────────────────────────────────────
-  console.log('\n── signed out ──');
-  await expect('DENY', 'signed out reads a register entry', () => getDoc(entryRef(anon, ABSENT)));
-  await expect('DENY', 'signed out LISTS registerEntries', () => getDocs(entryList(anon)));
-  await expect('DENY', 'signed out writes a register entry', () =>
-    updateDoc(entryRef(anon, ABSENT), { name: 'probe' }),
-  );
-  await expect('DENY', 'signed out creates a register entry', () =>
-    setDoc(entryRef(anon, ABSENT), { no: 226, name: 'probe' }),
-  );
-  await expect('DENY', 'signed out deletes a register entry', () => deleteDoc(entryRef(anon, ABSENT)));
-
-  // ── signed in, no admin claim ─────────────────────────────────────────────
-  //
-  // The section that matters most. `registerEntries` is admin-only for READ as
-  // well as write — stricter than `medical`, which any signed-in account can
-  // read — because these rows are internal operating history: who rescued an
-  // animal, and what happened to the twenty that died. An adopter with an
-  // account must not be able to open one, and must not be able to enumerate
-  // them either, which is what the LIST case is for.
-  console.log('\n── signed in, WITHOUT the admin claim ──');
-  await expect('DENY', 'a signed-in NON-admin reads a register entry', () => getDoc(entryRef(member, ABSENT)));
-  await expect('DENY', 'a signed-in NON-admin LISTS registerEntries', () => getDocs(entryList(member)));
-  await expect('DENY', 'a signed-in NON-admin writes a register entry', () =>
-    updateDoc(entryRef(member, ABSENT), { name: 'probe' }),
-  );
-  await expect('DENY', 'a signed-in NON-admin creates a register entry', () =>
-    setDoc(entryRef(member, ABSENT), { no: 226, name: 'probe' }),
-  );
-  await expect('DENY', 'a signed-in NON-admin deletes a register entry', () =>
-    deleteDoc(entryRef(member, ABSENT)),
+  // ── the rules under test ──────────────────────────────────────────────────
+  check('anonymous read of a register row', await status(`/registerEntries/${DOC}`, null), DENIED,
+    'the register is not public');
+  check('anonymous list of the register', await status('/registerEntries?pageSize=1', null), DENIED,
+    'nobody may enumerate the animals this shelter has held');
+  check('member read of a register row', await status(`/registerEntries/${DOC}`, memberToken), DENIED,
+    'an adopter account may not open a row');
+  check('member list of the register', await status('/registerEntries?pageSize=1', memberToken), DENIED,
+    'an adopter account may not enumerate 225 animals, the dead among them');
+  check(
+    'member write to a register row',
+    await status(`/registerEntries/${DOC}?updateMask.fieldPaths=petId`, memberToken, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { petId: { stringValue: 'nope' } } }),
+    }),
+    DENIED,
+    'an adopter may not link a row to an animal',
   );
 
-  // ── signed in, with the admin claim ───────────────────────────────────────
-  console.log('\n── signed in, WITH the admin claim ──');
-  await expect('ALLOW', 'an admin reads a register entry', () => getDoc(entryRef(admin, ABSENT)));
-  await expect('ALLOW', 'an admin LISTS registerEntries', () => getDocs(entryList(admin)));
-  await expect('ALLOW', 'an admin writes a register entry (absent → not-found)', () =>
-    updateDoc(entryRef(admin, ABSENT), { name: 'probe' }),
-  );
+  check('admin read of an absent row', await status(`/registerEntries/${DOC}`, adminToken),
+    ALLOWED_ABSENT, 'the rule allows; the document simply is not there');
+  check('admin list of the register', await status('/registerEntries?pageSize=1', adminToken),
+    OK, 'the roster can load');
 
-  // ── the one real write ────────────────────────────────────────────────────
-  //
-  // `not-found` above already proves the rule said yes, so why create anything?
-  // Because `create` is the verb the import actually uses — `import-register.mjs`
-  // writes every document with `.create()` and never `.set()` — and a rule that
-  // permitted `update` while refusing `create` would pass every case above and
-  // fail the real import on its first row. One document, by the admin only,
-  // deleted immediately and read back at zero.
-  //
-  // The shape is a literal rather than a real `RegisterEntry`, because the rule
-  // carries no field whitelist: `allow read, write: if isAdmin()` decides on the
-  // caller alone, so a faithful 30-field document would test nothing extra and
-  // would be one more thing that could drift.
-  console.log('\n── one real create, by the admin ──');
-  await expect('ALLOW', 'an admin CREATES a register entry', () =>
-    setDoc(entryRef(admin, CREATED), { no: null, probe: RUN_ID, note: 'rules probe, deleted immediately' }),
+  // One real write, because "may an admin link a row" is the rule the roster
+  // depends on, and an absent-document read cannot prove an allow on create.
+  check(
+    'admin create of a register row',
+    await status(`/registerEntries?documentId=${DOC}`, adminToken, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { no: { integerValue: '9999' } } }),
+    }),
+    OK,
+    'the importer and the roster can write',
   );
-  await expect('ALLOW', 'an admin reads back the entry it created', () => getDoc(entryRef(admin, CREATED)));
-  await expect('DENY', 'a signed-in NON-admin reads the entry that now EXISTS', () =>
-    getDoc(entryRef(member, CREATED)),
+  check(
+    'admin delete of that row',
+    await status(`/registerEntries/${DOC}`, adminToken, { method: 'DELETE' }),
+    OK,
+    'and can clean up after itself',
   );
-  await expect('ALLOW', 'an admin DELETES the entry it created', () => deleteDoc(entryRef(admin, CREATED)));
-} catch (error) {
-  console.error('\nPROBE ABORTED:', error?.code ?? error?.message ?? error);
-  exitCode = 2;
 } finally {
   console.log('\n── cleanup ──');
-
-  for (const c of Object.values(clients)) {
-    try {
-      if (c.user) await signOut(getAuth(c.app));
-      await terminate(c.db);
-    } catch {
-      /* closing a client is best-effort and must never mask a result */
-    }
+  for (const user of [member, admin]) {
+    if (user) await adminAuth.deleteUser(user.uid).catch(() => {});
   }
+  await adminDb.doc(`registerEntries/${DOC}`).delete().catch(() => {});
 
-  // Deleted with the Admin SDK rather than through a client, so cleanup cannot
-  // fail for the very reason the probe is investigating.
-  await adminDb.collection('registerEntries').doc(CREATED).delete().catch(() => {});
-  await adminDb.collection('registerEntries').doc(ABSENT).delete().catch(() => {});
-  for (const uid of Object.values(uids)) {
-    // Deleting an auth account does NOT cascade to users/{uid}; the app creates
-    // that document on sign-in, and two orphans from an earlier probe survived a
-    // cleanup this project recorded as "verified at zero".
-    await adminDb.collection('users').doc(uid).delete().catch(() => {});
-    await adminAuth.deleteUser(uid).catch(() => {});
-  }
-
-  const leftovers = [];
-  for (const id of [CREATED, ABSENT]) {
-    if ((await adminDb.collection('registerEntries').doc(id).get()).exists) {
-      leftovers.push(`registerEntries/${id}`);
-    }
-  }
-  for (const [who, uid] of Object.entries(uids)) {
-    if ((await adminDb.collection('users').doc(uid).get()).exists) leftovers.push(`users/${uid}`);
-    const stillThere = await adminAuth.getUser(uid).then(() => true, () => false);
-    if (stillThere) leftovers.push(`auth ${who}`);
-  }
-  console.log(
-    leftovers.length === 0
-      ? 'readback: nothing left behind'
-      : `READBACK FOUND LEFTOVERS: ${leftovers.join(', ')}`,
-  );
-  if (leftovers.length > 0) exitCode = 3;
-
-  const failed = results.filter((r) => !r.ok);
-  console.log(`\n${results.length - failed.length}/${results.length} as expected`);
-
-  // ── the diagnosis, so a wall of FAILs is not read as a broken rule ─────────
-  //
-  // Until `firestore.rules` is deployed, `registerEntries` meets the closing
-  // default-deny and EVERY admin case comes back DENY while every other case
-  // passes. That is a deploy that is still owed, not a rule that is wrong, and
-  // the two look identical in a list of results.
-  const adminDenied = failed.filter((r) => r.expect === 'ALLOW' && r.outcome === 'DENY');
-  if (adminDenied.length > 0 && adminDenied.length === failed.length) {
-    console.log(
-      '\nEvery failure is an ALLOW that came back DENY, and nothing else failed.\n' +
-        'That is what an undeployed ruleset looks like: registerEntries falls through to the\n' +
-        "closing `match /{document=**} { allow read, write: if false; }`. Deploy firestore.rules\n" +
-        '(`firebase deploy --only firestore:rules`) and run this again.',
-    );
-  }
-
-  if (failed.length > 0 && exitCode === 0) exitCode = 1;
-  process.exit(exitCode);
+  const probeDoc = await adminDb.doc(`registerEntries/${DOC}`).get();
+  const accounts = await adminAuth.listUsers(1000);
+  const strays = accounts.users.filter((u) => (u.email ?? '').includes('regprobe-'));
+  console.log(`probe document left behind: ${probeDoc.exists ? 'YES' : 'no'}`);
+  console.log(`probe accounts left behind: ${strays.length}`);
 }
+
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${results.length - failed.length}/${results.length} as expected`);
+for (const f of failed) console.log(`  FAILED: ${f.name} → ${f.actual}, expected ${f.expected}`);
+process.exit(failed.length === 0 ? 0 : 1);
