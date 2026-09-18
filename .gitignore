@@ -61,3 +61,17 @@ _e2e/*
 !_e2e/cards/
 _e2e/cards/*
 !_e2e/cards/EXAMPLE-ground-truth.json
+
+# The shelter's own paper register: the intake spreadsheet and photographs of
+# the handwritten pages. Every row carries an adopter's name, phone number and
+# the coordinates of their home, so this is the most sensitive data the project
+# handles - and it is the shelter's, not the template's.
+# Measured 2026-09-17: `_files/` was untracked and matched no ignore rule, so a
+# single `git add -A` would have published it. Same rule and same reason as
+# `seed/` and `_e2e/` above - and a committed rule, rather than a local
+# `.git/info/exclude`, is what protects a fork or a fresh clone too.
+_files/
+
+# Local scratch derived from that register: transcriptions, review sheets,
+# roll-call lists. Derived data carries the personal data of its source.
+_local/
