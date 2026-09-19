@@ -7,8 +7,10 @@
  * The values below are the reference deployment (Wawitas Red de Apoyo,
  * Cochabamba, Bolivia); replace them with your own.
  *
- * Design tokens — colours, fonts, the logo mark — live in src/app/globals.css
- * and src/components/Brand.tsx. Those are the other two files worth changing.
+ * Design tokens — colours, fonts — live in src/app/globals.css, and the drawn
+ * artwork in src/components/Brand.tsx (the mark) and Wordmark.tsx (the name as
+ * lettering). Those are the other three files worth changing; everything else
+ * reads from here.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -18,6 +20,17 @@ export interface ShelterConfig {
   name: string;
   shortName: string;
   tagline: string;
+
+  /**
+   * Whether this shelter has a DRAWN logotype — its own name as artwork rather
+   * than as type. True renders src/components/Wordmark.tsx in place of the
+   * first word of `name`; the rest of `name` still sets below it as text.
+   *
+   * Leave it false unless you have replaced that file with your own lettering.
+   * True with the reference artwork still in place would put "Wawitas" in your
+   * header no matter what `name` says.
+   */
+  hasWordmark: boolean;
   mission: string;
 
   /** Full international format, digits only, no + or spaces. Used to build wa.me links. */
@@ -167,6 +180,7 @@ export const SHELTER: ShelterConfig = {
   name: 'Wawitas Red de Apoyo',
   shortName: 'Wawitas',
   tagline: 'De la calle, a tu corazón.',
+  hasWordmark: true,
   mission:
     'Rescatamos animalitos abandonados y maltratados, los rehabilitamos física y emocionalmente, y les buscamos una familia para toda la vida en adopción responsable.',
 

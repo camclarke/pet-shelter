@@ -70,12 +70,10 @@ h1,h2,h3,h4{font-family:var(--display);font-variation-settings:var(--w-suave);li
 }
 .cabecera{display:flex;align-items:center;gap:20px;position:relative}
 .cabecera .logo{width:78px;flex:none}
-.marca{
-  font-family:var(--display);font-weight:900;font-variation-settings:"SOFT" 70,"WONK" 1,"opsz" 144;
-  font-size:clamp(44px,7.4vw,90px);line-height:.9;letter-spacing:-.035em;text-transform:uppercase;
-}
-.marca small{display:block;font-size:.17em;letter-spacing:.42em;font-weight:600;
-  font-variation-settings:"SOFT" 40,"WONK" 0;opacity:.85;margin-top:.5em;text-transform:uppercase}
+/* El logotipo dibujado, no compuesto: sustituye al ajuste tipográfico que
+   suplía un logotipo que el refugio ya tenía. Va solo, sin "Red de Apoyo"
+   colgando debajo — el lockup del refugio tampoco lo lleva. */
+.marca-wm{width:clamp(200px,34vw,420px);flex:none}
 .lema{
   font-family:var(--display);font-weight:400;font-style:italic;
   font-variation-settings:"SOFT" 60,"WONK" 1;
@@ -211,16 +209,14 @@ footer{padding:58px 0 90px;border-top:2px solid var(--linea)}
 
 <!-- ═══ definiciones reutilizables ═══ -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-  <!-- LA MARCA: huella cuyo pulpejo es un corazón, con un perrito dentro -->
-  <symbol id="mk" viewBox="0 0 200 232">
-    <ellipse cx="41"  cy="47" rx="17.5" ry="25" transform="rotate(-20 41 47)"/>
-    <ellipse cx="80"  cy="29" rx="18"   ry="27"/>
-    <ellipse cx="120" cy="29" rx="18"   ry="27"/>
-    <ellipse cx="159" cy="47" rx="17.5" ry="25" transform="rotate(20 159 47)"/>
-    <path fill="none" stroke-width="17" stroke-linejoin="round"
-      d="M100 220C58 189 24 156 24 122c0-24 18-42 41-42 15 0 28 8 35 21 7-13 20-21 35-21 23 0 41 18 41 42 0 34-34 67-76 98Z"
-      style="stroke:inherit"/>
-    <path d="M62 190C55 175 55 155 63 143c5-10 13-17 22-21-4-11-6-21-1-26 6-4 14 1 18 11 5 6 10 11 15 14 10 3 21 8 29 15 6 5 4 12-3 13h-11c-4 7-11 12-19 14l-4 11c-3 10-11 16-20 16Z"/>
+  <!-- LA MARCA: huella cuyo pulpejo es un corazón, con un perrito dentro.
+       Vector original del refugio, adoptado el 19/09/2026. -->
+  <symbol id="mk" viewBox="0 0 777 835">
+    <g transform="translate(-298.76,845) scale(0.1,-0.1)"><path d="M8400 8429c354-98 604-465 651-957 27-283-33-617-153-856-51-101-163-258-236-329-187-185-368-267-587-267-215 0-386 78-547 248-142 150-219 297-281 537-30 115-31 129-31 325-1 160 3 223 17 287 64 299 190 552 367 737 135 142 283 234 445 277 100 26 258 25 355-2zm-2644-73c266-98 492-339 624-666 89-219 121-432 102-663-49-583-395-992-837-991-122 1-199 20-320 78-115 55-199 119-284 215-156 178-252 378-313 656-32 147-32 445 1 595 79 367 251 618 506 742 114 54 186 68 330 64 99-3 133-8 191-30zm4602-1436c71-10 175-55 232-100 51-41 107-127 138-214 23-62 26-87 26-196-1-145-15-217-74-357-54-131-136-249-255-369-193-195-379-281-591-272-86 4-110 9-168 36-189 88-285 274-273 522 15 282 176 574 421 764 133 103 269 167 396 185 76 12 77 12 148 1zm-6763-11c275-51 550-270 693-554 73-144 109-324 93-470-21-195-124-341-298-422-71-33-88-37-184-41-139-6-229 14-358 78-191 96-362 279-462 495-157 341-99 691 140 844 108 69 244 95 376 70zm1776-1339c386-39 763-198 1079-455 104-84 232-209 378-367l53-57 37 41c20 22 41 47 45 54 17 29 268 251 377 333 133 100 242 167 398 246 333 166 678 236 999 200 225-25 344-60 540-159 134-67 232-136 336-235 476-454 634-1169 422-1906-128-444-399-907-845-1440-273-326-762-781-1145-1065-464-344-1026-660-1174-660-171 0-1002 500-1411 849-195 166-440 399-550 522l-59 65 97 28c111 31 267 103 374 171 191 124 394 338 518 550 83 139 116 219 154 372 20 78 48 174 62 215 116 322 354 591 648 733 155 74 252 99 396 99 98 0 135-5 245-33 108-28 141-33 200-28 133 11 340 98 559 236 151 95 177 102 243 70 41-20 53-34 81-89 49-98 73-206 79-355 14-335-95-515-573-941-179-159-266-249-324-336l-38-58-40 83c-35 72-67 159-126 352l-16 50 5-67c8-105 48-244 120-421 100-241 138-369 132-438-6-69-27-103-81-132-35-18-57-21-141-20-84 1-119 7-218 38-295 89-479 215-614 418-38 56-77 127-87 157-28 77-32 44-6-37 43-131 161-304 275-403 120-104 300-198 464-242l84-22-7-66c-9-105-53-262-119-425-68-170-80-239-52-298 35-73 112-74 257-1 381 191 948 668 1342 1129 113 132 252 305 296 369 8 12 45 64 81 116 263 376 460 786 544 1132 44 184 55 275 55 474 0 195-23 346-73 485-112 308-297 523-562 654-201 99-392 135-607 115-414-40-826-247-1167-589-154-154-337-375-390-469-14-26-64 22-235 223-206 244-316 357-446 462-187 151-340 236-551 307-377 127-702 111-1010-51-117-61-207-129-315-238-187-189-285-385-336-675-19-110-16-427 6-568 87-559 413-1151 932-1692l93-96-47-17c-67-23-206-57-234-57-48 1-353 303-534 530-121 151-182 238-272 388-421 701-485 1486-171 2102 205 403 556 682 1002 796 186 47 383 62 568 44z"/></g>
+  </symbol>
+  <!-- EL LOGOTIPO: "Wawitas" a pincel, tal como lo dibuja el refugio -->
+  <symbol id="wm" viewBox="0 0 927 160">
+    <g transform="translate(-7.06,167.07) scale(0.1,-0.1)"><path d="M6929 1651c78-40 161-165 161-244 0-29-7-46-28-67-27-27-32-28-168-35-76-4-166-10-199-14-57-6-60-7-69-41-49-183-151-456-325-874-112-267-105-255-147-272-42-17-94-8-157 29-104 61-140 149-117 282 21 117 67 287 151 552 43 138 79 256 79 261 0 4-27 5-62 1-39-5-73-4-89 2-14 6-63 57-108 114-111 142-122 175-73 224 24 24 40 29 127 39 265 31 651 58 853 61 113 1 138-2 171-18zm-6598-51c98-50 172-120 190-179 14-46 4-178-31-420-11-74-18-136-16-138 2-2 45 56 96 129 150 215 346 473 375 496 59 47 216 12 285-62 32-36 32-62-9-290-39-222-39-235-4-176 83 142 239 393 305 489 104 155 142 177 249 147 119-33 195-102 193-177-2-43-14-67-204-374-21-33-88-143-151-245-165-270-355-567-406-633-24-31-57-64-73-72-39-20-117-18-165 4-111 51-147 150-162 449-3 67-9 122-12 122-3 0-84-117-179-260-95-142-188-272-207-289-71-62-165-64-242-5-69 52-75 80-86 364-11 292 6 1056 24 1109 25 72 100 76 230 11zm2528 16c121-32 179-62 215-113 39-56 38-110-7-293-68-272-99-405-167-710-77-342-76-340-159-340-64 0-140 38-211 106-66 63-80 95-80 188 0 42-3 57-12 53-7-2-60-12-117-22l-104-19-113-171c-73-112-121-175-139-183-89-41-208 30-250 149-26 72-19 124 29 223 42 86 43 91 29 124-8 19-13 50-11 70 4 44 47 78 112 87 38 6 46 12 66 48 13 23 35 60 50 82 15 22 54 81 86 130 85 132 258 378 332 472 65 83 123 130 177 144 48 13 172 1 274-25zm6254-11c114-39 183-108 214-214 21-74 12-157-33-313-20-67-42-146-49-175-26-110-77-139-191-108-73 20-175 83-208 128-34 47-28 134 17 227 43 90 80 200 72 209-20 18-154-179-187-273-49-143-3-216 226-351 172-101 218-163 195-263-14-64-41-112-100-176-185-202-499-277-778-185-123 41-211 163-211 292 0 82 24 158 61 191 44 39 89 32 182-30 96-65 178-97 257-102 66-4 131 12 114 27-5 5-70 34-144 65-208 88-294 168-327 301-14 56-15 79-6 131 13 76 65 198 118 279 58 87 178 209 260 264 155 103 352 132 518 76zm-3586-31c87-41 155-104 173-159 31-93-17-237-308-934-141-338-148-348-225-336-50 7-153 71-191 118-26 33-31 48-34 107-3 43 2 99 13 147 26 119 129 425 265 793 16 41 38 116 50 165 12 50 27 98 34 106 37 50 110 48 223-7zm-575 15c71-27 148-86 171-129 22-43 16-80-20-147-38-68-233-368-468-718-270-402-312-462-338-480-34-24-119-19-176 10-122 61-161 163-187 482l-6 82-42-57c-23-31-100-144-171-251-72-107-142-206-157-221-57-58-154-45-229 30-55 55-64 82-84 240-35 284-44 606-25 920 14 222 22 240 114 240 57 0 212-77 273-135 64-62 64-59 12-463-5-40-9-85-8-100l0-27 19 25c11 14 42 57 70 95 183 252 373 490 417 519 62 42 150 31 241-29 62-41 68-66 43-177-11-51-32-156-46-233-14-77-27-148-29-157-8-33 13-18 35 24 12 23 42 73 67 112 25 39 69 107 98 151 168 262 245 375 269 394 35 27 87 27 157 0zm2975-9c98-23 145-42 196-77 84-58 86-111 13-357-68-229-173-604-226-811-44-169-55-195-95-221-74-48-283 53-316 153-8 24-9 65-5 120l6 83-27 0c-32 0-242-35-246-41-3-4-78-107-171-232-91-124-143-133-245-41-63 57-103 137-103 207 1 40 9 64 42 121 41 70 42 72 31 122-20 88 6 122 111 145 63 13 46-4 228 230 192 247 393 476 481 550 28 23 67 48 87 55 53 19 145 17 239-6zM2536 1066c-112-157-166-236-166-243 0-4 32-6 72-3l72 5 28 135c15 74 27 138 25 141-1 4-15-12-31-35zM7587 993c-36-49-84-112-106-141-23-29-41-55-41-57 0-7 82-6 117 1 29 6 31 10 68 141 20 74 35 136 33 139-3 2-34-35-71-83z"/></g>
   </symbol>
   <!-- perritos asomando: marcadores para los recortes reales de Wawitas -->
   <symbol id="d1" viewBox="0 0 120 150"><!-- orejas paradas -->
@@ -235,8 +231,8 @@ footer{padding:58px 0 90px;border-top:2px solid var(--linea)}
 <header class="portada">
   <div class="env">
     <div class="cabecera">
-      <svg class="logo" viewBox="0 0 200 232" fill="#F6F1E7" style="stroke:#F6F1E7"><use href="#mk"/></svg>
-      <div class="marca">Wawitas<small>Red de Apoyo</small></div>
+      <svg class="logo" viewBox="0 0 777 835" fill="#F6F1E7"><use href="#mk"/></svg>
+      <svg class="marca-wm" viewBox="0 0 927 160" fill="#F6F1E7"><use href="#wm"/></svg>
     </div>
     <p class="lema">De la calle,<br><b>a tu corazón.</b></p>
     <div class="credenciales">
@@ -285,15 +281,16 @@ footer{padding:58px 0 90px;border-top:2px solid var(--linea)}
 <!-- ═══ 03 ═══ -->
 <section class="sec"><div class="env">
   <div class="eyebrow">03 — La marca gráfica</div>
-  <p class="nota">La huella-corazón se reconstruye como SVG: nítida a cualquier tamaño, coloreable, utilizable como favicon, viñeta de lista, separador de sección y marca de agua. Deja de ser un JPG de Facebook y pasa a ser un elemento del sistema.</p>
+  <p class="nota">La huella-corazón es el vector original del refugio: nítida a cualquier tamaño, coloreable, utilizable como favicon, viñeta de lista, separador de sección y marca de agua. Deja de ser un JPG de Facebook y pasa a ser un elemento del sistema.</p>
   <div class="marcas">
-    <div class="mk"><svg width="104" viewBox="0 0 200 232" style="stroke:var(--jade)"><use href="#mk"/></svg><span class="cap">Principal</span></div>
-    <div class="mk"><svg width="52" viewBox="0 0 200 232" style="stroke:var(--jade)"><use href="#mk"/></svg><span class="cap">Compacta</span></div>
-    <div class="mk"><svg width="26" viewBox="0 0 200 232" style="stroke:var(--jade)"><use href="#mk"/></svg><span class="cap">Favicon</span></div>
-    <div class="mk inv"><svg width="72" viewBox="0 0 200 232" style="stroke:var(--crema)"><use href="#mk"/></svg><span class="cap">Sobre jade</span></div>
-    <div class="mk"><svg width="72" viewBox="0 0 200 232" style="stroke:var(--coral);fill:var(--coral)"><use href="#mk"/></svg><span class="cap">Acento</span></div>
+    <div class="mk"><svg width="104" viewBox="0 0 777 835"><use href="#mk"/></svg><span class="cap">Principal</span></div>
+    <div class="mk"><svg width="52" viewBox="0 0 777 835"><use href="#mk"/></svg><span class="cap">Compacta</span></div>
+    <div class="mk"><svg width="26" viewBox="0 0 777 835"><use href="#mk"/></svg><span class="cap">Favicon</span></div>
+    <div class="mk inv"><svg width="72" viewBox="0 0 777 835"><use href="#mk"/></svg><span class="cap">Sobre jade</span></div>
+    <div class="mk"><svg width="72" viewBox="0 0 777 835" style="fill:var(--coral)"><use href="#mk"/></svg><span class="cap">Acento</span></div>
+    <div class="mk"><svg width="150" viewBox="0 0 927 160"><use href="#wm"/></svg><span class="cap">Logotipo</span></div>
   </div>
-  <p class="nota" style="margin-top:22px;font-size:13.5px;opacity:.6">Reconstrucción de trabajo. Antes de publicar conviene pedir el archivo vectorial original a quien diseñó el logo — si existe, se usa ese.</p>
+  <p class="nota" style="margin-top:22px;font-size:13.5px;opacity:.6">Vector original del refugio, adoptado el 19/09/2026. Llegó como trazado invertido —el logo era un hueco recortado sobre un rectángulo negro— y aquí ya está corregido y recortado al dibujo. La misma geometría que usa la aplicación en Brand.tsx.</p>
 </div></section>
 
 <!-- ═══ 04 ═══ -->
