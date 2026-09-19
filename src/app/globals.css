@@ -18,6 +18,15 @@
   --sun: #f5b72b;         /* tape, underlines, the ticker */
   --charcoal: #1a0e08;      /* text on coral and sol */
 
+  /* The logo mark and logotype. A token rather than jade directly, because the
+     note on --jade-light says jade recedes at night and hands emphasis over —
+     and until now nothing acted on that. Measured on the mark's own greens:
+     jade is 3.45:1 on cream and only 4.70:1 on the night page, where
+     jade-light reaches 9.05:1. Redefined in BOTH dark blocks below; four
+     older rules in this file set only [data-theme='dark'] and so break for a
+     system-dark visitor who never touched the toggle. */
+  --brand-mark: var(--jade);
+
   --line: rgba(18, 70, 59, 0.16);
   --shadow: 0 1px 0 rgba(18, 70, 59, 0.08), 0 12px 26px -14px rgba(18, 70, 59, 0.45);
   --shadow-high: 0 1px 0 rgba(18, 70, 59, 0.1), 0 28px 46px -20px rgba(18, 70, 59, 0.5);
@@ -53,6 +62,7 @@
   --cream: #0d1714;
   --cream-2: #142320;
   --jade-deep: #efe9dc;
+  --brand-mark: var(--jade-light);
   --line: rgba(239, 233, 220, 0.15);
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 14px 30px -16px rgba(0, 0, 0, 0.9);
   --shadow-high: 0 1px 0 rgba(0, 0, 0, 0.4), 0 30px 50px -20px rgba(0, 0, 0, 0.95);
@@ -63,6 +73,7 @@
     --cream: #0d1714;
     --cream-2: #142320;
     --jade-deep: #efe9dc;
+    --brand-mark: var(--jade-light);
     --line: rgba(239, 233, 220, 0.15);
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 14px 30px -16px rgba(0, 0, 0, 0.9);
     --shadow-high: 0 1px 0 rgba(0, 0, 0, 0.4), 0 30px 50px -20px rgba(0, 0, 0, 0.95);
@@ -306,7 +317,9 @@ textarea {
   line-height: 0.9;
   letter-spacing: -0.03em;
   text-transform: uppercase;
-  color: var(--jade);
+  /* The drawn logotype inherits this through currentColor, so the word and the
+     line under it always change together — and follow the mark beside them. */
+  color: var(--brand-mark);
 }
 .header__name small {
   display: block;
@@ -315,6 +328,12 @@ textarea {
   font-variation-settings: 'SOFT' 40, 'WONK' 0;
   opacity: 0.75;
   margin-top: 4px;
+}
+/* The drawn logotype, where the shelter has one. It takes the place of
+   .header__name rather than sitting inside it — the artwork already spells
+   the name, so none of that block's type settings apply to it. */
+.header__wordmark {
+  color: var(--brand-mark);
 }
 .header__nav {
   display: flex;
@@ -397,6 +416,17 @@ textarea {
   gap: var(--space-4);
   justify-content: space-between;
   align-items: flex-end;
+}
+/* The mark sits centred over the logotype, as the shelter's own lockup draws
+   it. fit-content keeps that centring local: the pair centre on each other and
+   the pair as a whole still sits flush left against the tagline beneath. */
+.site-footer__lockup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  color: var(--brand-mark);
 }
 .site-footer__tagline {
   font-family: var(--display);

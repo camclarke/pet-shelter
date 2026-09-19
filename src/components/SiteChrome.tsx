@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Brand } from './Brand';
+import { Wordmark } from './Wordmark';
 import { ThemeToggle } from './ThemeToggle';
 import { AccountLink } from './AccountLink';
 import { SHELTER } from '@/config/shelter';
@@ -22,12 +23,24 @@ export function Header() {
   return (
     <header className="header">
       <div className="container header__row">
-        <Link href="/" className="header__brand">
-          <Brand size={40} color="var(--jade)" title={SHELTER.name} />
-          <span className="header__name">
-            {first}
-            {rest.length > 0 && <small>{rest.join(' ')}</small>}
-          </span>
+        {/* The drawn logotype stands alone. Hanging "Red de Apoyo" beneath it
+            was the type-set treatment's way of carrying a word the artwork
+            does not, and the shelter's own lockup does not carry it either.
+            The link keeps the full registered name, so a screen reader and a
+            crawler still get it — which is also why neither child needs a
+            `title`: repeating it inside would only stutter.
+            A fork with no lettering falls back to the two-line setting that
+            layout was built for. */}
+        <Link href="/" className="header__brand" aria-label={SHELTER.name}>
+          <Brand size={40} />
+          {SHELTER.hasWordmark ? (
+            <Wordmark size={132} className="header__wordmark" />
+          ) : (
+            <span className="header__name">
+              {first}
+              {rest.length > 0 && <small>{rest.join(' ')}</small>}
+            </span>
+          )}
         </Link>
 
         <nav className="header__nav" aria-label="Principal">
@@ -70,7 +83,18 @@ export function Footer() {
     <footer className="site-footer">
       <div className="container site-footer__row">
         <div>
-          <Brand size={54} color="var(--jade)" />
+          {/* The footer had the mark but never the name. Composed from the two
+              components rather than shipping the fused lockup as a third copy
+              of the same contours — same picture, one colour to set, and the
+              wordmark can drop out for a fork that has no lettering. */}
+          {/* Whichever of the two carries the name is the one that gets a
+              `title`; the other is decorative. The logotype's accessible name
+              is the word it draws, not the registered name — alt text for an
+              image of text is that text. */}
+          <span className="site-footer__lockup">
+            <Brand size={54} title={SHELTER.hasWordmark ? undefined : SHELTER.name} />
+            {SHELTER.hasWordmark && <Wordmark size={116} title={SHELTER.shortName} />}
+          </span>
           <p className="site-footer__tagline">{SHELTER.tagline}</p>
         </div>
         <div className="site-footer__data">
