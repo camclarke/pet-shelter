@@ -2533,6 +2533,7 @@ textarea {
 .dossier__apply a,
 .apply-back,
 .queue-group__record,
+.register-match__record,
 .answer__link,
 .my-applications__pet {
   display: inline-flex;
