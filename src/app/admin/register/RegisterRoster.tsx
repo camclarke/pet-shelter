@@ -426,11 +426,27 @@ export function RegisterRoster() {
             )}
 
             {linked && (
-              <p className="admin-match__meta">
-                Ya está enlazado con una ficha ({rowStateText(candidate)}).
-                {candidate.linkConfidence === 'provisional' &&
-                  ' Quedó marcado como «por confirmar»: alguien dijo que no podía distinguirlo de otro animalito.'}
-              </p>
+              <>
+                <p className="admin-match__meta">
+                  Ya está enlazado con una ficha ({rowStateText(candidate)}).
+                  {candidate.linkConfidence === 'provisional' &&
+                    ' Quedó marcado como «por confirmar»: alguien dijo que no podía distinguirlo de otro animalito.'}
+                </p>
+                {/* Reading is not an act. Deliberately a plain <Link> and NOT
+                    routed through `go()`, which writes `petId` and a link
+                    confidence: looking at an animal's history must never
+                    decide that this row is that animal. That decision stays
+                    with "Sí, es esta" below.
+
+                    Only rendered when the row already points at a record —
+                    an unlinked row has no history to open yet. */}
+                <Link
+                  href={`/admin/pets/${candidate.petId}`}
+                  className="auth__link register-match__record"
+                >
+                  Ver historial médico
+                </Link>
+              </>
             )}
           </div>
         </div>

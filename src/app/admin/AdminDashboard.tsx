@@ -167,7 +167,18 @@ export function AdminDashboard() {
               const progress = draftProgress(draft);
               return (
                 <li key={draft.id} className="admin-list__item">
-                  <Link href={`/admin/intake?draft=${draft.id}`}>
+                  {/* The RECORD, not the wizard — the same destination the
+                      published rows below use, and for the same reason: the
+                      register import gave 36 of the 43 imported drafts a
+                      medical history, and until this href changed there was no
+                      route to it from anywhere. The camera is not lost, it is
+                      one tap on: `/admin/pets/{id}` renders PendingDraftPanel,
+                      whose primary action is "Tomar fotos y completar" back
+                      into `/admin/intake?draft={id}` with this same id. That
+                      screen also names the animal and warns that the imported
+                      records came off a handwritten sheet, which is worth
+                      reading BEFORE photographing rather than after. */}
+                  <Link href={`/admin/pets/${draft.id}`}>
                     {/* Unfinished drafts are usually unnamed — a shelter photographs
                         the animal first and names it later — so a list of "Sin
                         nombre" rows is unusable without the photo. Reported from a
