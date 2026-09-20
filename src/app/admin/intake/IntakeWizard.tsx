@@ -1863,14 +1863,25 @@ export function IntakeWizard() {
             />
           </label>
 
-          <label className="admin-form__check">
-            <input
-              type="checkbox"
-              checked={draft.sterilized}
+          {/* A SELECT, not a checkbox, and that is the point: a checkbox has
+              two states and this question has three. Unticked used to mean
+              both "no" and "nobody knows", which is how 15 animals ended up
+              carrying a claim the paper never made. ASV §7.2 asks that
+              sterilization status be documented for each animal, and "we do
+              not know yet" is a documented status. */}
+          <label className="auth__field">
+            <span className="t-label">¿Está esterilizado o esterilizada?</span>
+            <select
+              value={toTristate(draft.sterilized)}
               disabled={busy}
-              onChange={(e) => update({ sterilized: e.target.checked })}
-            />
-            Ya está esterilizado o esterilizada
+              onChange={(e) => update({ sterilized: fromTristate(e.target.value) })}
+            >
+              {TRISTATE.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </label>
 
           <div className="admin-form__row">

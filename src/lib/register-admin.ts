@@ -406,7 +406,11 @@ function draftFromEntry(
     name,
     slug: name ? slugify(name) : '',
     colorPattern: entry.colourNote ?? '',
-    sterilized: entry.sterilizedPerRegister,
+    // `true` or UNKNOWN, never `false`. The register saying nothing about
+    // sterilization is not the register saying the animal is unaltered, and
+    // writing `false` here would put a claim on the record that the paper
+    // never made. See src/lib/sterilization.ts.
+    sterilized: entry.sterilizedPerRegister ? true : null,
     register: {
       no: entry.no,
       nameRaw: entry.nameRaw,

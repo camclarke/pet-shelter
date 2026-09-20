@@ -218,7 +218,12 @@ export interface PetDetail {
   /** What the shelter commits to, e.g. free castration at 6–7 months. */
   commitments: string[];
 
-  sterilized: boolean;
+  /**
+   * THREE-STATE. `null` means nobody has recorded it — see
+   * src/lib/sterilization.ts for why that must not collapse into `false`, and
+   * for the ASV §7.2 statements that depend on the distinction.
+   */
+  sterilized: boolean | null;
   goodWithChildren: boolean | null;
   goodWithOtherPets: boolean | null;
 }

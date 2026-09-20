@@ -139,7 +139,14 @@ export interface PetDraft {
   temperament: string[];
   healthNotes: string;
   commitments: string[];
-  sterilized: boolean;
+  /**
+   * THREE-STATE, like the two fields under it. `null` is "nobody wrote it
+   * down", which is not the same claim as `false`, "this animal is unaltered"
+   * — see src/lib/sterilization.ts. The register importer used to write
+   * `false` for both, so 15 of the 42 animals in the shelter carry a `false`
+   * that the paper never said.
+   */
+  sterilized: boolean | null;
   goodWithChildren: boolean | null;
   goodWithOtherPets: boolean | null;
 
@@ -258,7 +265,8 @@ export function draftDefaults(id: string): PetDraft {
     temperament: [],
     healthNotes: '',
     commitments: [],
-    sterilized: false,
+    // Unknown, not "no". A fresh draft has been told nothing about this animal.
+    sterilized: null,
     goodWithChildren: null,
     goodWithOtherPets: null,
     slug: '',
