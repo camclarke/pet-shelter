@@ -1921,6 +1921,94 @@ textarea {
   gap: var(--space-1);
 }
 
+/* ── a history row you tap to open ───────────────────────────────────────────
+   The medical and weight histories on an animal's internal page, and ONLY
+   those two. Every rule here is opt-in through `.record-row`, because
+   `.admin-list__item--record` above is shared by six other lists — the food
+   screens, the applications list and the medical review queue — and the
+   review queue in particular must keep its own Confirmar/Descartar buttons,
+   since choosing between them is a decision rather than "open this".
+
+   What this replaces: two full-size `.btn`s on every row. Measured at 360px
+   against this stylesheet, they were 120px of a 262px row — 46% of it — and
+   they WRAPPED, stacking one above the other. Nine records came to 2358px,
+   about three phone screens.
+
+   ⚠️ The row opens the record. It does not delete it. Deleting moved inside
+   the editor, behind a confirm naming the record — the project log records
+   these two buttons shipping flush together at a zero gap, "on a phone, where
+   a mis-tap deletes a medical record". */
+.admin-list__item--record.record-row {
+  /* The button owns the padding so the whole card is the tap target. Two
+     classes, so this beats the shared single-class rule regardless of which
+     order the two end up in. */
+  padding: 0;
+}
+
+.record-row__open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  /* Every row is far taller than this; the floor is here for a bare
+     measurement whose only content is a weight and a date. */
+  min-height: 44px;
+  padding: 13px 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  /* A <button> does not inherit type or colour on its own. */
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Restates `.admin-list__item--record > div:first-child`, which no longer
+   matches: a <button> may not contain flow content, so the wrapper is a
+   <span>. Editing the shared rule to cover spans would reach all six other
+   lists. */
+.record-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+  /* A vet's full name or an admin's email must wrap, never widen the row. */
+  overflow-wrap: anywhere;
+}
+
+/* ⚠️ 0.75, not 0.5, and the difference is measured rather than aesthetic.
+   This chevron is what tells a volunteer the row opens, so it is a meaningful
+   indicator and WCAG 1.4.11 wants 3:1. Composited over `--cream`, ink at 0.5
+   comes out at 2.61:1 on light paper — under the bar — and at 0.75 it is
+   4.84:1. Dark mode was never the problem; light was, and only reading the
+   :root tokens showed it. */
+.record-row__go {
+  flex: 0 0 auto;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.record-row__open:hover {
+  background: var(--cream-2);
+}
+
+.record-row__open:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* ── deleting a history record, from inside its editor ─────────────────────
+   The confirm itself reuses `.register-warning`, the block the roster already
+   asks a second question in, so there is no new colour decision here and it is
+   legible in both themes. Only the trigger button needs placing. */
+.record-delete__start {
+  margin-top: var(--space-2);
+  align-self: flex-start;
+}
+
 /* ── the medical review gate (step 9) ────────────────────────────────────────
    A record a model read off a card is VISIBLE and counts for nothing until a
    person confirms it. Sun is the palette's "look at this" colour — already

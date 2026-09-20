@@ -24,6 +24,7 @@ import {
   type MeasurementView,
 } from '@/lib/measurements-admin';
 import type { MuscleCondition, Species } from '@/lib/types';
+import { DeleteRecordButton } from './DeleteRecordButton';
 
 /**
  * Weight and body condition for one animal. Build-order step 10, plan §2.7.
@@ -44,6 +45,22 @@ import type { MuscleCondition, Species } from '@/lib/types';
  * is nothing to be overdue against. What IS shown is how old the latest weight
  * is, because that decides whether it can still be trusted.
  */
+
+/**
+ * One measurement in the words its row shows, for the tap target's accessible
+ * name and for the delete confirm.
+ *
+ * The date is part of it because a weight on its own does not identify a
+ * weighing — a dog weighed monthly has several that read the same.
+ */
+function measurementLabel(r: MeasurementView): string {
+  const parts = [
+    r.weightKg !== null ? t.formatKg(r.weightKg) : null,
+    r.bcs !== null ? `Condición ${t.bodyConditionLabel(r.bcs)}` : null,
+    r.mcs ? t.muscleConditionLabel(r.mcs) : null,
+  ].filter(Boolean);
+  return `${parts.join(' · ') || '—'} · ${formatDate(r.measuredAt)}`;
+}
 
 function freshDraft(): MeasurementDraft {
   return {
@@ -74,6 +91,14 @@ export default function MeasurementPanel({
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<MeasurementDraft>(freshDraft);
+
+  /**
+   * The record being edited, resolved from the id rather than stored twice.
+   * Null while adding, and null if it has gone — a reload that drops it must
+   * not leave a delete button pointing at an id nothing answers for.
+   */
+  const editingRecord =
+    editingId === null ? null : (records?.find((r) => r.id === editingId) ?? null);
 
   const reload = useCallback(async () => {
     try {
@@ -150,6 +175,11 @@ export default function MeasurementPanel({
     setBusy(true);
     try {
       await deleteMeasurement(petId, record.id);
+      // Close ONLY on success, for the reason written out in MedicalPanel: this
+      // is reached from inside the record's editor now, and closing in a
+      // `finally` would hide the failure behind a list that still shows it.
+      setOpen(false);
+      setEditingId(null);
       await reload();
     } catch (caught) {
       console.error('[measurements]', caught);
@@ -209,8 +239,19 @@ export default function MeasurementPanel({
               .join(' · ');
 
             return (
-              <li key={r.id} className="admin-list__item admin-list__item--record">
-                <div>
+              <li key={r.id} className="admin-list__item admin-list__item--record record-row">
+                {/* The row opens the measurement and never deletes it — see
+                    MedicalPanel for the reasoning and DeleteRecordButton for
+                    where deleting went. A <span> inside, because a <button>
+                    may not contain flow content. */}
+                <button
+                  type="button"
+                  className="record-row__open"
+                  disabled={busy}
+                  onClick={() => startEdit(r)}
+                  aria-label={`Corregir: ${measurementLabel(r)}`}
+                >
+                <span className="record-row__text">
                   <strong>
                     {headline || (r.mcs ? t.muscleConditionLabel(r.mcs) : '—')}
                   </strong>
@@ -223,26 +264,11 @@ export default function MeasurementPanel({
                   )}
                   {r.note && <span className="t-data">{r.note}</span>}
                   {r.recordedBy && <span className="t-data">Anotado por {r.recordedBy}</span>}
-                </div>
-
-                <div className="admin-list__actions">
-                  <button
-                    type="button"
-                    className="btn btn--muted"
-                    disabled={busy}
-                    onClick={() => startEdit(r)}
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--muted"
-                    disabled={busy}
-                    onClick={() => void remove(r)}
-                  >
-                    Borrar
-                  </button>
-                </div>
+                </span>
+                  <span className="record-row__go" aria-hidden="true">
+                    ›
+                  </span>
+                </button>
               </li>
             );
           })}
@@ -385,6 +411,18 @@ export default function MeasurementPanel({
               Cancelar
             </button>
           </div>
+
+          {/* Only on a measurement that exists, never while adding one. `key`
+              remounts the confirm per record so a half-confirmed delete cannot
+              carry across to a different one. */}
+          {editingRecord && (
+            <DeleteRecordButton
+              key={editingRecord.id}
+              label={measurementLabel(editingRecord)}
+              disabled={busy}
+              onDelete={() => void remove(editingRecord)}
+            />
+          )}
         </div>
       )}
     </section>

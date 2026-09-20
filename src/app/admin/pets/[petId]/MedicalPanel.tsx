@@ -31,6 +31,7 @@ import { CandidateGoneError, MedicalConfirmationError } from '@/lib/medical-cand
 import { canConfirmAsIs, isConfirmed, type EvidenceThresholds } from '@/lib/review-gate';
 import type { MedicalExtractionSource, MedicalRecordKind } from '@/lib/types';
 import CardCapture, { type CardCaptureNotice } from './CardCapture';
+import { DeleteRecordButton } from './DeleteRecordButton';
 import {
   EvidenceHint,
   REVIEW_EVERYTHING,
@@ -106,6 +107,21 @@ function failureMessage(caught: unknown, fallback: string): string {
   }
   if (caught instanceof CandidateGoneError) return t.medicalReview.candidateGone;
   return fallback;
+}
+
+/**
+ * One record in the words its row shows, for the tap target's accessible name
+ * and for the delete confirm.
+ *
+ * The date is part of it on purpose: an animal from the paper register can
+ * carry four octavalente rows, and "¿Borrar «Vacuna · Octavalente»?" would not
+ * tell a person which of them is about to go.
+ */
+function recordLabel(r: MedicalRecordView): string {
+  const kind = r.kind ? t.medicalKindLabel(r.kind) : t.medicalReview.unknownKind;
+  const name = r.name || t.medicalReview.unknownName;
+  const when = r.performedAt !== null ? formatDate(r.performedAt) : t.medicalReview.unknownDate;
+  return `${kind} · ${name} · ${when}`;
 }
 
 export default function MedicalPanel({
@@ -256,6 +272,12 @@ export default function MedicalPanel({
     setBusy(true);
     try {
       await deleteMedicalRecord(petId, record.id);
+      // Close ONLY on success. This is now reached from inside the record's own
+      // editor, so closing in a `finally` would hide the failure message behind
+      // a list that still shows the record — which reads as "it deleted and
+      // came back".
+      setOpen(false);
+      setEditing(null);
       await reload();
     } catch (caught) {
       console.error('[medical]', caught);
@@ -434,11 +456,32 @@ export default function MedicalPanel({
             return (
               <li
                 key={r.id}
-                className={`admin-list__item admin-list__item--record${
+                className={`admin-list__item admin-list__item--record record-row${
                   isConfirmed(r) ? '' : ' admin-list__item--unconfirmed'
                 }`}
               >
-                <div>
+                {/* The ROW is the target, and it opens the record — it never
+                    deletes it. Deleting lives inside the editor, behind a
+                    confirm that names the record.
+
+                    A <span> rather than a <div> because a <button> may not
+                    contain flow content, and everything inside is phrasing
+                    already. That is also why the shared
+                    `.admin-list__item--record > div:first-child` rule stops
+                    applying here, so `.record-row__text` restates it — six
+                    other screens share that rule and none of them may change.
+
+                    ⚠️ Nothing interactive may go inside this button. A control
+                    nested in a button is unreachable, and on this list the
+                    surrounding tap would fire instead. */}
+                <button
+                  type="button"
+                  className="record-row__open"
+                  disabled={busy}
+                  onClick={() => startEdit(r)}
+                  aria-label={`Corregir: ${recordLabel(r)}`}
+                >
+                <span className="record-row__text">
                   {!isConfirmed(r) && <UnconfirmedBadge />}
 
                   <strong>
@@ -478,26 +521,11 @@ export default function MedicalPanel({
                       {r.confirmedBy ? ` · ${t.confirmedByLabel(r.confirmedBy)}` : ''}
                     </span>
                   )}
-                </div>
-
-                <div className="admin-list__actions">
-                  <button
-                    type="button"
-                    className="btn btn--muted"
-                    disabled={busy}
-                    onClick={() => startEdit(r)}
-                  >
-                    Editar
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--muted"
-                    disabled={busy}
-                    onClick={() => void remove(r)}
-                  >
-                    Borrar
-                  </button>
-                </div>
+                </span>
+                  <span className="record-row__go" aria-hidden="true">
+                    ›
+                  </span>
+                </button>
               </li>
             );
           })}
@@ -749,6 +777,22 @@ export default function MedicalPanel({
               Cancelar
             </button>
           </div>
+
+          {/* Deleting is only possible on a record that EXISTS, so never while
+              adding one and never on a candidate — a candidate is discarded
+              through the review gate, which records that a person rejected a
+              model's reading rather than erasing it silently.
+
+              `key` remounts the confirm per record, so a half-confirmed delete
+              cannot carry across to a different one. */}
+          {editing?.kind === 'record' && (
+            <DeleteRecordButton
+              key={editing.record.id}
+              label={recordLabel(editing.record)}
+              disabled={busy}
+              onDelete={() => void remove(editing.record)}
+            />
+          )}
         </div>
       )}
     </section>
