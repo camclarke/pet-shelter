@@ -941,7 +941,12 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
       // Same gate as `name`: a slug derived from a description would become
       // the animal's public URL.
       slug: entry.hasRealName ? slugify(normalizedName) : '',
-      sterilized: entry.sterilizedPerRegister || sterilizedByEvent,
+      // `true` or UNKNOWN, never `false`. A register that records no
+      // sterilization has not recorded that the animal is unaltered — on a
+      // handwritten sheet the absence of a note is not evidence. The first
+      // run of this importer wrote `false` for both, which is why 15 of the
+      // 42 animals in the shelter carry a claim nobody made.
+      sterilized: entry.sterilizedPerRegister || sterilizedByEvent ? true : null,
       healthNotes: healthNotes.join('\n'),
       register,
 

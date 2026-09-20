@@ -53,6 +53,7 @@ import {
   unlinkEntry,
 } from '@/lib/register-admin';
 import { listDrafts } from '@/lib/pets-admin';
+import { needsAttention } from '@/lib/sterilization';
 import { formatDate } from '@/lib/date-input';
 import { t } from '@/i18n';
 import type { PetSex, RegisterEntry, RegisterStatus } from '@/lib/types';
@@ -132,11 +133,15 @@ export function RegisterRoster() {
   const [entries, setEntries] = useState<RegisterEntry[] | null>(null);
   /** petId → how many photos its draft already holds. Absent means no draft. */
   const [draftPhotos, setDraftPhotos] = useState<Map<string, number>>(new Map());
+  /** petId → its draft's three-state sterilization. Absent means no draft. */
+  const [draftSterilized, setDraftSterilized] = useState<Map<string, boolean | null>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>('resident');
   const [queryText, setQueryText] = useState('');
   const [sexFilter, setSexFilter] = useState<PetSex | null>(null);
+  /** ASV §7.2: show only the animals the shelter cannot say are sterilized. */
+  const [pendingSterilization, setPendingSterilization] = useState(false);
 
   /** The row whose confirm card is open, and how far through it we are. */
   const [candidate, setCandidate] = useState<RegisterEntry | null>(null);
@@ -189,6 +194,10 @@ export function RegisterRoster() {
       // draft is an animal whose record was already published.
       const drafts = await listDrafts(200);
       setDraftPhotos(new Map(drafts.map((draft) => [draft.id, draft.media.length])));
+      // Same single read, second question. ASV §7.2 requires a system for
+      // keeping track of unaltered animals, and a boolean could not express
+      // "nobody wrote it down" — see src/lib/sterilization.ts.
+      setDraftSterilized(new Map(drafts.map((draft) => [draft.id, draft.sterilized ?? null])));
     } catch (caught) {
       console.error('[register] could not load', caught);
       const code = (caught as { code?: string })?.code;
@@ -204,6 +213,25 @@ export function RegisterRoster() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Does this row belong on the unaltered list?
+   *
+   * Only rows whose record we can actually read: a row with no draft has no
+   * sterilization status to report, and a published animal keeps its status in
+   * `pets/{id}/detail/main`, which this screen does not load. Treating either
+   * as "needs sterilizing" would invent the very claim this change removes —
+   * so they are excluded, and the chip's hint says the list covers records
+   * that are not yet published.
+   */
+  const awaitingSterilization = useCallback(
+    (entry: RegisterEntry) => {
+      if (!entry.petId) return false;
+      if (!draftSterilized.has(entry.petId)) return false;
+      return needsAttention(draftSterilized.get(entry.petId));
+    },
+    [draftSterilized],
+  );
 
   /**
    * The folded search tokens for every row, built once. Re-folding 225 rows on
@@ -239,11 +267,30 @@ export function RegisterRoster() {
       .filter(({ entry, tokens }) => {
         if (tab === 'resident' && entry.status !== 'in-shelter') return false;
         if (sexFilter !== null && entry.sex !== sexFilter) return false;
+        if (pendingSterilization && !awaitingSterilization(entry)) return false;
         return matchesTokens(tokens, needles);
       })
       .map(({ entry }) => entry)
       .sort(compareForRoster);
-  }, [indexed, tab, sexFilter, needles]);
+  }, [indexed, tab, sexFilter, pendingSterilization, awaitingSterilization, needles]);
+
+  /**
+   * How many animals the shelter cannot say are sterilized — the count ASV
+   * §7.2's "system for keeping track of unaltered animals" is asking for.
+   *
+   * Scoped to rows that HAVE a draft, because a row without one has no record
+   * to read a status from; saying such an animal needs sterilizing would be
+   * the same unfounded claim this change exists to remove. Counted over
+   * in-shelter rows only — an adopted animal is no longer the shelter's to
+   * book surgery for.
+   */
+  const pendingCount = useMemo(
+    () =>
+      (entries ?? []).filter(
+        (entry) => entry.status === 'in-shelter' && awaitingSterilization(entry),
+      ).length,
+    [entries, awaitingSterilization],
+  );
 
   const residentCount = useMemo(
     () => (entries ?? []).filter((entry) => entry.status === 'in-shelter').length,
@@ -618,11 +665,32 @@ export function RegisterRoster() {
             </p>
           )}
 
-          {/* Exactly two. There is deliberately NO age filter: 17 of the 43
-              animals still living here have no age written anywhere in the
-              register, so an age filter would hide precisely the rows nobody
-              can identify by age in the first place. */}
+          {/* Three, and the order is MEASURED rather than tidy.
+              `.register-chips` is `nowrap` with `overflow-x: auto`, and at
+              360px the row is 260px wide against 331px of chips — so whatever
+              comes last sits ~71px off-screen behind a swipe. The unaltered
+              list is the one ASV §7.2 requires the shelter to keep, and it is
+              the only chip carrying a number nobody can guess, so it goes
+              first; "Hembra" and "Macho" are guessable and survive the scroll.
+
+              There is still deliberately NO age filter: 17 of the animals
+              still living here have no age written anywhere in the register,
+              so an age filter would hide precisely the rows nobody can
+              identify by age in the first place. */}
           <div className="register-chips">
+            {/* First, on purpose — see the note above. Rendered only when
+                there is something on the list, so a shelter that has this in
+                hand does not carry a chip reading zero for ever. */}
+            {pendingCount > 0 && (
+              <button
+                type="button"
+                aria-pressed={pendingSterilization}
+                className={`register-chip${pendingSterilization ? ' is-on' : ''}`}
+                onClick={() => setPendingSterilization((on) => !on)}
+              >
+                Sin esterilizar · {pendingCount}
+              </button>
+            )}
             {(['female', 'male'] as const).map((sex) => (
               <button
                 key={sex}
@@ -635,6 +703,13 @@ export function RegisterRoster() {
               </button>
             ))}
           </div>
+
+          {pendingSterilization && (
+            <p className="auth__hint">
+              Animalitos que todavía no podemos dar por esterilizados: los que dicen que no y los
+              que nadie anotó. La lista sólo cuenta fichas sin publicar.
+            </p>
+          )}
         </div>
 
         {entries === null && <p className="admin__sub">Cargando el registro…</p>}
