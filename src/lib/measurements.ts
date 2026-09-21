@@ -276,6 +276,41 @@ export function latestWeight<T extends { weightKg: number | null; measuredAt: nu
   return best;
 }
 
+/**
+ * The HEAVIEST measured weight ever recorded, with its date, or null.
+ *
+ * ⚠️ NOT for dosing and NOT for rations — `latestWeight` is the only weight
+ * those may read, because an animal is its current weight, not its record.
+ * This exists for one question only: whether a scale contradicts the adult
+ * weight band a person chose (see `bandConflict` in sterilization-timing.ts).
+ *
+ * That question is about the maximum, which is why this is a separate
+ * selector rather than a reuse of `latestWeight`. The premise "a dog that
+ * reached 22 kg has an adult frame over 20 kg" is about the most it ever
+ * weighed: a dog weighed 22 kg in March and 19 kg in September — sick,
+ * wasting, the exact animals the measurements panel exists to track — still
+ * reached 22, and `latestWeight` would silently discard that and answer 19.
+ *
+ * Ties go to the most recent reading, so the date shown is the latest time
+ * the animal was that heavy.
+ */
+export function heaviestWeight<T extends { weightKg: number | null; measuredAt: number }>(
+  history: readonly T[]
+): WeightReading | null {
+  let best: WeightReading | null = null;
+  for (const entry of history) {
+    if (entry.weightKg === null || !(entry.weightKg > 0)) continue;
+    if (
+      best === null ||
+      entry.weightKg > best.kg ||
+      (entry.weightKg === best.kg && entry.measuredAt > best.measuredAt)
+    ) {
+      best = { kg: entry.weightKg, measuredAt: entry.measuredAt };
+    }
+  }
+  return best;
+}
+
 /** The most recent body-condition score, skipping weight-only readings. */
 export function latestBodyCondition<T extends { bcs: number | null; measuredAt: number }>(
   history: readonly T[]

@@ -387,6 +387,9 @@ export function PetAdminPanel({ petId }: { petId: string }) {
         species={pet?.species ?? null}
         estimatedKgMin={pet?.weightIsEstimate ? (pet.weightKgMin ?? null) : null}
         estimatedKgMax={pet?.weightIsEstimate ? (pet.weightKgMax ?? null) : null}
+        // `?? null`: a pet published before this field existed has it
+        // undefined at runtime, whatever the `as Pet` cast claims.
+        adultBand={pet?.expectedAdultWeightBand ?? null}
       />
 
       {/* ── the collar tag: build-order step 12 ─────────────────────────── */}
@@ -586,6 +589,7 @@ function PendingDraftPanel({ petId, draft }: { petId: string; draft: PetDraft })
         species={draft.species ?? null}
         estimatedKgMin={draft.weightKgMin ?? null}
         estimatedKgMax={draft.weightKgMax ?? null}
+        adultBand={draft.expectedAdultWeightBand ?? null}
       />
     </div>
   );

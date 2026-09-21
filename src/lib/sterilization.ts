@@ -33,13 +33,16 @@
  * — they need different actions (book surgery vs. go and check), but both are
  * animals the shelter cannot yet say are sterilized.
  *
- * ⚠️ NOTHING HERE IS ABOUT WHEN TO STERILIZE. The AAHA 2019 Canine Life Stage
- * recommendation depends on sex, expected ADULT weight and age, and as of
- * 2026-09-20 the shelter's records hold all three for 0 of 42 animals — sex
- * for all 42, age for 1, size for 0. Timing belongs in its own module once the
- * photo session has filled those fields, and it needs an expected-adult-weight
- * field that does not exist: the photo estimate and `size` are both CURRENT,
- * which is the wrong number for exactly the growing animals the rule is about.
+ * ⚠️ NOTHING HERE IS ABOUT WHEN TO STERILIZE. That lives in
+ * src/lib/sterilization-timing.ts, which applies the AAHA 2019 canine chart
+ * (sex, expected ADULT weight, age) and reads `expectedAdultWeightBand` — a
+ * field added for it on 2026-09-21. This module answers only "is it done?",
+ * and the two stay separate because the second question is a standard's
+ * recommendation while this one is a fact about the record.
+ *
+ * (An earlier version of this comment said the timing rule needed a field
+ * that did not exist. It now does; the comment is corrected rather than left
+ * describing a gap that has closed.)
  */
 
 /** What the shelter can actually say about one animal. */
