@@ -10,6 +10,7 @@ import {
   MUSCLE_CONDITIONS,
   daysSinceMeasured,
   latestBodyCondition,
+  heaviestWeight,
   latestWeight,
   measurementDraftDefaults,
   measurementWarnings,
@@ -23,7 +24,8 @@ import {
   updateMeasurement,
   type MeasurementView,
 } from '@/lib/measurements-admin';
-import type { MuscleCondition, Species } from '@/lib/types';
+import type { AdultWeightBand, MuscleCondition, Species } from '@/lib/types';
+import { bandConflict } from '@/lib/sterilization-timing';
 import { DeleteRecordButton } from './DeleteRecordButton';
 
 /**
@@ -75,6 +77,12 @@ export interface MeasurementPanelProps {
   /** The intake photos' estimated range. Shown for context, never used as a value. */
   estimatedKgMin: number | null;
   estimatedKgMax: number | null;
+  /**
+   * The adult-weight band a person chose. Read here for ONE purpose: to show
+   * when a measured weight contradicts it. Never rewritten from a scale —
+   * mass is not frame (see `bandConflict`).
+   */
+  adultBand: AdultWeightBand | null;
 }
 
 export default function MeasurementPanel({
@@ -82,6 +90,7 @@ export default function MeasurementPanel({
   species,
   estimatedKgMin,
   estimatedKgMax,
+  adultBand,
 }: MeasurementPanelProps) {
   const { user } = useAuth();
 
@@ -124,6 +133,10 @@ export default function MeasurementPanel({
   });
 
   const weight = records ? latestWeight(records) : null;
+  // The HEAVIEST, not the latest — see heaviestWeight's note. A dog that
+  // reached 22 kg and was reweighed at 19 while sick still reached 22.
+  const heaviest = records ? heaviestWeight(records) : null;
+  const conflict = bandConflict(adultBand, heaviest?.kg ?? null);
   const condition = records ? latestBodyCondition(records) : null;
 
   function patch(next: Partial<MeasurementDraft>) {
@@ -201,6 +214,17 @@ export default function MeasurementPanel({
         <p className="place-now">
           Último peso: <strong>{t.formatKg(weight.kg)}</strong>,{' '}
           {t.daysAgoLabel(daysSinceMeasured(weight.measuredAt))} ({formatDate(weight.measuredAt)})
+        </p>
+      )}
+
+      {/* A NOTE, never an override. The band was a person's judgement and it
+          stays theirs: a scale over 20 kg is shown beside it and changes
+          nothing, because obesity, a late pregnancy or fluid in the abdomen
+          put a small-framed dog over 20 kg just as a big frame does. The
+          warning style — never the error style — because nothing is blocked. */}
+      {conflict && heaviest && (
+        <p className="auth__notice" role="note">
+          {t.adultBandConflict(heaviest.kg)}
         </p>
       )}
 

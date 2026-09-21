@@ -192,6 +192,7 @@ function pet(over: Partial<Pet> = {}): Pet {
     birthdateApprox: null,
     sex: 'female',
     size: 'medium',
+    expectedAdultWeightBand: null,
     colorPattern: 'café con pecho blanco',
     coatType: 'corto',
     weightKgMin: 12,

@@ -40,6 +40,7 @@ import type { IntakeError } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
 import type { TagTone } from '@/lib/qr-tokens';
+import type { TimingResult as SterilizationTimingResult } from '@/lib/sterilization-timing';
 
 /**
  * Everything a QR tag says: the public page a finder lands on, and the admin
@@ -506,6 +507,30 @@ export interface Messages {
 
   /** An estimated range for reading: "18–26 kg". */
   formatKgRange(minKg: number, maxKg: number): string;
+
+  /**
+   * Where an animal sits against the AAHA 2019 canine spay/neuter chart, as a
+   * sentence for whoever books the vet's visit. It PREPARES the decision and
+   * never makes it — ASV §7.2 gives the surgical decision to a veterinarian,
+   * by a must. It never says "not due yet"; see src/lib/sterilization-timing.ts.
+   *
+   * Gender-free on purpose: the animal may be of either sex, and a clitic
+   * ("esterilizarlo") would be wrong for half of them.
+   */
+  sterilizationTiming(result: SterilizationTimingResult): string;
+
+  /**
+   * The competing-risk note for a female who may be over 20 kg, shown while
+   * that choice is still live. BOTH options, neither preferred — the chart
+   * itself refuses to choose, and so must this screen.
+   */
+  sterilizationFemaleOptions: string;
+
+  /**
+   * A measured weight contradicts the adult band somebody chose. Shown beside
+   * the band, never used to rewrite it — mass is not frame.
+   */
+  adultBandConflict(heaviestKg: number): string;
 
   /**
    * A weight as an INPUT's value: "12,5", no unit and no grouping, so that

@@ -446,6 +446,11 @@ export async function publishDraft(draft: PetDraft, user: User): Promise<Publish
     birthdateApprox: null,
     sex: draft.sex!,
     size: draft.size!,
+    // No `!`: null is a legitimate answer and is NOT a publish blocker. Four
+    // of the imported residents already cannot publish until someone types a
+    // slug, and a second blocker on that cohort is the gate-stricter-than-
+    // reality failure plan §3 warns gets worked around.
+    expectedAdultWeightBand: draft.expectedAdultWeightBand ?? null,
     colorPattern: draft.colorPattern.trim() || null,
     coatType: draft.coatType.trim() || null,
     weightKgMin: draft.weightKgMin,

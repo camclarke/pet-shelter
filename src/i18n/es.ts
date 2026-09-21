@@ -1177,6 +1177,47 @@ export const es: Messages = {
 
   formatKgRange: (minKg, maxKg) => `${kgNumber(minKg)}–${kgNumber(maxKg)} kg`,
 
+  // ⚠️ Gender-free, every one. The animal may be of either sex, and a clitic
+  // ("esterilizarlo", "ubicarlo") would be wrong for half of them — the class
+  // of error that shipped "Está identifica con microchip" to a live dossier.
+  // And none of them may read as "not due yet": see sterilization-timing.ts.
+  sterilizationTiming: (result) => {
+    switch (result.kind) {
+      case 'refused':
+        switch (result.reason) {
+          case 'species-unknown':
+            return 'Todavía no sabemos la especie. La guía AAHA es para perros.';
+          case 'not-a-dog':
+            // "No canine guideline applies" is a different claim from "no
+            // guideline exists", and must not be written as the second.
+            return 'La guía AAHA es solo para perros; para esta especie no hay una guía cargada.';
+          case 'sex-unknown':
+            return 'Falta el sexo para aplicar la guía AAHA.';
+          case 'age-unknown':
+            return 'Falta la edad. Se completa con la foto de los dientes o con el registro en papel.';
+        }
+        break;
+      case 'act-now':
+        return 'Según la guía AAHA ya es el momento, o la ventana ya pasó. Corresponde antes de la adopción; lo decide el veterinario.';
+      case 'early':
+        // Both standards, side by side, and no "todavía no". AAHA would place
+        // the surgery later; ASV §7.1 says a shelter must not let an animal
+        // breed. The vet weighs one against the other — not this screen.
+        return 'La guía AAHA pondría la esterilización más adelante, pero en un refugio no se puede dejar que críe (norma ASV §7.1). Lo decide el veterinario.';
+      case 'depends':
+        return result.on === 'band'
+          ? 'Depende de cuánto pesará de adulto: si pasará de 20 kg, la guía AAHA cambia. Anótalo en «¿Cuánto crees que pesará de adulto?».'
+          : 'La edad es demasiado imprecisa para aplicar la guía AAHA. Hace falta una edad más exacta, por ejemplo con la foto de los dientes.';
+    }
+    return '';
+  },
+
+  sterilizationFemaleOptions:
+    'En hembras que pasarán de 20 kg, la guía AAHA da dos opciones y no elige: esterilizar antes del primer celo (menos riesgo de cáncer de mama, evita camadas) o después de que termine de crecer (más riesgo de cáncer de mama, pero menos de otros cánceres y de problemas en huesos y articulaciones, y quizá de incontinencia). Lo decide el veterinario.',
+
+  adultBandConflict: (heaviestKg) =>
+    `Un peso medido de ${kgNumber(heaviestKg)} kg contradice «menos de 20 kg». Conviene revisar ese dato: el sobrepeso, una preñez o líquido en el abdomen también suben el peso, así que la balanza sola no lo decide.`,
+
   formatKgInput: (kg) => kgNumber(kg),
 
   microchipError: (error) => MICROCHIP_ERROR[error],

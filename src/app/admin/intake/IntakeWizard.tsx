@@ -86,7 +86,14 @@ import {
   type ReadmissionInput,
 } from '@/lib/readmission';
 import { formatMicrochipCode, validateMicrochip, type MicrochipError } from '@/lib/microchip';
-import type { PetPhotoSlot, PetSex, PetSize, PetStatus, Species } from '@/lib/types';
+import type {
+  AdultWeightBand,
+  PetPhotoSlot,
+  PetSex,
+  PetSize,
+  PetStatus,
+  Species,
+} from '@/lib/types';
 import { requestSuggestion, type SuggestOutcome } from '@/lib/intake-suggest-client';
 import PhotoSuggestions, {
   SEX_WITHHELD_REASON,
@@ -136,6 +143,25 @@ const TRISTATE: { value: string; label: string }[] = [
   { value: 'yes', label: 'Sí' },
   { value: 'no', label: 'No' },
 ];
+
+/**
+ * The adult-weight band, three ways — same shape as TRISTATE, for the same
+ * reason: "nobody has said" must be a choice of its own, never the default
+ * reading of an unanswered question.
+ */
+const ADULT_BAND_OPTIONS: { value: string; label: string }[] = [
+  { value: 'unknown', label: 'No sabemos' },
+  { value: 'under-20kg', label: 'Menos de 20 kg' },
+  { value: 'over-20kg', label: 'Más de 20 kg' },
+];
+
+function toBandValue(band: AdultWeightBand | null): string {
+  return band ?? 'unknown';
+}
+
+function fromBandValue(value: string): AdultWeightBand | null {
+  return value === 'under-20kg' || value === 'over-20kg' ? value : null;
+}
 
 /**
  * The label a select would show for a stored value, so a collapsed row and its
@@ -1861,6 +1887,42 @@ export function IntakeWizard() {
               disabled={busy}
               onChange={(e) => update({ commitments: toList(e.target.value) })}
             />
+          </label>
+
+          {/* The adult-weight band, asked in the AAHA chart's own words:
+              "How much do you think your dog will weigh when fully grown?"
+              The wording is load-bearing, not decorative — it is the only
+              thing separating this from "Tamaño" and "Peso aproximado" on the
+              first step, and read as "how big is this dog" it would duplicate
+              `size` and carry nothing.
+
+              The hint is what makes it answerable by someone who is not a
+              vet, which is who does intake: for a dog that has finished
+              growing, the answer is simply what it weighs today. It is only a
+              guess for a puppy — and a puppy is the only animal the answer
+              changes anything for.
+
+              Never prefilled and never offered by the model: see the note on
+              PREFILLABLE in src/lib/intake.ts. */}
+          <label className="auth__field">
+            <span className="t-label">¿Cuánto crees que pesará de adulto?</span>
+            <select
+              value={toBandValue(draft.expectedAdultWeightBand)}
+              disabled={busy}
+              onChange={(e) =>
+                update({ expectedAdultWeightBand: fromBandValue(e.target.value) })
+              }
+            >
+              {ADULT_BAND_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <span className="auth__hint">
+              Si ya terminó de crecer, es lo que pesa hoy. En un cachorro es una estimación: sirve
+              para saber cuándo conviene la esterilización.
+            </span>
           </label>
 
           {/* A SELECT, not a checkbox, and that is the point: a checkbox has

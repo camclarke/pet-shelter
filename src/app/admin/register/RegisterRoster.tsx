@@ -54,9 +54,14 @@ import {
 } from '@/lib/register-admin';
 import { listDrafts } from '@/lib/pets-admin';
 import { needsAttention } from '@/lib/sterilization';
+import {
+  ageRangeToday,
+  sterilizationTiming,
+  type TimingResult,
+} from '@/lib/sterilization-timing';
 import { formatDate } from '@/lib/date-input';
 import { t } from '@/i18n';
-import type { PetSex, RegisterEntry, RegisterStatus } from '@/lib/types';
+import type { AdultWeightBand, PetSex, RegisterEntry, RegisterStatus } from '@/lib/types';
 
 type Tab = 'resident' | 'all';
 
@@ -135,6 +140,8 @@ export function RegisterRoster() {
   const [draftPhotos, setDraftPhotos] = useState<Map<string, number>>(new Map());
   /** petId → its draft's three-state sterilization. Absent means no draft. */
   const [draftSterilized, setDraftSterilized] = useState<Map<string, boolean | null>>(new Map());
+  /** petId → the adult-weight band a person chose. Absent or null means unknown. */
+  const [draftBand, setDraftBand] = useState<Map<string, AdultWeightBand | null>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>('resident');
@@ -198,6 +205,12 @@ export function RegisterRoster() {
       // keeping track of unaltered animals, and a boolean could not express
       // "nobody wrote it down" — see src/lib/sterilization.ts.
       setDraftSterilized(new Map(drafts.map((draft) => [draft.id, draft.sterilized ?? null])));
+      // Still the same single read. `?? null` because every read path here is a
+      // cast: a draft written before this field existed has it UNDEFINED at
+      // runtime while TypeScript believes it is present.
+      setDraftBand(
+        new Map(drafts.map((draft) => [draft.id, draft.expectedAdultWeightBand ?? null])),
+      );
     } catch (caught) {
       console.error('[register] could not load', caught);
       const code = (caught as { code?: string })?.code;
@@ -231,6 +244,41 @@ export function RegisterRoster() {
       return needsAttention(draftSterilized.get(entry.petId));
     },
     [draftSterilized],
+  );
+
+  /**
+   * "Now", fixed when the register loads rather than read on every render, so
+   * an animal's computed age does not drift while someone scrolls the list.
+   */
+  const loadedAt = useMemo(() => Date.now(), [entries]);
+
+  /**
+   * Where one row sits against the AAHA chart — for the list a vet visit
+   * needs. No Firestore read: species, sex, age at intake and the intake date
+   * are all on the register entry this screen already holds, and the band is
+   * on the draft it already read.
+   *
+   * Age is computed at READ time from age-at-intake plus elapsed time, and
+   * never written back. That is a different act from storing it as somebody's
+   * answer, which the importer rightly refused to do.
+   */
+  const timingFor = useCallback(
+    (entry: RegisterEntry): TimingResult => {
+      const age = ageRangeToday(
+        entry.ageAtIntakeMinMonths,
+        entry.ageAtIntakeMaxMonths,
+        entry.intakeDate ? entry.intakeDate.toMillis() : null,
+        loadedAt,
+      );
+      return sterilizationTiming({
+        species: entry.species,
+        sex: entry.sex,
+        ageMonthsMin: age?.min ?? null,
+        ageMonthsMax: age?.max ?? null,
+        band: entry.petId ? (draftBand.get(entry.petId) ?? null) : null,
+      });
+    },
+    [draftBand, loadedAt],
   );
 
   /**
@@ -290,6 +338,17 @@ export function RegisterRoster() {
         (entry) => entry.status === 'in-shelter' && awaitingSterilization(entry),
       ).length,
     [entries, awaitingSterilization],
+  );
+
+  /** Does any animal on screen still have the female-over-20-kg choice open? */
+  const showFemaleOptions = useMemo(
+    () =>
+      pendingSterilization &&
+      visible.some((entry) => {
+        const r = timingFor(entry);
+        return r.kind !== 'refused' && r.femaleOptions;
+      }),
+    [pendingSterilization, visible, timingFor],
   );
 
   const residentCount = useMemo(
@@ -707,8 +766,18 @@ export function RegisterRoster() {
           {pendingSterilization && (
             <p className="auth__hint">
               Animalitos que todavía no podemos dar por esterilizados: los que dicen que no y los
-              que nadie anotó. La lista sólo cuenta fichas sin publicar.
+              que nadie anotó. La lista sólo cuenta fichas sin publicar. Cada fila dice dónde queda
+              según la guía AAHA de 2019, para preparar la visita del veterinario: la decisión de
+              operar es suya.
             </p>
+          )}
+
+          {/* ONCE, not per row. It is a long paragraph, and repeating it under
+              every young female would bury the list it is meant to explain.
+              Shown only while a visible female still has that choice open —
+              for an adult female both options are already in the past. */}
+          {pendingSterilization && showFemaleOptions && (
+            <p className="auth__hint">{t.sterilizationFemaleOptions}</p>
           )}
         </div>
 
@@ -756,6 +825,23 @@ export function RegisterRoster() {
                       )}
                       <span className="t-data">{rowStateText(entry)}</span>
                     </span>
+
+                    {/* Only in the unaltered-animals view — the list a vet
+                        visit works from. The default roster, which the photo
+                        session uses, stays exactly as it was: one more line on
+                        42 rows is a long scroll on a phone for a question
+                        nobody is asking during a photo session.
+
+                        A direct child of the row, on its own full-width line,
+                        rather than a fourth line in the text column. Measured
+                        at 360px: inside the column the sentence wrapped into
+                        the ~150px beside the number and the tags and the row
+                        reached 210–230px; across the full row it is 192px. */}
+                    {pendingSterilization && (
+                      <span className="register-row__timing">
+                        {t.sterilizationTiming(timingFor(entry))}
+                      </span>
+                    )}
                   </button>
                 </li>
               );

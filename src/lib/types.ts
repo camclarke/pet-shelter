@@ -49,6 +49,12 @@ export type PetStatus =
 export type PetSex = 'male' | 'female';
 export type PetSize = 'small' | 'medium' | 'large';
 
+/**
+ * Which side of 20 kg a dog will land on WHEN FULLY GROWN — the one line the
+ * AAHA 2019 canine spay/neuter chart splits on. See src/lib/sterilization-timing.ts.
+ */
+export type AdultWeightBand = 'under-20kg' | 'over-20kg';
+
 /** How precisely a location may be revealed. Never widen without owner consent. */
 export type LocationPrecision = 'exact' | 'approx';
 
@@ -112,6 +118,24 @@ export interface Pet {
 
   sex: PetSex;
   size: PetSize;
+
+  /**
+   * A PROJECTION, not a description — and that is the only thing to know.
+   *
+   * `size` just above and `weightKgMin/Max` below both describe the animal
+   * NOW. This answers the AAHA chart's own question, verbatim: "How much do you
+   * think your dog will weigh when fully grown?" For an adult the two agree.
+   * For a puppy — the only animal the answer changes anything for — they can
+   * differ two- or three-fold, which is why `size` cannot stand in for it.
+   *
+   * A person's judgement, three-state, and never filled by the model or
+   * derived from a scale: a measured weight above 20 kg is shown as a CONFLICT
+   * beside it (see `bandConflict`), because mass is not frame.
+   *
+   * Public tier because it is a size class, not personal data — it reveals no
+   * more than `size` and the weight range already do.
+   */
+  expectedAdultWeightBand: AdultWeightBand | null;
 
   /**
    * What it LOOKS like. Both public, both nullable, and separate on purpose:

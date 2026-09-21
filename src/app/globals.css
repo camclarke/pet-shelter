@@ -3389,6 +3389,21 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+/* Where the animal sits against the AAHA chart, shown only in the
+   unaltered-animals view. Plain body type rather than `.t-data`: `.t-data` is
+   uppercase and letter-spaced, which is right for a date and a sex but turns a
+   full Spanish sentence into something nobody reads. Full ink, not muted — it
+   is the reason the vet opened this view. */
+.register-row__timing {
+  /* Its own line across the whole row — the row is `flex-wrap: wrap`. */
+  flex: 1 0 100%;
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: left;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
+
 .register-row__tags {
   flex: 0 0 auto;
   margin-left: auto;

@@ -15,6 +15,7 @@
 
 import { normalizeMicrochipCode, type MicrochipStandard } from './microchip';
 import type {
+  AdultWeightBand,
   PetPhotoSlot,
   PetSex,
   PetSize,
@@ -147,6 +148,15 @@ export interface PetDraft {
    * that the paper never said.
    */
   sterilized: boolean | null;
+  /**
+   * Beside `sterilized` on purpose, and NOT beside `size` on the identity
+   * step. Among "Tamaño", "Peso aproximado" and "Raza" it would read as a
+   * third description of the dog and get answered as one — grande → over,
+   * pequeño → under — at which point it carries nothing `size` did not. Here
+   * it reads as what it is: an input to the sterilization question.
+   * Three-state; see `AdultWeightBand` in types.ts.
+   */
+  expectedAdultWeightBand: AdultWeightBand | null;
   goodWithChildren: boolean | null;
   goodWithOtherPets: boolean | null;
 
@@ -267,6 +277,8 @@ export function draftDefaults(id: string): PetDraft {
     commitments: [],
     // Unknown, not "no". A fresh draft has been told nothing about this animal.
     sterilized: null,
+    // Unknown, not a guess — and never derived from `size` or the photo range.
+    expectedAdultWeightBand: null,
     goodWithChildren: null,
     goodWithOtherPets: null,
     slug: '',
@@ -489,11 +501,21 @@ export function draftProgress(draft: PetDraft): { done: number; total: number } 
  * the animal, and prefilling half of it would leave bounds describing a
  * different estimate than the number beside them.
  *
- * ⚠️ `sterilized` is deliberately ABSENT, so it can never be prefilled. It is a
- * boolean that defaults to false, which means "no" and "nobody has said" are
- * the same stored value — there is no empty state to detect, so the only safe
- * treatment is the one `SUGGESTION_POLICY` already gives it: offered, accepted
- * by a person, never written by this function.
+ * ⚠️ `sterilized` is deliberately ABSENT, so it can never be prefilled — and
+ * the reason changed on 2026-09-20. It used to say this was because the field
+ * was a boolean defaulting to false, with no empty state to detect. PR #64 made
+ * it `boolean | null` defaulting to null, so an empty state now exists and that
+ * premise is false; this comment went stale in that PR and is corrected here.
+ * The conclusion survives on different grounds: a photograph can show evidence
+ * of "yes" (a spay scar) but its absence is not evidence of "no", so a model's
+ * reading is only ever OFFERED and accepted by a person.
+ *
+ * `expectedAdultWeightBand` is absent for a stronger reason still: it is a
+ * projection about an animal that does not weigh that yet, and the photo
+ * estimate it would come from describes the animal today. `decideWeight`'s
+ * guard is a ratio, so 8–10 kg on a four-month-old passes it cleanly and would
+ * suggest "under 20 kg" for a dog heading to 35. Omission from this table IS
+ * the enforcement — `shouldPrefill` returns false for any key not listed.
  */
 const PREFILLABLE: Readonly<
   Record<string, { keys: readonly (keyof PetDraft)[]; isEmpty: (draft: PetDraft) => boolean }>
