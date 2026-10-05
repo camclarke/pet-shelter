@@ -346,11 +346,74 @@ export function nextDue<T extends Confirmable & { nextDueAt: number | null }>(
   return due.reduce((soonest, r) => (r.nextDueAt! < soonest.nextDueAt! ? r : soonest));
 }
 
+/**
+ * Which repeating thing a record is a dose OF, or null when it is not one.
+ *
+ * Only vaccinations and dewormings repeat under one name. A second
+ * "Consulta" is not the follow-up of the first — it may be about something
+ * else entirely — so every other kind has no series and its dates stand alone.
+ *
+ * Rabies collapses to one key through `isRabiesRecord`, because a campaign card
+ * says "Antirrábica" where a vet types "Rabia". Every other name is matched as
+ * written, folded for accents, case and spacing.
+ *
+ * ⚠️ Two different words for one product ("Óctuple", "Octavalente") do NOT
+ * match, on purpose. No product registry exists to say they are the same, and
+ * the two ways of being wrong are not equal: an unmatched pair leaves an old
+ * due date showing, which a person can see and act on; a wrong match would hide
+ * a due date that was never met.
+ */
+export function doseSeriesKey(kind: MedicalRecordKind | null, name: string): string | null {
+  if (kind !== 'vaccination' && kind !== 'deworming') return null;
+  if (isRabiesRecord(kind, name)) return 'vaccination:rabies';
+  const folded = name
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  return folded ? `${kind}:${folded}` : null;
+}
+
+/**
+ * The records whose dates a LATER dose of the same thing has answered.
+ *
+ * A due date says "come back on this day". Once the animal did come back, and
+ * that dose is on record, the older record's due date and its declared
+ * protection are history: they are still shown, and they conclude nothing.
+ * Without this, every finished series would leave its first dose reading
+ * "VENCIDA" for the rest of the animal's life.
+ *
+ * Derived from the records, never marked by a person: a link someone has to
+ * remember to set is a link that goes unset.
+ *
+ * "Later" is a strictly later dose date. A dose given BEFORE the due date still
+ * answers it. Two records on the same day answer neither.
+ *
+ * ⚠️ Applies the review gate itself, on both sides: an unconfirmed reading
+ * neither answers a record nor is answered.
+ */
+export function answeredByLaterDose<T extends Confirmable & SortableRecord & { name: string }>(
+  records: readonly T[]
+): Set<T> {
+  const latest = new Map<string, number>();
+  const dosed: Array<{ record: T; key: string; at: number }> = [];
+  for (const record of confirmedOnly(records)) {
+    const key = doseSeriesKey(record.kind, record.name);
+    if (key === null || record.performedAt === null) continue;
+    dosed.push({ record, key, at: record.performedAt });
+    latest.set(key, Math.max(latest.get(key) ?? -Infinity, record.performedAt));
+  }
+  return new Set(dosed.filter((d) => d.at < latest.get(d.key)!).map((d) => d.record));
+}
+
 export interface RecordSignals {
   /** A booster that is past due. */
   overdue: boolean;
   /** Declared protection that has run out. */
   lapsed: boolean;
+  /** A later dose of the same thing is on record, so neither flag applies. */
+  answered: boolean;
 }
 
 /**
@@ -363,12 +426,20 @@ export interface RecordSignals {
  */
 export function recordSignals(
   record: Confirmable & { nextDueAt: number | null; validUntil: number | null },
-  now: number = Date.now()
+  now: number = Date.now(),
+  /**
+   * Whether `summarizeMedicalHistory().answered` holds this record. One record
+   * cannot know about the others, so the caller passes it in — and a row that
+   * omits it would say "VENCIDA" where the summary above it says nothing.
+   */
+  answered: boolean = false
 ): RecordSignals {
-  if (!isConfirmed(record)) return { overdue: false, lapsed: false };
+  if (!isConfirmed(record)) return { overdue: false, lapsed: false, answered: false };
+  if (answered) return { overdue: false, lapsed: false, answered: true };
   return {
     overdue: isOverdue(record.nextDueAt, now),
     lapsed: protectionLapsed(record.validUntil, now),
+    answered: false,
   };
 }
 
@@ -394,6 +465,12 @@ export interface MedicalSummary<T> {
   overdue: T[];
   /** Declared protection that has ended, earliest end first. */
   lapsed: T[];
+  /**
+   * Records a later dose of the same thing has answered — see
+   * `answeredByLaterDose`. Never in `nextDue`, `overdue` or `lapsed`. A row
+   * passes its membership here to `recordSignals`.
+   */
+  answered: T[];
   /**
    * The most recent CONFIRMED rabies dose. The one input any future rabies
    * validity, travel or "vacunado" signal must be computed from — never from
@@ -428,18 +505,25 @@ export function summarizeMedicalHistory<T extends SummarizableRecord>(
   // a second date comparison. `isOverdue` subtracts the clock-skew tolerance; a
   // fresh `>= now` here would drop a record sitting inside that window from
   // both lists, and the summary would then disagree with the row's own flag.
-  const overdue = counted
+  // A date a later dose has answered concludes nothing: not next, not overdue,
+  // not lapsed. `latestRabies` above is unaffected — the latest dose is by
+  // definition the one nothing answered.
+  const answered = answeredByLaterDose(counted);
+  const standing = counted.filter((r) => !answered.has(r));
+
+  const overdue = standing
     .filter((r) => isOverdue(r.nextDueAt, now))
     .sort((a, b) => a.nextDueAt! - b.nextDueAt!);
   const pastDue = new Set<T>(overdue);
 
   return {
     awaitingReview: awaitingReview(records).length,
-    nextDue: nextDue(counted.filter((r) => !pastDue.has(r))),
+    nextDue: nextDue(standing.filter((r) => !pastDue.has(r))),
     overdue,
-    lapsed: counted
+    lapsed: standing
       .filter((r) => protectionLapsed(r.validUntil, now))
       .sort((a, b) => a.validUntil! - b.validUntil!),
+    answered: counted.filter((r) => answered.has(r)),
     latestRabies,
   };
 }

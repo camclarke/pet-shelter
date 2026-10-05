@@ -1525,6 +1525,8 @@ export const es: Messages = {
 
   nextDueSummary: (name: string, dateText: string) => `Lo próximo: ${name}, el ${dateText}.`,
 
+  dueAnsweredByLaterDose: 'ya hay una dosis posterior registrada',
+
   yesNo: (value) => (value ? 'Sí' : 'No'),
 
   applicationStatusLabel: (status) => APPLICATION_STATUS[status],

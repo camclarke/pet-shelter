@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   MEDICAL_PROVENANCE_FIELDS,
+  answeredByLaterDose,
   byMostRecent,
+  doseSeriesKey,
   isRabiesRecord,
   medicalDraftDefaults,
   medicalEditFields,
@@ -244,6 +246,150 @@ test('the summary does not reorder the list it was given', () => {
   ];
   summarizeMedicalHistory(given, NOW);
   assert.deepEqual(given.map((r) => r.id), ['recent', 'oldest']);
+});
+
+// ─── a later dose answers an earlier one's dates ─────────────────────────────
+
+test('a due date met by a later dose of the same vaccine is not overdue', () => {
+  const first = record({ id: 'dose1', performedAt: NOW - 400 * DAY, nextDueAt: NOW - 380 * DAY });
+  const second = record({ id: 'dose2', performedAt: NOW - 379 * DAY });
+  const s = summarizeMedicalHistory([first, second], NOW);
+  assert.deepEqual(s.overdue, []);
+  assert.equal(s.nextDue, null);
+  assert.deepEqual(s.answered.map((r) => r.id), ['dose1']);
+  // Control: without the second dose the same record IS overdue.
+  assert.deepEqual(summarizeMedicalHistory([first], NOW).overdue.map((r) => r.id), ['dose1']);
+});
+
+test('the latest dose keeps its own due date, overdue or ahead', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'dose1', performedAt: NOW - 800 * DAY, nextDueAt: NOW - 435 * DAY }),
+      record({ id: 'dose2', performedAt: NOW - 430 * DAY, nextDueAt: NOW - 65 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['dose2']);
+});
+
+test('a later dose answers lapsed protection too', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'dose1', performedAt: NOW - 800 * DAY, validUntil: NOW - 435 * DAY }),
+      record({ id: 'dose2', performedAt: NOW - 430 * DAY, validUntil: NOW + 300 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.lapsed, []);
+});
+
+test('a dose given before the due date still answers it', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'dose1', performedAt: NOW - 400 * DAY, nextDueAt: NOW - 30 * DAY }),
+      record({ id: 'early', performedAt: NOW - 60 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue, []);
+});
+
+test('a different vaccine does not answer it', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'octa', name: 'Octavalente', performedAt: NOW - 400 * DAY, nextDueAt: NOW - 30 * DAY }),
+      // Deliberately NOT rabies: that has its own key, so it would stay apart
+      // even if the name were ignored, and this test would prove nothing.
+      record({ id: 'quint', name: 'Quíntuple', performedAt: NOW - 10 * DAY }),
+      record({ id: 'rabies', name: 'Antirrábica', performedAt: NOW - 5 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['octa']);
+  assert.deepEqual(s.answered, []);
+});
+
+test('the same name under another kind does not answer it', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'vax', name: 'Refuerzo', performedAt: NOW - 400 * DAY, nextDueAt: NOW - 30 * DAY }),
+      record({ id: 'worm', kind: 'deworming', name: 'Refuerzo', performedAt: NOW - 10 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['vax']);
+});
+
+test('an UNCONFIRMED later dose answers nothing', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'dose1', performedAt: NOW - 400 * DAY, nextDueAt: NOW - 30 * DAY }),
+      record({ id: 'model', performedAt: NOW - 10 * DAY, confirmedBy: null }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['dose1']);
+  assert.deepEqual(s.answered, []);
+});
+
+test('two doses on the same day answer neither', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'a', performedAt: NOW - 400 * DAY, nextDueAt: NOW - 30 * DAY }),
+      record({ id: 'b', performedAt: NOW - 400 * DAY, nextDueAt: NOW - 20 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['a', 'b']);
+});
+
+test('"Rabia" and "Antirrábica" are one series; spelling, case and spacing do not split one', () => {
+  assert.equal(doseSeriesKey('vaccination', 'Rabia'), doseSeriesKey('vaccination', 'ANTIRRÁBICA'));
+  assert.equal(
+    doseSeriesKey('vaccination', '  óctuple   canina '),
+    doseSeriesKey('vaccination', 'Octuple Canina')
+  );
+  assert.notEqual(doseSeriesKey('vaccination', 'Octavalente'), doseSeriesKey('vaccination', 'Óctuple'));
+});
+
+test('only vaccinations and dewormings form a series', () => {
+  assert.equal(doseSeriesKey('deworming', 'Ivermectina'), 'deworming:ivermectina');
+  for (const kind of ['consultation', 'surgery', 'treatment', 'sterilization', 'serology'] as const) {
+    assert.equal(doseSeriesKey(kind, 'Control'), null, kind);
+  }
+  assert.equal(doseSeriesKey(null, 'Rabia'), null);
+  assert.equal(doseSeriesKey('vaccination', '   '), null);
+});
+
+test('a second consultation does not answer the first one\'s follow-up date', () => {
+  const visit = (id: string, over: object) =>
+    ({ ...record({ id, name: 'Control' }), kind: 'consultation' as const, ...over });
+  const s = summarizeMedicalHistory(
+    [
+      visit('first', { performedAt: NOW - 400 * DAY, nextDueAt: NOW - 30 * DAY }),
+      visit('second', { performedAt: NOW - 10 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['first']);
+});
+
+test('a row told its record was answered shows neither flag, and says so', () => {
+  const r = record({ nextDueAt: NOW - 30 * DAY, validUntil: NOW - 30 * DAY });
+  assert.deepEqual(recordSignals(r, NOW, true), { overdue: false, lapsed: false, answered: true });
+  // Control: the same record, not answered.
+  assert.deepEqual(recordSignals(r, NOW), { overdue: true, lapsed: true, answered: false });
+  // The gate still comes first: an unconfirmed record is never "answered".
+  assert.equal(recordSignals({ ...r, confirmedBy: null }, NOW, true).answered, false);
+});
+
+test('answeredByLaterDose applies the gate itself, on a mixed list', () => {
+  const answered = answeredByLaterDose([
+    record({ id: 'dose1', performedAt: NOW - 400 * DAY }),
+    record({ id: 'model-old', performedAt: NOW - 500 * DAY, confirmedBy: null }),
+    record({ id: 'dose2', performedAt: NOW - 10 * DAY }),
+  ]);
+  assert.deepEqual([...answered].map((r) => r.id), ['dose1']);
 });
 
 test('a candidate with no kind and no date does not break the summary', () => {
