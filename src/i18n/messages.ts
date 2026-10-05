@@ -647,6 +647,12 @@ export interface Messages {
   /** The soonest confirmed booster: "Lo próximo: Quíntuple, el 14 feb 2026." */
   nextDueSummary(name: string, dateText: string): string;
 
+  /**
+   * Beside an older record's due date once a later dose of the same thing is
+   * on record. States the fact only; it must not say the series is complete.
+   */
+  readonly dueAnsweredByLaterDose: string;
+
   // ── adoption applications ─────────────────────────────────────────────────
 
   /** "Sí" / "No", for a stored yes-or-no answer. */

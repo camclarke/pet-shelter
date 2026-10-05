@@ -59,6 +59,23 @@ test('the medical panel draws row flags through the gate, never around it', () =
   assert.equal(/\bprotectionLapsed\(/.test(src), false, 'protectionLapsed() bypasses the gate');
 });
 
+test('each row is told whether a later dose answered it, from the summary', () => {
+  // PR #26 is the precedent: the pure layer computed a value and the screen
+  // dropped it with every test green. Here a dropped argument means a row says
+  // "VENCIDA" for a dose the summary above it treats as answered.
+  const src = code(PANEL);
+  assert.ok(
+    /new Set\(summary\?\.answered\)/.test(src),
+    'the answered set must come from the summary'
+  );
+  assert.ok(
+    /recordSignals\(r,\s*undefined,\s*answered\.has\(r\)\)/.test(src),
+    'recordSignals() must receive answered.has(r)'
+  );
+  assert.equal(/\bansweredByLaterDose\(/.test(src), false, 'go through the summary');
+  assert.ok(/signals\.answered[^\n]*t\.dueAnsweredByLaterDose/.test(src), 'the row must say so');
+});
+
 test('the medical panel computes its summary through summarizeMedicalHistory', () => {
   const src = code(PANEL);
   assert.ok(/summarizeMedicalHistory\(/.test(src));

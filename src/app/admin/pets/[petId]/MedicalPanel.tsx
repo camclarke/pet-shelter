@@ -175,6 +175,7 @@ export default function MedicalPanel({
   const errors = validateMedicalDraft(draft);
   const warnings = medicalWarnings(draft, { birthdateApprox, microchipImplantedAt });
   const summary = records ? summarizeMedicalHistory(records) : null;
+  const answered = new Set(summary?.answered);
   // Candidates, plus — defence in depth — any record in `medical` with no confirmer.
   const waiting = (candidates?.length ?? 0) + (summary?.awaitingReview ?? 0);
 
@@ -452,7 +453,9 @@ export default function MedicalPanel({
       {records !== null && records.length > 0 && (
         <ul className="admin-list__items">
           {records.map((r) => {
-            const signals = recordSignals(r);
+            // ⚠️ The third argument is what keeps a row and the summary above it
+            // in agreement: a dose a later dose has answered is not "VENCIDA".
+            const signals = recordSignals(r, undefined, answered.has(r));
             return (
               <li
                 key={r.id}
@@ -500,6 +503,7 @@ export default function MedicalPanel({
                     <span className="t-data">
                       Próxima: {formatDate(r.nextDueAt)}
                       {signals.overdue ? ' · VENCIDA' : ''}
+                      {signals.answered ? ` · ${t.dueAnsweredByLaterDose}` : ''}
                     </span>
                   )}
 
