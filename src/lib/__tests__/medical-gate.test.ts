@@ -141,6 +141,111 @@ test('the summary counts what is awaiting review, and computes nothing from it',
   assert.deepEqual(s.overdue, []);
 });
 
+// ─── "next" never means a date already gone ──────────────────────────────────
+//
+// Dates here are literals around NOW. The skew tolerance is pinned as a number
+// (5 minutes) rather than imported, so a test cannot agree with the code by
+// reading the same constant.
+
+const MINUTE = 60_000;
+
+test('a past-due booster is never the summary next-due; it is in overdue', () => {
+  const s = summarizeMedicalHistory([record({ id: 'late', nextDueAt: NOW - 30 * DAY })], NOW);
+  assert.equal(s.nextDue, null);
+  assert.deepEqual(s.overdue.map((r) => r.id), ['late']);
+});
+
+test('with one booster past due and one ahead, next-due is the one ahead', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'late', nextDueAt: NOW - 30 * DAY }),
+      record({ id: 'ahead', nextDueAt: NOW + 60 * DAY }),
+      record({ id: 'further', nextDueAt: NOW + 90 * DAY }),
+    ],
+    NOW
+  );
+  assert.equal(s.nextDue?.id, 'ahead');
+  assert.deepEqual(s.overdue.map((r) => r.id), ['late']);
+});
+
+test('a booster due inside the clock-skew window is still next, and in exactly one list', () => {
+  // Two minutes ago: past by the wall clock, not overdue by the 5-minute
+  // tolerance. A second comparison against `now` would lose it from both.
+  const s = summarizeMedicalHistory([record({ id: 'edge', nextDueAt: NOW - 2 * MINUTE })], NOW);
+  assert.equal(s.nextDue?.id, 'edge');
+  assert.deepEqual(s.overdue, []);
+  // Control: six minutes ago is past the tolerance, and moves across.
+  const later = summarizeMedicalHistory([record({ id: 'edge', nextDueAt: NOW - 6 * MINUTE })], NOW);
+  assert.equal(later.nextDue, null);
+  assert.deepEqual(later.overdue.map((r) => r.id), ['edge']);
+});
+
+test('every dated confirmed record is either overdue or not earlier than next-due', () => {
+  const dated = [
+    record({ id: 'a', nextDueAt: NOW - 400 * DAY }),
+    record({ id: 'b', nextDueAt: NOW - 1 * DAY }),
+    record({ id: 'c', nextDueAt: NOW + 1 * DAY }),
+    record({ id: 'd', nextDueAt: NOW + 400 * DAY }),
+  ];
+  const s = summarizeMedicalHistory([...dated, record({ id: 'undated' })], NOW);
+  const overdueIds = new Set(s.overdue.map((r) => r.id));
+  assert.equal(s.nextDue?.id, 'c');
+  for (const r of dated) {
+    assert.ok(
+      overdueIds.has(r.id) || r.nextDueAt! >= s.nextDue!.nextDueAt!,
+      `${r.id} is neither overdue nor upcoming`
+    );
+  }
+  assert.equal(overdueIds.has('undated'), false);
+});
+
+test('overdue is ordered longest overdue first, whatever order the records arrive in', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'recent', nextDueAt: NOW - 3 * DAY }),
+      record({ id: 'oldest', nextDueAt: NOW - 300 * DAY }),
+      record({ id: 'middle', nextDueAt: NOW - 30 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['oldest', 'middle', 'recent']);
+});
+
+test('lapsed is ordered earliest end first', () => {
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'recent', validUntil: NOW - 3 * DAY }),
+      record({ id: 'oldest', validUntil: NOW - 300 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.lapsed.map((r) => r.id), ['oldest', 'recent']);
+});
+
+test('lapsed reads validUntil and overdue reads nextDueAt; neither stands in for the other', () => {
+  const s = summarizeMedicalHistory(
+    [
+      // Come-back date gone, declared protection still running.
+      record({ id: 'due-only', nextDueAt: NOW - 30 * DAY, validUntil: NOW + 700 * DAY }),
+      // Declared protection ended, come-back date still ahead.
+      record({ id: 'lapsed-only', nextDueAt: NOW + 30 * DAY, validUntil: NOW - 30 * DAY }),
+    ],
+    NOW
+  );
+  assert.deepEqual(s.overdue.map((r) => r.id), ['due-only']);
+  assert.deepEqual(s.lapsed.map((r) => r.id), ['lapsed-only']);
+  assert.equal(s.nextDue?.id, 'lapsed-only');
+});
+
+test('the summary does not reorder the list it was given', () => {
+  const given = [
+    record({ id: 'recent', nextDueAt: NOW - 3 * DAY, validUntil: NOW - 3 * DAY }),
+    record({ id: 'oldest', nextDueAt: NOW - 300 * DAY, validUntil: NOW - 300 * DAY }),
+  ];
+  summarizeMedicalHistory(given, NOW);
+  assert.deepEqual(given.map((r) => r.id), ['recent', 'oldest']);
+});
+
 test('a candidate with no kind and no date does not break the summary', () => {
   const s = summarizeMedicalHistory(
     [record({ kind: null, name: '', performedAt: null, confirmedBy: null })],
