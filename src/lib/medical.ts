@@ -330,6 +330,10 @@ export function isRabiesRecord(kind: MedicalRecordKind | null, name: string): bo
  * Ignores records with no due date rather than treating them as due now — a
  * consultation has no booster and must not appear in a reminder list.
  *
+ * ⚠️ Knows nothing about today: it returns the soonest date even when that date
+ * is past. `summarizeMedicalHistory` hands it only records that are not
+ * overdue, and that is the entry point a screen should use.
+ *
  * ⚠️ Ignores UNCONFIRMED records, here rather than at the call site. A model
  * that misread "2026" as "2025" would otherwise put a booster nobody has
  * checked against the card at the top of a reminder list.
@@ -377,8 +381,18 @@ export interface SummarizableRecord extends Confirmable, SortableRecord {
 export interface MedicalSummary<T> {
   /** How many records a person still has to confirm. Shown, never computed from. */
   awaitingReview: number;
+  /**
+   * The soonest booster that is NOT already in `overdue`, or null.
+   *
+   * ⚠️ Until 2026-10-05 this was the soonest due date of any kind, past ones
+   * included, so the panel announced "Lo próximo: … el {a date already gone}"
+   * above a row that said "VENCIDA". Nothing showed it because no record had a
+   * due date. A past date is never "next"; it is in `overdue`.
+   */
   nextDue: T | null;
+  /** Past-due boosters, longest overdue first. */
   overdue: T[];
+  /** Declared protection that has ended, earliest end first. */
   lapsed: T[];
   /**
    * The most recent CONFIRMED rabies dose. The one input any future rabies
@@ -392,9 +406,9 @@ export interface MedicalSummary<T> {
  * Everything computed across one animal's history, from confirmed records only.
  *
  * This is the sanctioned entry point for any aggregate — a reminder, a badge,
- * a public "vacunado" line. Nothing computes one today (checked 2026-09-12:
- * no public module reads `medical` at all), which is exactly why it exists
- * now: the first caller inherits the gate instead of having to remember it.
+ * a public "vacunado" line. Its one caller today is the admin `MedicalPanel`;
+ * no public module reads `medical` at all. It exists so that every later
+ * caller inherits the gate instead of having to remember it.
  */
 export function summarizeMedicalHistory<T extends SummarizableRecord>(
   records: readonly T[],
@@ -410,11 +424,22 @@ export function summarizeMedicalHistory<T extends SummarizableRecord>(
     }
   }
 
+  // ⚠️ "Upcoming" is defined as NOT IN `overdue`, by membership, rather than by
+  // a second date comparison. `isOverdue` subtracts the clock-skew tolerance; a
+  // fresh `>= now` here would drop a record sitting inside that window from
+  // both lists, and the summary would then disagree with the row's own flag.
+  const overdue = counted
+    .filter((r) => isOverdue(r.nextDueAt, now))
+    .sort((a, b) => a.nextDueAt! - b.nextDueAt!);
+  const pastDue = new Set<T>(overdue);
+
   return {
     awaitingReview: awaitingReview(records).length,
-    nextDue: nextDue(counted),
-    overdue: counted.filter((r) => isOverdue(r.nextDueAt, now)),
-    lapsed: counted.filter((r) => protectionLapsed(r.validUntil, now)),
+    nextDue: nextDue(counted.filter((r) => !pastDue.has(r))),
+    overdue,
+    lapsed: counted
+      .filter((r) => protectionLapsed(r.validUntil, now))
+      .sort((a, b) => a.validUntil! - b.validUntil!),
     latestRabies,
   };
 }
