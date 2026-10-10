@@ -26,6 +26,23 @@ terraform
 *.tfvars
 backend.hcl
 
+# Everything .gitignore keeps out of the repo must stay out of the image too.
+# CI builds from a clean checkout where these do not exist, but a local
+# `docker build` or `gcloud builds submit` runs in a working tree that has
+# them — and `COPY . .` would bake in the shelter's paper register (an
+# adopter's name, phone and home coordinates), real animal photos and
+# service-account files. Keep this block at least as strict as .gitignore.
+_files
+_local
+_e2e
+seed
+*.tsbuildinfo
+next-env.d.ts
+*-service-account*.json
+serviceAccountKey.json
+.firebaserc.local
+ui-debug.log
+
 # VCS and tooling.
 .git
 .gitignore

@@ -28,12 +28,26 @@ name: Deploy
 on:
   push:
     branches: [master]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'design/**'
-      - 'terraform/**' # infrastructure is applied deliberately, by a human
-      - 'LICENSE'
+    # An allow-list of what can change the IMAGE, replacing the old ignore-list.
+    # An ignore-list deploys for every new folder by accident; this one deploys
+    # only for files the Dockerfile's build actually reads. Rules, Terraform,
+    # docs, scripts and design assets do not rebuild the container, and
+    # infrastructure is applied deliberately, by a human.
+    #
+    # ⚠️ A merge that touches none of these does NOT deploy, and a deploy that
+    # fails is no longer "repaired" by the next docs merge. Re-run it from the
+    # Actions tab, or start it by hand (`workflow_dispatch` below).
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 # One deploy at a time. Two overlapping runs would race on the same service and
@@ -60,7 +74,8 @@ jobs:
   deploy:
     name: Build, push, deploy
     needs: ci
-    runs-on: ubuntu-latest
+    # Same switch as ci.yml: one repository variable moves every job.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
 
     permissions:
