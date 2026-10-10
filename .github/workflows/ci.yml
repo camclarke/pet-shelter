@@ -9,19 +9,59 @@
 # (That fallback is the whole reason `revalidate` is not optional here — see
 # the project log, 2026-08-12.)
 
+#
+# ── Minutes ──────────────────────────────────────────────────────────────────
+# This repo is public, so GitHub's own runners cost nothing today. The filters
+# below exist for the day it goes private (2,000 free minutes a month, and each
+# job is rounded UP to a whole minute). Replayed over the 41 merges since
+# 2026-09-01: CI would run on 37 and deploy on 36, against 39 deploys before.
+#
+#  - `pull_request` only. There is deliberately no `push` trigger, so a commit
+#    on a branch with an open PR is never checked twice.
+#  - `paths` lists every file the checks can read. The tests read
+#    firestore.rules, storage.rules and scripts/ at the repo root, and
+#    scripts/fixtures, so those are in. Add a path here the day a test starts
+#    reading a new one, or a change to it will skip the test that guards it.
+#  - A docs-only PR therefore shows "no checks reported". That is expected, not
+#    a stuck run. A deploy that fails is NOT repaired by the next docs merge any
+#    more (docs no longer deploy): re-run it from the Actions tab.
+#  - `CI_RUNNER` is a repository variable. Unset, jobs run on GitHub's machines;
+#    set it to a runner label to move every job at once. Delete it to move back.
+
 name: CI
 
 on:
   pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'public/**'
+      - 'firestore.rules'
+      - 'storage.rules'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/ci.yml'
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a PR supersedes the run nobody will read. Only for
+# pull_request: when deploy.yml calls this workflow, the event is `push` and a
+# cancelled check would SKIP the deploy of an earlier commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   checks:
     name: Typecheck, test, build
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
 
     steps:
