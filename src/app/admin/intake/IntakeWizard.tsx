@@ -54,6 +54,7 @@ import {
   applyPhotoPrefill,
   draftDefaults,
   publishBlockers,
+  registerBlockers,
   sexConflict,
   slugify,
   validateStep,
@@ -297,6 +298,35 @@ export function IntakeWizard() {
   const [openField, setOpenField] = useState<string | null>(null);
 
   /**
+   * Whether the form holds something that has not reached Firestore yet.
+   *
+   * It exists for one sentence: "Registrado en el refugio." That is a claim
+   * about the database, so it is shown only when the name AND the photo on
+   * screen are the ones that were saved. A photo saves itself on upload; a name
+   * typed afterwards does not, and without this flag the screen would announce
+   * a registration that had not happened.
+   */
+  const [dirty, setDirty] = useState(false);
+
+  /**
+   * The two optional sections. `null` means "the person has not touched it",
+   * and then the screen decides: closed on a new intake, open when there is
+   * already something inside worth seeing. Once touched, it stays as left.
+   */
+  const [aiOpen, setAiOpen] = useState<boolean | null>(null);
+  const [moreOpen, setMoreOpen] = useState<boolean | null>(null);
+
+  // A new intake opens with the name ready to type: it is one of only two
+  // things asked for, and a collapsed row would hide it behind a tap. Keyed on
+  // the draft's id, so it fires once per animal and never while typing.
+  const draftId = draft?.id ?? null;
+  const startsUnnamed = draft !== null && draft.name.trim().length === 0;
+  useEffect(() => {
+    if (draftId !== null && startsUnnamed) setOpenField('name');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId]);
+
+  /**
    * The photo accelerator. `suggesting` is separate from `busy` on purpose:
    * `busy` disables the whole form, and a model call that takes 20 seconds
    * must not lock an admin out of typing the name they already know.
@@ -379,6 +409,7 @@ export function IntakeWizard() {
   const update = useCallback((patch: Partial<PetDraft>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));
     setNotice(null);
+    setDirty(true);
   }, []);
 
   /**
@@ -431,8 +462,31 @@ export function IntakeWizard() {
     );
   }
 
-  const stepErrors = validateStep(step, draft);
   const blockers = publishBlockers(draft);
+  const missingToRegister = registerBlockers(draft);
+
+  const captured = draft.media.map((m) => ({
+    slot: m.slot,
+    path: m.path,
+    url: m.url,
+    busy: false,
+  }));
+
+  // Open by default only when there is already something inside to see.
+  const aiIsOpen =
+    aiOpen ??
+    (suggesting ||
+      suggestOutcome !== null ||
+      draft.media.some((m) => m.slot !== null && m.slot !== undefined && m.slot !== 'front'));
+  const moreIsOpen =
+    moreOpen ??
+    (suggestOutcome !== null ||
+      draft.register !== null && draft.register !== undefined ||
+      draft.species !== null ||
+      draft.sex !== null ||
+      draft.size !== null ||
+      draft.breed.trim().length > 0 ||
+      draft.hasMicrochip);
 
   /** Live microchip feedback, from the validator that already has 10 tests. */
   let chipError: MicrochipError | null = null;
@@ -456,6 +510,7 @@ export function IntakeWizard() {
     setError(null);
     try {
       await saveDraft(next);
+      setDirty(false);
       setNotice('Ficha guardada.');
     } catch (caught) {
       report(caught);
@@ -519,6 +574,7 @@ export function IntakeWizard() {
       const next = { ...draft!, media: [...draft!.media, ...uploaded] };
       setDraft(next);
       await saveDraft(next);
+      setDirty(false);
       setNotice(
         uploaded.length === 1 ? 'Foto subida.' : `${uploaded.length} fotos subidas.`,
       );
@@ -564,6 +620,7 @@ export function IntakeWizard() {
       const next: PetDraft = { ...draft, media: [...kept, uploaded] };
       setDraft(next);
       await saveDraft(next);
+      setDirty(false);
 
       // Held in memory so analysis does not have to re-download what was just
       // uploaded. Lost on reload, which handleAnalyzePhotos recovers from.
@@ -655,6 +712,7 @@ export function IntakeWizard() {
       if (next !== draft) {
         setDraft(next);
         await saveDraft(next);
+      setDirty(false);
       }
     } catch (caught) {
       report(caught);
@@ -889,6 +947,9 @@ export function IntakeWizard() {
     setNotice(null);
     setError(null);
     setSlugTouched(false);
+    setDirty(false);
+    setAiOpen(null);
+    setMoreOpen(null);
     setDraft(draftDefaults(mintPetId()));
     // Only when a stale `?draft=` is still in the URL; otherwise the effect
     // does not re-run and would leave the resumed id in the address bar.
@@ -1111,7 +1172,7 @@ export function IntakeWizard() {
         <div>
           <h1 className="t-title">Nuevo ingreso</h1>
           <p className="admin__sub">
-            Con la identidad y una foto ya se puede publicar. La historia puede esperar.
+            {t.intakeForm.lead}
           </p>
         </div>
         <Link href="/admin" className="btn btn--muted">
@@ -1170,30 +1231,6 @@ export function IntakeWizard() {
             </aside>
           )}
 
-          <GuidedPhotoCapture
-            captured={draft.media.map((m) => ({
-              slot: m.slot,
-              path: m.path,
-              url: m.url,
-              busy: false,
-            }))}
-            busy={busy}
-            disabled={busy || suggesting}
-            analysing={suggesting}
-            onPick={(slot, file) => void handlePickPhoto(slot, file)}
-            onAnalyze={() => void handleAnalyzePhotos()}
-          />
-
-          {/* Narrative only. Every per-field reading now lands in the row for
-              that field below, so this panel says what the photographs SHOW
-              and the rows say what the record HOLDS. */}
-          <PhotoSuggestions
-            outcome={suggestOutcome}
-            busy={suggesting}
-            disabled={busy}
-            onApplySterilized={() => acceptSuggested({ sterilized: true }, 'sterilized')}
-          />
-
           {/* ── one row per field, and exactly one ────────────────────────
               Each row shows what the field HOLDS and opens its editor when
               clicked. Until 2026-09-02 these values were printed once in the
@@ -1243,7 +1280,89 @@ export function IntakeWizard() {
                 }}
               />
             </EditableField>
+          </div>
 
+          {/* ── the one required photo ────────────────────────────────────
+              Cover mode: a single slot and NO analysis control. Registering
+              an animal must never look like it needs a model. */}
+          <GuidedPhotoCapture
+            mode="cover"
+            captured={captured}
+            busy={busy}
+            disabled={busy || suggesting}
+            analysing={false}
+            onPick={(slot, file) => void handlePickPhoto(slot, file)}
+            onAnalyze={() => undefined}
+          />
+
+          {/* ── registered, or what is still missing to be ────────────────
+              ⚠️ Two requirements, and only two. The nine things a public page
+              needs live in the closed list above the footer, worded as a
+              choice. Do not add a field here. */}
+          {missingToRegister.length > 0 ? (
+            <ul className="admin-errors" role="status">
+              {missingToRegister.map((code: IntakeError) => (
+                <li key={code}>{t.intakeError(code)}</li>
+              ))}
+            </ul>
+          ) : dirty ? (
+            <button
+              type="button"
+              className="btn btn--action intake-register"
+              onClick={() => void persist()}
+              disabled={busy}
+            >
+              {busy ? 'Un momento…' : t.intakeForm.registerAction}
+            </button>
+          ) : (
+            <p className="auth__notice" role="status">
+              <strong>{t.intakeForm.registeredTitle}</strong> {t.intakeForm.registeredBody}{' '}
+              <Link href={`/admin/pets/${draft.id}`}>{t.intakeForm.openRecord}</Link>
+            </p>
+          )}
+
+          {/* ── optional: the analysis ────────────────────────────────────
+              Closed on a new intake. Nothing inside runs until someone opens
+              it and presses Analizar, so a person who never opens it never
+              spends a request and never sees an AI control. */}
+          <details
+            className="intake-more"
+            open={aiIsOpen}
+            onToggle={(e) => setAiOpen(e.currentTarget.open)}
+          >
+            <summary>{t.intakeForm.aiSummary}</summary>
+            <p className="admin__sub">{t.intakeForm.aiIntro}</p>
+
+            <GuidedPhotoCapture
+              mode="analysis"
+              captured={captured}
+              busy={busy}
+              disabled={busy || suggesting}
+              analysing={suggesting}
+              onPick={(slot, file) => void handlePickPhoto(slot, file)}
+              onAnalyze={() => void handleAnalyzePhotos()}
+            />
+
+            {/* Narrative only. Every per-field reading lands in the row for
+                that field below, so this panel says what the photographs SHOW
+                and the rows say what the record HOLDS. */}
+            <PhotoSuggestions
+              outcome={suggestOutcome}
+              busy={suggesting}
+              disabled={busy}
+              onApplySterilized={() => acceptSuggested({ sterilized: true }, 'sterilized')}
+            />
+          </details>
+
+          {/* ── optional: every other field ───────────────────────────────── */}
+          <details
+            className="intake-more"
+            open={moreIsOpen}
+            onToggle={(e) => setMoreOpen(e.currentTarget.open)}
+          >
+            <summary>{t.intakeForm.moreSummary}</summary>
+
+          <div className="field-list">
             <EditableField
               label="Especie"
               value={optionLabel(SPECIES_OPTIONS, draft.species)}
@@ -1769,6 +1888,7 @@ export function IntakeWizard() {
               </>
             )}
           </fieldset>
+          </details>
         </section>
       )}
 
@@ -1979,12 +2099,20 @@ export function IntakeWizard() {
         </section>
       )}
 
-      {stepErrors.length > 0 && (
-        <ul className="admin-errors" role="status">
-          {stepErrors.map((code: IntakeError) => (
-            <li key={code}>{t.intakeError(code)}</li>
-          ))}
-        </ul>
+      {/* ⚠️ Not errors, and not shown as errors. These are what a PUBLIC page
+          needs; an animal is registered without any of them. Until 2026-10-10
+          this was a red list visible from the first keystroke, which made
+          admitting a dog read as a nine-field job. Closed by default. */}
+      {blockers.length > 0 && (
+        <details className="intake-more intake-more--publish">
+          <summary>{t.intakeForm.publishMissingSummary(blockers.length)}</summary>
+          <p className="admin__sub">{t.intakeForm.publishMissingIntro}</p>
+          <ul className="intake-more__list">
+            {blockers.map((code: IntakeError) => (
+              <li key={code}>{t.intakeError(code)}</li>
+            ))}
+          </ul>
+        </details>
       )}
 
       <footer className="admin__footer">
@@ -2023,12 +2151,6 @@ export function IntakeWizard() {
         </div>
 
         <div className="admin__footer-right">
-          {blockers.length > 0 && (
-            <span className="admin__blocked">
-              Falta{blockers.length === 1 ? '' : 'n'} {blockers.length} dato
-              {blockers.length === 1 ? '' : 's'} para publicar
-            </span>
-          )}
           <button
             type="button"
             className="btn btn--action"

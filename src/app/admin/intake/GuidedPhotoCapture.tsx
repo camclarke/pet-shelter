@@ -2,6 +2,7 @@
 
 import { useRef, useState, type ChangeEvent } from 'react';
 
+import { t } from '@/i18n';
 import type { PetPhotoSlot } from '@/lib/types';
 import { PetPhoto } from './PetPhoto';
 import { AnalysisProgress } from './AnalysisProgress';
@@ -44,7 +45,22 @@ export interface CapturedSlot {
   busy: boolean;
 }
 
+/**
+ * Which part of the capture this instance shows.
+ *
+ * - `cover`: the ONE photo an intake needs. A single slot, no analysis button.
+ *   This is what registers the animal, and nothing about it mentions a model.
+ * - `analysis`: the three extra guided shots and the Analizar button. Optional,
+ *   and mounted inside a section that is closed by default — so a person who
+ *   never opens it never sees an AI control and never spends a request.
+ *
+ * The cover photo is still SENT to the analysis: the button counts every photo
+ * the animal has, whichever instance captured it.
+ */
+export type CaptureMode = 'cover' | 'analysis';
+
 export interface GuidedPhotoCaptureProps {
+  mode: CaptureMode;
   captured: readonly CapturedSlot[];
   busy: boolean;
   disabled: boolean;
@@ -94,6 +110,7 @@ const SLOTS: SlotSpec[] = [
 ];
 
 export default function GuidedPhotoCapture({
+  mode,
   captured,
   busy,
   disabled,
@@ -120,7 +137,10 @@ export default function GuidedPhotoCapture({
   const [step, setStep] = useState(0);
 
   const filled = new Map(captured.map((c) => [c.slot, c]));
+  // Every photo the animal has goes to the model in one call, including the
+  // cover taken by the other instance.
   const count = captured.length;
+  const slots = SLOTS.filter((s) => (mode === 'cover' ? s.slot === 'front' : s.slot !== 'front'));
 
   function handleChange(slot: PetPhotoSlot, e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -128,21 +148,19 @@ export default function GuidedPhotoCapture({
     e.target.value = '';
     if (!file) return;
     onPick(slot, file);
-    const index = SLOTS.findIndex((s) => s.slot === slot);
-    if (index >= 0 && index + 1 < SLOTS.length) setStep(index + 1);
+    const index = slots.findIndex((s) => s.slot === slot);
+    if (index >= 0 && index + 1 < slots.length) setStep(index + 1);
   }
 
   return (
     <div className="admin-suggest">
-      <h2 className="t-label">Fotos del animalito</h2>
+      <h2 className="t-label">{mode === 'cover' ? t.intakeForm.coverTitle : t.intakeForm.extraPhotosTitle}</h2>
       <p className="admin__sub">
-        Toma las que puedas — <strong>con una alcanza</strong>. Cada foto agrega
-        un dato distinto, y todas se analizan juntas al final.{' '}
-        <strong>Tú revisas todo antes de publicar.</strong>
+        {mode === 'cover' ? t.intakeForm.coverHint : t.intakeForm.extraPhotosHint}
       </p>
 
       <ol className="capture">
-        {SLOTS.map((spec, index) => {
+        {slots.map((spec, index) => {
           const done = filled.get(spec.slot);
           const isNext = index === step && !done;
           return (
@@ -217,30 +235,34 @@ export default function GuidedPhotoCapture({
         })}
       </ol>
 
-      <div className="capture__submit">
-        <button
-          type="button"
-          className="btn btn--action"
-          disabled={disabled || busy || analysing || count === 0}
-          onClick={onAnalyze}
-        >
-          {analysing
-            ? 'Analizando…'
-            : `Analizar ${count === 1 ? 'la foto' : `las ${count} fotos`}`}
-        </button>
-        {count === 0 && (
-          <small className="auth__hint">
-            Toma al menos una foto para poder analizar. También puedes cargar
-            todos los datos a mano.
-          </small>
-        )}
-      </div>
+      {/* ⚠️ The cover instance has NO analysis control at all. Registering an
+          animal must never look like it needs a model. */}
+      {mode === 'analysis' && (
+        <div className="capture__submit">
+          <button
+            type="button"
+            className="btn btn--action"
+            disabled={disabled || busy || analysing || count === 0}
+            onClick={onAnalyze}
+          >
+            {analysing
+              ? 'Analizando…'
+              : `Analizar ${count === 1 ? 'la foto' : `las ${count} fotos`}`}
+          </button>
+          {count === 0 && (
+            <small className="auth__hint">
+              Toma al menos una foto para poder analizar. También puedes cargar
+              todos los datos a mano.
+            </small>
+          )}
+        </div>
+      )}
 
       {/* Replaces a static "Con varias puede tardar cerca de un minuto", which
           left someone holding an animal with no way to tell a slow call from a
           stuck one. See AnalysisProgress for why it shows elapsed time against
           a known ceiling rather than anything resembling progress. */}
-      {analysing && <AnalysisProgress photoCount={count} />}
+      {mode === 'analysis' && analysing && <AnalysisProgress photoCount={count} />}
     </div>
   );
 }

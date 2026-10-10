@@ -455,6 +455,35 @@ export function canPublish(draft: PetDraft): boolean {
 }
 
 /**
+ * What an animal needs to be REGISTERED IN THE SHELTER: a name and one photo.
+ *
+ * ⚠️ Deliberately far short of `publishBlockers`, and the two answer different
+ * questions. Registering is "this animal is in our care and has a record" —
+ * it is saved, it is listed, and it can receive medical records from that
+ * moment. Publishing is "a stranger may read a page about it", and that page
+ * cannot be written without species, sex, size, breed and age: every Spanish
+ * sentence about the animal inflects on its sex.
+ *
+ * Until 2026-10-10 the form showed all nine publish blockers as errors from the
+ * first keystroke, so admitting a dog at the gate read as a nine-field job. A
+ * gate stricter than the shelter's reality gets worked around (plan §3), and
+ * the workaround here is the paper notebook.
+ *
+ * No photo description is asked for here. Alt text is for the public page; it
+ * stays in `publishBlockers`.
+ */
+export function registerBlockers(draft: PetDraft): IntakeError[] {
+  const errors: IntakeError[] = [];
+  if (draft.name.trim().length === 0) errors.push('name-required');
+  if (draft.media.length === 0) errors.push('photo-required');
+  return errors;
+}
+
+export function canRegister(draft: PetDraft): boolean {
+  return registerBlockers(draft).length === 0;
+}
+
+/**
  * How complete a draft is, for the dashboard's progress hint.
  *
  * Counts the two blocking steps plus the optional story, so a fully-published

@@ -1431,6 +1431,54 @@ textarea {
 /* The accelerator panel. Visually recessed on purpose: it is optional, and it
    must not read as the main event on a form whose real job is the shelter
    entering what it already knows. */
+/* ---- intake: optional sections ------------------------------------------
+   Everything past the name and one photo sits in one of these, closed. The
+   summary is the whole tap target, and 44px tall for a thumb. */
+.intake-more {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+}
+
+.intake-more > summary {
+  min-height: 44px;
+  padding: 10px var(--space-2);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.intake-more[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.intake-more > :not(summary) {
+  margin: var(--space-2);
+}
+
+.intake-more__list {
+  list-style: disc;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.intake-more--publish {
+  margin-top: var(--space-3);
+}
+
+.intake-register {
+  align-self: flex-start;
+  min-height: 44px;
+}
+
 .admin-suggest {
   border: 1px solid var(--line);
   border-radius: var(--radius);
