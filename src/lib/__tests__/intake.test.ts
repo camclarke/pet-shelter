@@ -19,6 +19,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   canPublish,
@@ -27,6 +29,8 @@ import {
   draftProgress,
   isValidSlug,
   publishBlockers,
+  registerBlockers,
+  canRegister,
   slugify,
   toAgeMonths,
   validateStep,
@@ -293,4 +297,128 @@ test('draftProgress reaches 3 of 3 only with a story', () => {
 
 test('draftProgress starts at 0 for a fresh draft', () => {
   assert.deepEqual(draftProgress(draftDefaults('p1')), { done: 0, total: 3 });
+});
+
+// ─── registering needs a name and one photo, and nothing else ────────────────
+//
+// Two thresholds, deliberately far apart. `registerBlockers` is "this animal is
+// in our care and has a record"; `publishBlockers` is "a stranger may read a
+// page about it". Each test below would pass on the OLD single gate only by
+// accident, so each pins one side of the difference.
+
+test('a name and one photo register an animal, with every other field blank', () => {
+  const draft: PetDraft = { ...draftDefaults('p1'), name: 'Luna', media: [photo()] };
+  assert.deepEqual(registerBlockers(draft), []);
+  assert.equal(canRegister(draft), true);
+  // Control: the same draft is far from publishable. If these ever agree, one
+  // gate has swallowed the other.
+  assert.equal(canPublish(draft), false);
+  for (const code of ['species-required', 'sex-required', 'size-required', 'breed-required', 'age-required']) {
+    assert.ok(publishBlockers(draft).includes(code as never), `${code} must still block publishing`);
+  }
+});
+
+test('registering asks for exactly two things, in the order the screen shows them', () => {
+  assert.deepEqual(registerBlockers(draftDefaults('p1')), ['name-required', 'photo-required']);
+});
+
+test('a name alone, or a photo alone, does not register', () => {
+  assert.deepEqual(registerBlockers({ ...draftDefaults('p1'), name: 'Luna' }), ['photo-required']);
+  assert.deepEqual(registerBlockers({ ...draftDefaults('p1'), media: [photo()] }), ['name-required']);
+});
+
+test('a name of only spaces is not a name', () => {
+  const draft: PetDraft = { ...draftDefaults('p1'), name: '   ', media: [photo()] };
+  assert.deepEqual(registerBlockers(draft), ['name-required']);
+});
+
+test('a photo with no description still registers; the description is for the public page', () => {
+  const draft: PetDraft = { ...draftDefaults('p1'), name: 'Luna', media: [photo({ alt: '' })] };
+  assert.deepEqual(registerBlockers(draft), []);
+  assert.ok(publishBlockers(draft).includes('alt-required'));
+});
+
+test('registering never depends on a model: a draft no analysis touched registers', () => {
+  const draft: PetDraft = { ...draftDefaults('p1'), name: 'Luna', media: [photo()] };
+  assert.deepEqual(draft.suggestedFields, []);
+  assert.equal(canRegister(draft), true);
+});
+
+// ─── the screen keeps those two thresholds apart ─────────────────────────────
+//
+// Read as TEXT, comments stripped. There is no component-test setup and the
+// page sits behind the admin login, so this is the only check that the pure
+// rule above is the one the screen uses. Precedent: PR #26, where a pure layer
+// computed a value and the screen dropped it with every test green.
+
+function source(file: string): string {
+  return readFileSync(join(process.cwd(), file), 'utf8')
+    .replace(/\r\n/g, '\n')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+const WIZARD_SRC = 'src/app/admin/intake/IntakeWizard.tsx';
+const CAPTURE_SRC = 'src/app/admin/intake/GuidedPhotoCapture.tsx';
+
+test('the screen decides "registered" from registerBlockers, and only when it is saved', () => {
+  const src = source(WIZARD_SRC);
+  assert.ok(/const missingToRegister = registerBlockers\(draft\)/.test(src));
+  // The registered sentence sits in the branch reached only when nothing is
+  // missing AND nothing is unsaved.
+  const branch = src.slice(src.indexOf('missingToRegister.length > 0 ?'));
+  const order = ['admin-errors', ') : dirty ? (', 't.intakeForm.registerAction', 't.intakeForm.registeredTitle'];
+  let at = 0;
+  for (const needle of order) {
+    const found = branch.indexOf(needle, at);
+    assert.ok(found >= 0, `${needle} is missing or out of order`);
+    at = found + needle.length;
+  }
+});
+
+test('a typed change marks the form unsaved, and every save clears it', () => {
+  const src = source(WIZARD_SRC);
+  const update = src.slice(src.indexOf('const update = useCallback'), src.indexOf('}, []);', src.indexOf('const update = useCallback')));
+  assert.ok(/setDirty\(true\)/.test(update), 'update() must mark the form unsaved');
+  const saves = src.match(/await saveDraft\(next\);/g) ?? [];
+  const cleared = src.match(/await saveDraft\(next\);\s*setDirty\(false\);/g) ?? [];
+  assert.ok(saves.length >= 4, 'expected the four save sites');
+  assert.equal(cleared.length, saves.length, 'a save that does not clear the flag hides the registered notice');
+});
+
+test('the required photo has no analysis control, and the analysis is inside a closed section', () => {
+  const wizard = source(WIZARD_SRC);
+  const cover = wizard.indexOf('mode="cover"');
+  const details = wizard.indexOf('t.intakeForm.aiSummary');
+  const analysis = wizard.indexOf('mode="analysis"');
+  assert.ok(cover >= 0 && details > cover && analysis > details, 'cover, then the AI section, then the analysis');
+  // The analysis instance is the only caller of the model.
+  // `void …()` is the CALL; the bare name also matches the function's own
+  // definition, which is not a caller.
+  assert.equal((wizard.match(/void handleAnalyzePhotos\(\)/g) ?? []).length, 1);
+  assert.ok(wizard.indexOf('void handleAnalyzePhotos()') > details);
+  // Closed unless there is already something inside it.
+  assert.ok(/open=\{aiIsOpen\}/.test(wizard));
+  assert.ok(/const aiIsOpen =\s*aiOpen \?\?/.test(wizard));
+
+  const capture = source(CAPTURE_SRC);
+  assert.ok(/mode === 'analysis' && \(\s*<div className="capture__submit">/.test(capture), 'Analizar must render in analysis mode only');
+  assert.ok(/mode === 'cover' \? s\.slot === 'front' : s\.slot !== 'front'/.test(capture), 'the cover is one slot');
+});
+
+test('what a public page needs is a closed list, never the red error list', () => {
+  const src = source(WIZARD_SRC);
+  assert.equal(/stepErrors/.test(src), false, 'the per-step error list must not come back');
+  const list = src.slice(src.indexOf('intake-more--publish'));
+  assert.ok(list.indexOf('t.intakeForm.publishMissingSummary(blockers.length)') >= 0);
+  // Exactly one red list remains, and it is the two-item register one.
+  assert.equal((src.match(/className="admin-errors"/g) ?? []).length, 1);
+  assert.ok(src.indexOf('className="admin-errors"') < src.indexOf('intake-more--publish'));
+});
+
+test('publishing is still gated on everything it was', () => {
+  const src = source(WIZARD_SRC);
+  assert.ok(/disabled=\{busy \|\| blockers\.length > 0 \|\| !user\}/.test(src));
+  assert.ok(/const blockers = publishBlockers\(draft\)/.test(src));
 });

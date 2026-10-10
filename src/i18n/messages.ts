@@ -617,6 +617,8 @@ export interface Messages {
   /** Fixed wording for the review gate and the card capture. */
   readonly medicalReview: MedicalReviewCopy;
 
+  readonly intakeForm: IntakeFormCopy;
+
   /** Where an extracted record came from: "Leído de una tarjeta de vacunación". */
   extractionSourceLabel(source: MedicalExtractionSource | null): string;
 
@@ -773,6 +775,40 @@ export interface Messages {
  * nothing in it inflects — but still here, because the rule is "no user-facing
  * words outside src/i18n", and the shelter's volunteers are users.
  */
+/**
+ * The intake form's own copy.
+ *
+ * ⚠️ Two different thresholds are named here and must never borrow each
+ * other's words: REGISTERING an animal in the shelter (a name and one photo)
+ * and PUBLISHING its public page (species, sex, size, breed, age). Nothing in
+ * the "registered" strings may suggest more is owed, and nothing may present
+ * the analysis as a step — it is an optional extra a person opens on purpose.
+ */
+export interface IntakeFormCopy {
+  /** Under the page title. States the whole requirement in one sentence. */
+  readonly lead: string;
+  /** Heading of the single required photo. */
+  readonly coverTitle: string;
+  readonly coverHint: string;
+  /** Heading of the three extra guided shots, inside the optional AI section. */
+  readonly extraPhotosTitle: string;
+  readonly extraPhotosHint: string;
+  /** The button that saves a name-and-photo intake. */
+  readonly registerAction: string;
+  /** Shown once it is saved. A fact, with nothing asked of the reader. */
+  readonly registeredTitle: string;
+  readonly registeredBody: string;
+  readonly openRecord: string;
+  /** Summary of the collapsed, opt-in analysis section. */
+  readonly aiSummary: string;
+  readonly aiIntro: string;
+  /** Summary of the collapsed section holding every other field. */
+  readonly moreSummary: string;
+  /** "Para publicar su página faltan 3 datos" — the summary of a closed list. */
+  publishMissingSummary(count: number): string;
+  readonly publishMissingIntro: string;
+}
+
 export interface MedicalReviewCopy {
   /** The badge on a record nobody has confirmed. */
   readonly unconfirmedBadge: string;

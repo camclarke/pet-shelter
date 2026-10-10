@@ -1527,6 +1527,29 @@ export const es: Messages = {
 
   dueAnsweredByLaterDose: 'ya hay una dosis posterior registrada',
 
+  intakeForm: {
+    lead: 'Con el nombre y una foto ya queda registrado en el refugio. Todo lo demás es opcional.',
+    coverTitle: 'Foto',
+    coverHint: 'Una sola alcanza. De frente y con buena luz, si se puede.',
+    extraPhotosTitle: 'Más fotos para el análisis',
+    extraPhotosHint:
+      'Cada foto agrega un dato distinto. Se analizan todas juntas, con la foto principal, y tú revisas cada dato antes de guardarlo.',
+    registerAction: 'Registrar en el refugio',
+    registeredTitle: 'Registrado en el refugio.',
+    registeredBody: 'Ya tiene su ficha y se le pueden cargar vacunas y controles.',
+    openRecord: 'Abrir su ficha',
+    aiSummary: 'Analizar las fotos con IA (opcional)',
+    aiIntro:
+      'Lee especie, raza, color, edad y sexo en las fotos y te los propone. No guarda nada sin que lo aceptes.',
+    moreSummary: 'Más datos (opcional)',
+    publishMissingSummary: (count: number) =>
+      count === 1
+        ? 'Para publicar su página falta 1 dato'
+        : `Para publicar su página faltan ${count} datos`,
+    publishMissingIntro:
+      'Solo hace falta si se va a publicar. Para tenerlo registrado en el refugio no.',
+  },
+
   yesNo: (value) => (value ? 'Sí' : 'No'),
 
   applicationStatusLabel: (status) => APPLICATION_STATUS[status],
