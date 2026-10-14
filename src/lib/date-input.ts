@@ -70,6 +70,31 @@ export function dayToInstant(dayMs: number, now: number = Date.now()): number {
   return toDateInput(dayMs) === toDateInput(now) ? now : dayMs;
 }
 
+/**
+ * The LOCAL calendar day an instant falls on, as a sortable number (20261014).
+ *
+ * The one thing two medical dates should ever be compared by. Dates reach a
+ * record stamped at different hours of the same day — `parseDateInput` stamps
+ * local midday, a vaccination card's date is stamped 12:00 UTC (08:00 in
+ * Bolivia) — so comparing instants orders two records of ONE day, and makes a
+ * dose due today read as missed by the afternoon.
+ */
+export function localDayNumber(ms: number): number {
+  const d = new Date(ms);
+  return d.getFullYear() * 10_000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+
+/**
+ * Is this day over? True only from the next local calendar day.
+ *
+ * "Due on the 14th" means the 14th is still in time, all of it. Pass
+ * `now - tolerance` as `now` to absorb a clock running a few minutes ahead:
+ * at 00:02 on the 15th a five-minute tolerance still reads the 14th.
+ */
+export function isPastDay(dayMs: number, now: number = Date.now()): boolean {
+  return localDayNumber(dayMs) < localDayNumber(now);
+}
+
 /** Epoch ms as Bolivian-readable text. */
 export function formatDate(ms: number): string {
   return new Date(ms).toLocaleDateString('es-BO', {
