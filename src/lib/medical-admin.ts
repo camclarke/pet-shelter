@@ -88,6 +88,10 @@ export interface MedicalRecordView {
   clinic: string | null;
   batch: string | null;
   manufacturer: string | null;
+  /** Null when absent — every record written before 2026-10-14 lacks it. */
+  product: string | null;
+  /** Epoch ms the vial expires. Null when absent. Never `validUntil`. */
+  productExpiresAt: number | null;
   notes: string | null;
   source: MedicalRecord['source'];
   confirmedBy: string | null;
@@ -165,6 +169,9 @@ export async function listMedicalRecords(petId: string): Promise<MedicalRecordVi
       clinic: data.clinic ?? null,
       batch: data.batch ?? null,
       manufacturer: data.manufacturer ?? null,
+      // Absent on every record written before 2026-10-14, imported ones included.
+      product: stringOrNull(data.product),
+      productExpiresAt: toMillis(data.productExpiresAt),
       notes: data.notes ?? null,
       source: data.source ?? 'manual',
       // ⚠️ Read as-is and judged by isConfirmed(), never coerced here. A
@@ -229,6 +236,7 @@ function editWrite(fields: MedicalEditFields) {
     nextDueAt: toTimestamp(fields.nextDueAt),
     validFrom: toTimestamp(fields.validFrom),
     validUntil: toTimestamp(fields.validUntil),
+    productExpiresAt: toTimestamp(fields.productExpiresAt),
   };
 }
 
@@ -335,6 +343,7 @@ export async function confirmMedicalRecord(
     nextDueAt: toTimestamp(record.nextDueAt),
     validFrom: toTimestamp(record.validFrom),
     validUntil: toTimestamp(record.validUntil),
+    productExpiresAt: toTimestamp(record.productExpiresAt),
     confirmedAt: serverTimestamp(),
     extractedAt: toTimestamp(record.extractedAt),
   };

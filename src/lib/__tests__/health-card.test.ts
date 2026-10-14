@@ -13,6 +13,7 @@ import {
   type HealthCardRecordInput,
 } from '../health-card';
 import { formatDateNumeric } from '../date-input';
+import { es } from '@/i18n/es';
 
 /**
  * The printable card. What is on paper leaves the building, so the rules here
@@ -89,10 +90,46 @@ test('a frozen register record prints its gaps as empty cells, never as requests
     name: 'Octavalente',
     manufacturer: null,
     batch: null,
+    product: null,
+    productExpiresAt: null,
     nextDueAt: null,
     veterinarian: null,
     clinic: null,
   });
+});
+
+test('the label product and the vial expiry reach the printed row', () => {
+  const tables = buildHealthCardTables([
+    record({ product: '  Vanguard Plus 5 L4 ', productExpiresAt: day(2027, 5, 11) }),
+    record({ id: 'd', kind: 'deworming', name: 'Desparasitación', product: 'Drontal Plus' }),
+  ]);
+  assert.equal(tables.vaccinations[0]!.product, 'Vanguard Plus 5 L4');
+  assert.equal(tables.vaccinations[0]!.productExpiresAt, day(2027, 5, 11));
+  assert.equal(tables.dewormings[0]!.product, 'Drontal Plus');
+  // The vial's date is never printed as the next dose.
+  assert.equal(tables.vaccinations[0]!.nextDueAt, null);
+});
+
+test('a malformed vial expiry prints nothing rather than a broken date', () => {
+  const tables = buildHealthCardTables([record({ productExpiresAt: Number.NaN })]);
+  assert.equal(tables.vaccinations[0]!.productExpiresAt, null);
+});
+
+test('the lab-and-lot cell says "frasco vence", never a bare "vence"', () => {
+  const cell = es.healthCard.labLot('Vanguard Plus 5 L4', 'Zoetis', '043987B', '11/05/2027');
+  assert.equal(cell, 'Vanguard Plus 5 L4 · Zoetis · lote 043987B · frasco vence 11/05/2027');
+  // A bare "vence" beside "Próxima dosis" would read as the dog's protection ending.
+  assert.equal(/(^|[^o] )vence/.test(cell), false);
+  // A legacy record prints an empty cell, not a request.
+  assert.equal(es.healthCard.labLot(null, null, null, null), '');
+});
+
+test('a deworming cell keeps the shelter word and adds the label product once', () => {
+  assert.equal(es.healthCard.dewormingProduct('Desparasitación', 'Drontal Plus'), 'Desparasitación · Drontal Plus');
+  assert.equal(es.healthCard.dewormingProduct('Desparasitación', null), 'Desparasitación');
+  assert.equal(es.healthCard.dewormingProduct('Drontal plus', 'Drontal Plus'), 'Drontal Plus');
+  assert.equal(es.healthCard.dewormingProduct(null, 'Drontal Plus'), 'Drontal Plus');
+  assert.equal(es.healthCard.dewormingProduct(null, null), '');
 });
 
 test('stored values print as stored — trimmed, and blank text is empty', () => {

@@ -5,7 +5,10 @@ import {
   RABIES_MIN_AGE_WEEKS,
   RABIES_PROTECTION_DELAY_DAYS,
   byMostRecent,
+  draftFromRecord,
   formWarnings,
+  medicalEditFields,
+  productExpiredBeforeDose,
   isOverdue,
   medicalDraftDefaults,
   medicalWarnings,
@@ -323,4 +326,95 @@ test('the +21 offer never appears on an imported record, nor once a start date i
   assert.equal(offersRabiesProtectionStart(rabiesDraft(), imported), false);
   assert.equal(offersRabiesProtectionStart(rabiesDraft({ validFrom: NOW }), null), false);
   assert.equal(offersRabiesProtectionStart(rabiesDraft({ performedAt: null }), null), false);
+});
+
+// ─── the label's product and the vial's expiry (C2, 2026-10-14) ──────────────
+//
+// Dates are built with the LOCAL constructor so the file means the same in CI
+// (UTC) and in Bolivia (UTC-4). Hours are deliberate: a date typed for today is
+// local midday, a date read off a label is 08:00.
+
+const localDay = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h, 0).getTime();
+
+test('a vial that expires ON the day of the dose is not expired — judged by calendar day', () => {
+  // Expiry stamped 08:00, dose at 12:00 on the same day: comparing instants
+  // would call this expired. The label means "good all day on the 14th".
+  assert.equal(productExpiredBeforeDose(localDay(2026, 10, 14, 8), localDay(2026, 10, 14, 12)), false);
+  assert.equal(productExpiredBeforeDose(localDay(2026, 10, 14, 23), localDay(2026, 10, 14, 0)), false);
+});
+
+test('a vial that expired the day BEFORE the dose is expired', () => {
+  assert.equal(productExpiredBeforeDose(localDay(2026, 10, 13, 23), localDay(2026, 10, 14, 0)), true);
+});
+
+test('a vial that expires the day AFTER the dose is not expired', () => {
+  assert.equal(productExpiredBeforeDose(localDay(2026, 10, 15, 0), localDay(2026, 10, 14, 23)), false);
+});
+
+test('no expiry, or no dose date, means no opinion', () => {
+  assert.equal(productExpiredBeforeDose(null, localDay(2026, 10, 14)), false);
+  assert.equal(productExpiredBeforeDose(localDay(2020, 1, 1), null), false);
+});
+
+test('an expired vial warns on any kind, and never blocks the save', () => {
+  const expired = {
+    performedAt: localDay(2026, 10, 14),
+    productExpiresAt: localDay(2026, 9, 30),
+  };
+  for (const kind of ['vaccination', 'deworming'] as const) {
+    const d = draft({ kind, name: 'Producto', ...expired });
+    assert.ok(medicalWarnings(d).includes('product-expired-before-dose'), kind);
+  }
+  // A warning, not an error: the form stays saveable.
+  assert.deepEqual(
+    validateMedicalDraft(draft({ ...expired }), localDay(2026, 10, 14, 18)),
+    []
+  );
+});
+
+test('an imported register record never shows the expired-vial warning', () => {
+  const d = draft({ performedAt: localDay(2026, 10, 14), productExpiresAt: localDay(2026, 9, 30) });
+  assert.deepEqual(formWarnings(d, {}, { imported: true }), []);
+});
+
+test('the vial expiry is its own field: it never fills validUntil or nextDueAt', () => {
+  const fields = medicalEditFields(
+    draft({ product: '  Vanguard Plus 5 L4 ', productExpiresAt: localDay(2027, 5, 11) })
+  );
+  assert.equal(fields.product, 'Vanguard Plus 5 L4');
+  assert.equal(fields.productExpiresAt, localDay(2027, 5, 11));
+  assert.equal(fields.validUntil, null);
+  assert.equal(fields.nextDueAt, null);
+});
+
+test('a blank product is stored as empty, not as spaces', () => {
+  assert.equal(medicalEditFields(draft({ product: '   ' })).product, null);
+});
+
+test('a record with no product fields — imported, older, or a card reading — drafts as empty', () => {
+  const draftOf = draftFromRecord({
+    kind: 'vaccination',
+    name: 'Octavalente',
+    performedAt: localDay(2025, 8, 16),
+    nextDueAt: null,
+    validFrom: null,
+    validUntil: null,
+    veterinarian: null,
+    clinic: null,
+    batch: null,
+    manufacturer: null,
+    notes: null,
+  });
+  assert.equal(draftOf.product, null);
+  assert.equal(draftOf.productExpiresAt, null);
+});
+
+test('a stored product and expiry survive the round trip into the edit form', () => {
+  const draftOf = draftFromRecord({
+    ...draft(),
+    product: 'Defensor 3',
+    productExpiresAt: localDay(2027, 1, 31),
+  });
+  assert.equal(draftOf.product, 'Defensor 3');
+  assert.equal(draftOf.productExpiresAt, localDay(2027, 1, 31));
 });

@@ -270,7 +270,14 @@ export function HealthCardView({
               <tr key={row.id}>
                 <td className="health-card__date">{when(row.performedAt)}</td>
                 <td>{row.name ?? ''}</td>
-                <td>{hc.labLot(row.manufacturer, row.batch)}</td>
+                <td>
+                  {hc.labLot(
+                    row.product,
+                    row.manufacturer,
+                    row.batch,
+                    row.productExpiresAt === null ? null : formatDateNumeric(row.productExpiresAt)
+                  )}
+                </td>
                 <td className="health-card__date">{when(row.nextDueAt)}</td>
                 <td>{hc.who(row.veterinarian, row.clinic)}</td>
                 <td />
@@ -307,7 +314,7 @@ export function HealthCardView({
             {tables.dewormings.map((row: HealthCardRow) => (
               <tr key={row.id}>
                 <td className="health-card__date">{when(row.performedAt)}</td>
-                <td>{row.name ?? ''}</td>
+                <td>{hc.dewormingProduct(row.name, row.product)}</td>
                 <td className="health-card__date">{when(row.nextDueAt)}</td>
                 <td>{hc.who(row.veterinarian, row.clinic)}</td>
                 <td />

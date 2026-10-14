@@ -44,6 +44,10 @@ export interface HealthCardRecordInput {
   clinic: string | null;
   batch: string | null;
   manufacturer: string | null;
+  /** The label's product name. Absent on every record written before 2026-10-14. */
+  product?: string | null;
+  /** Epoch ms the VIAL expires — never the dog's protection. Absent likewise. */
+  productExpiresAt?: number | null;
   confirmedBy: string | null;
 }
 
@@ -54,6 +58,9 @@ export interface HealthCardRow {
   name: string | null;
   manufacturer: string | null;
   batch: string | null;
+  product: string | null;
+  /** Printed as "frasco vence …", never as a date about the dog. */
+  productExpiresAt: number | null;
   nextDueAt: number | null;
   veterinarian: string | null;
   clinic: string | null;
@@ -79,6 +86,11 @@ function toRow(record: HealthCardRecordInput & { performedAt: number }): HealthC
     name: text(record.name),
     manufacturer: text(record.manufacturer),
     batch: text(record.batch),
+    product: text(record.product),
+    productExpiresAt:
+      typeof record.productExpiresAt === 'number' && Number.isFinite(record.productExpiresAt)
+        ? record.productExpiresAt
+        : null,
     nextDueAt: record.nextDueAt,
     veterinarian: text(record.veterinarian),
     clinic: text(record.clinic),

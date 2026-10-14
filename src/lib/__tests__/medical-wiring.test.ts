@@ -212,6 +212,60 @@ test('the history and the review rows show the laboratory', () => {
   assert.ok(/c\.manufacturer && <span className="t-data">\{c\.manufacturer\}<\/span>/.test(src));
 });
 
+// ─── the label's product and the vial's expiry (C2, 2026-10-14) ──────────────
+//
+// Both fields are OPTIONAL on the stored type, and an optional field a writer
+// drops is a green typecheck and a record without it — the hole
+// `MedicalRecordWrite` was annotated to close. So each path is checked here:
+// create, edit, confirm, list, the form, the history row and the card.
+
+const CARD_PRINT = 'src/app/admin/pets/[petId]/health-card/HealthCardPrint.tsx';
+
+test('the record list reads both fields', () => {
+  const list = exportedFunction(code(ADMIN), 'listMedicalRecords');
+  assert.ok(/product: stringOrNull\(data\.product\)/.test(list));
+  assert.ok(/productExpiresAt: toMillis\(data\.productExpiresAt\)/.test(list));
+});
+
+test('create, edit and confirm all write the vial expiry as a Timestamp', () => {
+  const src = code(ADMIN);
+  // create and edit both go through editWrite()
+  const editWrite = src.slice(src.indexOf('function editWrite('), src.indexOf('function buildCreate('));
+  assert.ok(/productExpiresAt: toTimestamp\(fields\.productExpiresAt\)/.test(editWrite));
+  assert.ok(/\.\.\.editWrite\(medicalEditFields\(draft\)\)/.test(exportedFunction(src, 'updateMedicalRecord')));
+  assert.ok(/productExpiresAt: toTimestamp\(record\.productExpiresAt\)/.test(exportedFunction(src, 'confirmMedicalRecord')));
+});
+
+test('the form has both inputs, and the expiry input writes only productExpiresAt', () => {
+  const src = code(PANEL);
+  assert.ok(/onChange=\{\(e\) => patch\(\{ product: e\.target\.value \|\| null \}\)\}/.test(src));
+  assert.ok(/value=\{draft\.productExpiresAt === null \? '' : toDateInput\(draft\.productExpiresAt\)\}/.test(src));
+  assert.ok(/productExpiresAt: e\.target\.value/.test(src));
+  // The vial's date must never land in the dog's protection or its next dose.
+  assert.equal(/validUntil:\s*draft\.productExpiresAt/.test(src), false);
+  assert.equal(/nextDueAt:\s*draft\.productExpiresAt/.test(src), false);
+});
+
+test('the history row shows the product and the vial expiry', () => {
+  const src = code(PANEL);
+  assert.ok(/r\.product && <span className="t-data">\{r\.product\}<\/span>/.test(src));
+  assert.ok(/t\.medicalForm\.vialExpires\(formatDate\(r\.productExpiresAt\)\)/.test(src));
+});
+
+test('the printed card passes both fields to its cells', () => {
+  const src = code(CARD_PRINT);
+  assert.ok(/hc\.labLot\(\s*row\.product,\s*row\.manufacturer,\s*row\.batch,/.test(src));
+  assert.ok(/row\.productExpiresAt === null \? null : formatDateNumeric\(row\.productExpiresAt\)/.test(src));
+  assert.ok(/hc\.dewormingProduct\(row\.name, row\.product\)/.test(src));
+});
+
+test('the vial-expiry hint says it is the bottle, not the protection', () => {
+  const es = read('src/i18n/es.ts');
+  const hint = es.slice(es.indexOf('productExpiresHint:'), es.indexOf('vialExpires:'));
+  assert.ok(/frasco/.test(hint));
+  assert.ok(/No es hasta cuándo protege/.test(hint));
+});
+
 test('no copy promises reminders that do not exist', () => {
   // "recordatorios" named a feature nobody had built. If a reminder screen is
   // built later, the sentence comes back WITH it, in the same change.

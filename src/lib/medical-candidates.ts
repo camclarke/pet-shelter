@@ -132,6 +132,9 @@ export interface ConfirmedRecordFields {
   clinic: string | null;
   batch: string | null;
   manufacturer: string | null;
+  /** From the form only — the card reader never produces them. */
+  product: string | null;
+  productExpiresAt: number | null;
   notes: string | null;
   codes: string[];
   source: 'llm-extracted';
