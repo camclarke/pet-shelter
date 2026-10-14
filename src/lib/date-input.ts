@@ -103,3 +103,15 @@ export function formatDate(ms: number): string {
     year: 'numeric',
   });
 }
+
+/**
+ * Epoch ms as `dd/mm/aaaa`, the way a Bolivian card is written by hand.
+ *
+ * For paper. Built from the local calendar parts rather than from ICU, so the
+ * output does not depend on which locale data a browser ships.
+ */
+export function formatDateNumeric(ms: number): string {
+  const d = new Date(ms);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`;
+}

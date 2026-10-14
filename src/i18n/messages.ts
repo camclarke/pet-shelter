@@ -43,6 +43,62 @@ import type { TagTone } from '@/lib/qr-tokens';
 import type { TimingResult as SterilizationTimingResult } from '@/lib/sterilization-timing';
 
 /**
+ * The printable vaccination card. Paper leaves the building, so nothing here
+ * asks anyone to complete anything: an empty cell is the true state of the
+ * record, and the blank rows are for the next dose.
+ */
+export interface HealthCardMessages {
+  /** Tab title, and the printed heading. */
+  readonly title: string;
+  /** The screen heading: "Carnet de Bravo". */
+  screenTitle(name: string): string;
+  /** The link from the medical history. */
+  readonly open: string;
+  readonly print: string;
+  readonly backToRecord: string;
+  /** Under the screen heading, never printed. */
+  readonly printTip: string;
+  readonly loading: string;
+  readonly loadFailed: string;
+  readonly permissionDenied: string;
+  readonly notFound: string;
+  /** "Cochabamba, Bolivia · WhatsApp 77903553 · wawitas.org" */
+  shelterLine(place: string, phone: string, host: string): string;
+
+  readonly nameLabel: string;
+  readonly speciesLabel: string;
+  readonly sexLabel: string;
+  readonly breedLabel: string;
+  readonly colorLabel: string;
+  readonly microchipLabel: string;
+  readonly ageLabel: string;
+  readonly sterilizationLabel: string;
+  /** The register's own words, with the day they were written: "3 años (al ingresar, 05/07/2025)". */
+  ageAtIntake(text: string, day: string | null): string;
+  /** A birth date someone knew. */
+  bornOn(date: string): string;
+
+  readonly vaccinationsTitle: string;
+  readonly dewormingsTitle: string;
+  readonly dateColumn: string;
+  readonly vaccineColumn: string;
+  readonly productColumn: string;
+  readonly labLotColumn: string;
+  readonly nextDoseColumn: string;
+  readonly whoColumn: string;
+  readonly stickerColumn: string;
+  readonly signColumn: string;
+  /** "Zoetis · lote 726501"; either part may be absent, and both absent is empty. */
+  labLot(manufacturer: string | null, batch: string | null): string;
+  /** Veterinarian and clinic, either may be absent. */
+  who(veterinarian: string | null, clinic: string | null): string;
+  /** The footer line. */
+  printedOn(date: string): string;
+  /** Under the QR code: the address a phone opens. */
+  qrCaption(host: string, formattedToken: string): string;
+}
+
+/**
  * Everything a QR tag says: the public page a finder lands on, and the admin
  * screens that issue, revoke and print tags. Build-order step 12, plan §7.
  *
@@ -611,6 +667,9 @@ export interface Messages {
 
   /** QR identity tags — the public page and the admin screens. */
   readonly tag: TagMessages;
+
+  /** The printable vaccination card. */
+  readonly healthCard: HealthCardMessages;
 
   // ── the medical review gate, and reading a vaccination card (step 9) ──────
 

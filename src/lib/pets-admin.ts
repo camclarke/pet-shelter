@@ -123,6 +123,20 @@ export async function loadDraft(id: string): Promise<PetDraft | null> {
 }
 
 /**
+ * A published pet's microchip number, or null when it has no chip record.
+ *
+ * Restricted tier: `identity` is readable by an admin or the owner only, and
+ * this is called from the printable card, which sits behind `AdminGate` and
+ * the rules both. A draft keeps its code on the draft and never reaches here.
+ */
+export async function loadMicrochipCode(petId: string): Promise<string | null> {
+  const { db } = getFirebase();
+  const snap = await getDoc(doc(db, 'pets', petId, 'identity', 'microchip'));
+  const code = snap.exists() ? snap.data().code : null;
+  return typeof code === 'string' && code.trim() !== '' ? code : null;
+}
+
+/**
  * Every unfinished draft, newest first.
  *
  * ⚠️ This deliberately does NOT `orderBy('updatedAt')` in the query, and that
