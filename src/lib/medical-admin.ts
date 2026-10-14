@@ -97,6 +97,8 @@ export interface MedicalRecordView {
   extractedFrom: MedicalExtractionSource | null;
   extractionEvidence: Record<string, FieldEvidence> | null;
   recordedBy: string;
+  /** True when the record came from the imported paper register. */
+  imported: boolean;
 }
 
 /** A candidate as the review UI sees it — epoch ms, read defensively. */
@@ -174,6 +176,9 @@ export async function listMedicalRecords(petId: string): Promise<MedicalRecordVi
       extractedFrom: EXTRACTION_SOURCES.includes(data.extractedFrom) ? data.extractedFrom : null,
       extractionEvidence: readEvidence(data.extractionEvidence),
       recordedBy: data.recordedBy ?? '',
+      // Read from the paper register by the importer. The register is frozen
+      // history: opening one of these records must ask nobody for anything.
+      imported: data.importRef != null,
     };
   });
 }

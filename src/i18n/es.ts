@@ -333,9 +333,9 @@ const MEDICAL_WARNING: Record<MedicalWarning, string> = {
   'rabies-under-age':
     'El animalito habría tenido menos de 12 semanas al momento de la antirrábica. Es el mínimo que exige la norma europea. Guárdalo igual si así fue.',
   'rabies-no-valid-from':
-    'Falta desde cuándo protege. En la antirrábica la protección empieza 21 días después de la dosis, y esa es la fecha que vale en un cruce de frontera.',
+    'Falta desde cuándo protege. Para viajar a la Unión Europea, una primera antirrábica protege desde 21 días después de la dosis; un refuerzo puesto a tiempo, desde el mismo día.',
   'vaccination-no-next-due':
-    'No pusiste cuándo toca la próxima. Sin eso no va a aparecer en los recordatorios.',
+    'Esta vacuna se guarda sin fecha de próxima dosis. Si la tarjeta tiene «Fecha refuerzo», cópiala de ahí.',
 };
 
 const MEASUREMENT_ERROR: Record<MeasurementError, string> = {
@@ -1526,6 +1526,18 @@ export const es: Messages = {
   nextDueSummary: (name: string, dateText: string) => `Lo próximo: ${name}, el ${dateText}.`,
 
   dueAnsweredByLaterDose: 'ya hay una dosis posterior registrada',
+
+  medicalForm: {
+    nameHint:
+      'Como lo escribió el veterinario en la columna «Vacuna». Usa el mismo nombre en cada dosis: así se sabe que una dosis responde a la anterior.',
+    dateHint: 'Si no la cambias, queda la de hoy.',
+    nextDueHint:
+      'Cópiala de «Fecha refuerzo» o «Próxima aplicación». No es la fecha de vencimiento de la etiqueta.',
+    batchHint: 'Está en la etiqueta pegada, como «Lote» o «N. Lote».',
+    manufacturerHint: 'El laboratorio que fabrica la vacuna, también en la etiqueta.',
+    campaignNote:
+      'Si la vacuna no trae etiqueta, como en las campañas municipales, el veterinario, el lote y el laboratorio pueden quedar vacíos. Es un registro válido y completo.',
+  },
 
   intakeForm: {
     lead: 'Con el nombre y una foto ya queda registrado en el refugio. Todo lo demás es opcional.',

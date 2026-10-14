@@ -9,7 +9,8 @@ import { cardThresholdsFor, type CardField } from '@/lib/card-extraction';
 import {
   draftFromRecord,
   medicalDraftDefaults,
-  medicalWarnings,
+  formWarnings,
+  offersRabiesProtectionStart,
   rabiesProtectionStart,
   recordSignals,
   summarizeMedicalHistory,
@@ -173,7 +174,13 @@ export default function MedicalPanel({
   }, [reload]);
 
   const errors = validateMedicalDraft(draft);
-  const warnings = medicalWarnings(draft, { birthdateApprox, microchipImplantedAt });
+  // The stored record behind the open form, if it is one. An imported record
+  // asks for nothing: see formWarnings().
+  const openRecord = editing?.kind === 'record' ? editing.record : null;
+  const warnings = formWarnings(draft, { birthdateApprox, microchipImplantedAt }, openRecord);
+  // Every name already on this animal, offered while typing, so the next dose
+  // is written the way the last one was. A series is linked by its name.
+  const knownNames = [...new Set((records ?? []).map((r) => r.name.trim()).filter(Boolean))].sort();
   const summary = records ? summarizeMedicalHistory(records) : null;
   const answered = new Set(summary?.answered);
   // Candidates, plus — defence in depth — any record in `medical` with no confirmer.
@@ -302,7 +309,9 @@ export default function MedicalPanel({
 
   return (
     <section className="admin-list">
-      <h2 className="t-label">Historial médico</h2>
+      <h2 className="t-label" id="historial-medico">
+        Historial médico
+      </h2>
 
       {error && <p className="auth__error">{error}</p>}
 
@@ -374,6 +383,7 @@ export default function MedicalPanel({
                     {hint('nextDueAt', true)}
 
                     {c.batch && <span className="t-data">Lote {c.batch}</span>}
+                    {c.manufacturer && <span className="t-data">{c.manufacturer}</span>}
                     {CARD_TEXT_HINT_FIELDS.map((field) => (
                       <span key={field} className="evidence-slot">
                         {hint(field)}
@@ -516,6 +526,7 @@ export default function MedicalPanel({
                   )}
 
                   {r.batch && <span className="t-data">Lote {r.batch}</span>}
+                  {r.manufacturer && <span className="t-data">{r.manufacturer}</span>}
                   {r.notes && <span className="t-data">{r.notes}</span>}
 
                   {r.source === 'llm-extracted' && (
@@ -590,10 +601,17 @@ export default function MedicalPanel({
               <input
                 type="text"
                 value={draft.name}
-                placeholder="Rabia"
+                placeholder="Octavalente"
+                list="medical-known-names"
                 disabled={busy}
                 onChange={(e) => patch({ name: e.target.value })}
               />
+              <datalist id="medical-known-names">
+                {knownNames.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+              <small className="auth__hint">{t.medicalForm.nameHint}</small>
               {formHint('name')}
             </label>
           </div>
@@ -613,6 +631,7 @@ export default function MedicalPanel({
                   })
                 }
               />
+              <small className="auth__hint">{t.medicalForm.dateHint}</small>
               {formHint('performedAt', true)}
             </label>
 
@@ -628,6 +647,7 @@ export default function MedicalPanel({
                   })
                 }
               />
+              <small className="auth__hint">{t.medicalForm.nextDueHint}</small>
               {formHint('nextDueAt', true)}
             </label>
           </div>
@@ -665,7 +685,7 @@ export default function MedicalPanel({
           {/* Offered, never imposed. The 21 days is a deterministic legal rule
               (Reg. EU 2026/131), not a clinical judgement — so the system may
               compute it, but a person still chooses to accept it. */}
-          {draft.performedAt !== null && draft.validFrom === null && (
+          {offersRabiesProtectionStart(draft, openRecord) && (
             <button
               type="button"
               className="btn btn--muted"
@@ -712,6 +732,7 @@ export default function MedicalPanel({
                 disabled={busy}
                 onChange={(e) => patch({ batch: e.target.value || null })}
               />
+              <small className="auth__hint">{t.medicalForm.batchHint}</small>
               {formHint('batch')}
             </label>
 
@@ -723,14 +744,12 @@ export default function MedicalPanel({
                 disabled={busy}
                 onChange={(e) => patch({ manufacturer: e.target.value || null })}
               />
+              <small className="auth__hint">{t.medicalForm.manufacturerHint}</small>
               {formHint('manufacturer')}
             </label>
           </div>
 
-          <p className="admin__sub">
-            El veterinario y el lote pueden quedar vacíos. Una vacuna de campaña es un
-            registro válido y completo aunque no los tenga.
-          </p>
+          <p className="admin__sub">{t.medicalForm.campaignNote}</p>
 
           <label className="auth__field">
             <span className="t-label">Notas (opcional)</span>

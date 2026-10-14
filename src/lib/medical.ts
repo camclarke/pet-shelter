@@ -208,6 +208,46 @@ export function medicalWarnings(
 }
 
 /**
+ * The warnings a person sees for the record they have open.
+ *
+ * ⚠️ NONE for a record imported from the paper register. The register is
+ * frozen history, and the owner's ruling (2026-10-05) is that nothing may ask
+ * anyone to complete it. Opening one of its 94 vaccinations used to say "No
+ * pusiste cuándo toca la próxima", which reads as a request to go and find a
+ * date that paper never held.
+ */
+export function formWarnings(
+  draft: MedicalRecordDraft,
+  ctx: WarningContext,
+  record: { imported: boolean } | null
+): MedicalWarning[] {
+  if (record?.imported) return [];
+  return medicalWarnings(draft, ctx);
+}
+
+/**
+ * Should the form offer to set "protects from" to the dose date + 21 days?
+ *
+ * Only for a RABIES vaccination someone is entering now. Until 2026-10-14 the
+ * button showed on every record whose start date was empty — a deworming, a
+ * sterilization, an Octavalente — so one tap stored a rabies rule on a record
+ * it has nothing to do with. Never on an imported record, for the reason in
+ * `formWarnings`. Still a default a person chooses, never imposed: the 21 days
+ * is the EU rule for a FIRST dose, and the form cannot know which this is.
+ */
+export function offersRabiesProtectionStart(
+  draft: MedicalRecordDraft,
+  record: { imported: boolean } | null
+): boolean {
+  if (record?.imported) return false;
+  return (
+    draft.performedAt !== null &&
+    draft.validFrom === null &&
+    isRabiesRecord(draft.kind, draft.name)
+  );
+}
+
+/**
  * Was the animal old enough for a rabies dose?
  *
  * ⚠️ THREE-STATE, not a boolean. `null` means "cannot be evaluated" — no
