@@ -12,6 +12,7 @@ import {
   nextDue,
   recordSignals,
   summarizeMedicalHistory,
+  validateMedicalDraft,
 } from '../medical';
 
 /**
@@ -145,11 +146,9 @@ test('the summary counts what is awaiting review, and computes nothing from it',
 
 // ─── "next" never means a date already gone ──────────────────────────────────
 //
-// Dates here are literals around NOW. The skew tolerance is pinned as a number
-// (5 minutes) rather than imported, so a test cannot agree with the code by
-// reading the same constant.
-
-const MINUTE = 60_000;
+// Dates here are literals around NOW. The skew tolerance is pinned as clock
+// times (00:02 and 00:10) rather than imported, so a test cannot agree with the
+// code by reading the same constant.
 
 test('a past-due booster is never the summary next-due; it is in overdue', () => {
   const s = summarizeMedicalHistory([record({ id: 'late', nextDueAt: NOW - 30 * DAY })], NOW);
@@ -171,15 +170,84 @@ test('with one booster past due and one ahead, next-due is the one ahead', () =>
 });
 
 test('a booster due inside the clock-skew window is still next, and in exactly one list', () => {
-  // Two minutes ago: past by the wall clock, not overdue by the 5-minute
-  // tolerance. A second comparison against `now` would lose it from both.
-  const s = summarizeMedicalHistory([record({ id: 'edge', nextDueAt: NOW - 2 * MINUTE })], NOW);
+  // Since 2026-10-14 "overdue" is by calendar day, so the skew window that
+  // matters is MIDNIGHT. Built with the local Date constructor, so this holds
+  // in any timezone the suite runs in. Due on the 14th:
+  const due = new Date(2026, 9, 14, 12, 0).getTime();
+  // Two minutes into the 15th: past by the wall clock, inside the 5-minute
+  // tolerance. A second comparison against `now` would lose it from both lists.
+  const s = summarizeMedicalHistory(
+    [record({ id: 'edge', nextDueAt: due })],
+    new Date(2026, 9, 15, 0, 2).getTime()
+  );
   assert.equal(s.nextDue?.id, 'edge');
   assert.deepEqual(s.overdue, []);
-  // Control: six minutes ago is past the tolerance, and moves across.
-  const later = summarizeMedicalHistory([record({ id: 'edge', nextDueAt: NOW - 6 * MINUTE })], NOW);
+  // Control: ten minutes into the 15th is past the tolerance, and moves across.
+  const later = summarizeMedicalHistory(
+    [record({ id: 'edge', nextDueAt: due })],
+    new Date(2026, 9, 15, 0, 10).getTime()
+  );
   assert.equal(later.nextDue, null);
   assert.deepEqual(later.overdue.map((r) => r.id), ['edge']);
+});
+
+// ─── a date is judged by its DAY ─────────────────────────────────────────────
+//
+// Each "now" below is one the OLD instant comparison got wrong: 13:00 and 23:57
+// on the due day both read "VENCIDA" before 2026-10-14. Local constructors
+// throughout, so the result does not depend on the machine's timezone.
+
+const due14 = new Date(2026, 9, 14, 12, 0).getTime(); // typed: local midday
+const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m).getTime();
+
+test('a dose due today is not overdue at 13:00, nor at 23:57', () => {
+  assert.equal(recordSignals(record({ nextDueAt: due14 }), at(14, 13)).overdue, false);
+  assert.equal(recordSignals(record({ nextDueAt: due14 }), at(14, 23, 57)).overdue, false);
+});
+
+test('it becomes overdue the next day, once the clock-skew allowance has passed', () => {
+  assert.equal(recordSignals(record({ nextDueAt: due14 }), at(15, 0, 2)).overdue, false);
+  assert.equal(recordSignals(record({ nextDueAt: due14 }), at(15, 0, 10)).overdue, true);
+  assert.equal(recordSignals(record({ nextDueAt: due14 }), at(16, 9)).overdue, true);
+});
+
+test('declared protection covers its last day, and lapses the next', () => {
+  assert.equal(recordSignals(record({ validUntil: due14 }), at(14, 23, 57)).lapsed, false);
+  assert.equal(recordSignals(record({ validUntil: due14 }), at(15, 9)).lapsed, true);
+});
+
+test('a dose typed today and one read off a card today are the same day', () => {
+  // Typed: local midday. Read off a card: 12:00 UTC — which is the same
+  // calendar day in every timezone from UTC-11 to UTC+11. Neither answers the
+  // other, so neither is hidden.
+  const typed = new Date(2026, 9, 14, 12, 0).getTime();
+  const fromCard = Date.UTC(2026, 9, 14, 12, 0, 0);
+  const s = summarizeMedicalHistory(
+    [
+      record({ id: 'typed', performedAt: typed, nextDueAt: at(20, 12) }),
+      record({ id: 'card', performedAt: fromCard, nextDueAt: at(21, 12) }),
+    ],
+    at(14, 18)
+  );
+  assert.deepEqual(s.answered, []);
+  assert.equal(s.nextDue?.id, 'typed');
+});
+
+test('a next date on the same day as the dose is not "before" it', () => {
+  // Typed dose (local midday) with a next date read off a card for the same
+  // day (12:00 UTC). Comparing instants refused this save in Bolivia.
+  const draft = {
+    ...medicalDraftDefaults(),
+    kind: 'vaccination' as const,
+    name: 'Octavalente',
+    performedAt: new Date(2026, 9, 14, 12, 0).getTime(),
+    nextDueAt: Date.UTC(2026, 9, 14, 12, 0, 0),
+  };
+  assert.equal(validateMedicalDraft(draft, at(14, 18)).includes('due-before-performed'), false);
+  // Control: the day before IS before.
+  assert.ok(
+    validateMedicalDraft({ ...draft, nextDueAt: at(13, 12) }, at(14, 18)).includes('due-before-performed')
+  );
 });
 
 test('every dated confirmed record is either overdue or not earlier than next-due', () => {

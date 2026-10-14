@@ -29,7 +29,7 @@
  */
 
 import type { MedicalRecordKind } from './types';
-import { dayToInstant } from './date-input';
+import { dayToInstant, isPastDay, localDayNumber } from './date-input';
 import { CLOCK_SKEW_TOLERANCE_MS } from './placements';
 import { awaitingReview, confirmedOnly, isConfirmed, type Confirmable } from './review-gate';
 
@@ -130,10 +130,13 @@ export function validateMedicalDraft(
     errors.push('performed-in-future');
   }
 
+  // By calendar day: a dose typed for today (local midday) and a next date read
+  // off a card for the same day (12:00 UTC, 08:00 in Bolivia) are one day, and
+  // comparing the instants refused a save that was perfectly true.
   if (
     draft.performedAt !== null &&
     draft.nextDueAt !== null &&
-    draft.nextDueAt < draft.performedAt
+    localDayNumber(draft.nextDueAt) < localDayNumber(draft.performedAt)
   ) {
     errors.push('due-before-performed');
   }
@@ -244,12 +247,18 @@ export function rabiesProtectionStart(performedAt: number): number {
 /**
  * Is a booster overdue as of `now`?
  *
- * Tolerant of clock skew in the same direction as everything else here: a
- * record due in the next few minutes is not yet overdue.
+ * ⚠️ By CALENDAR DAY. "Próxima: 14 oct" means the 14th is in time, all day.
+ * Until 2026-10-14 this compared instants, and dates are stamped at an hour —
+ * local midday when typed, 08:00 Bolivian time when read off a card — so a
+ * dose due today read "VENCIDA" from 08:05 or 12:05 the same day. A warning
+ * that fires on the due date itself is a warning people learn to ignore.
+ *
+ * Clock skew is still absorbed: the day is read from `now` minus the
+ * tolerance, so a clock a few minutes fast does not end the day early.
  */
 export function isOverdue(nextDueAt: number | null, now: number = Date.now()): boolean {
   if (nextDueAt === null) return false;
-  return nextDueAt < now - CLOCK_SKEW_TOLERANCE_MS;
+  return isPastDay(nextDueAt, now - CLOCK_SKEW_TOLERANCE_MS);
 }
 
 /**
@@ -265,7 +274,8 @@ export function protectionLapsed(
   now: number = Date.now()
 ): boolean {
   if (validUntil === null) return false;
-  return validUntil < now - CLOCK_SKEW_TOLERANCE_MS;
+  // "Protege hasta el 14" covers the 14th; it has lapsed from the 15th.
+  return isPastDay(validUntil, now - CLOCK_SKEW_TOLERANCE_MS);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -387,8 +397,10 @@ export function doseSeriesKey(kind: MedicalRecordKind | null, name: string): str
  * Derived from the records, never marked by a person: a link someone has to
  * remember to set is a link that goes unset.
  *
- * "Later" is a strictly later dose date. A dose given BEFORE the due date still
- * answers it. Two records on the same day answer neither.
+ * "Later" is a strictly later dose DAY. A dose given BEFORE the due date still
+ * answers it. Two records on the same day answer neither — compared by local
+ * calendar day, because a dose typed for today (local midday) and one read off
+ * a card for today (08:00 in Bolivia) are not ordered just by their hours.
  *
  * ⚠️ Applies the review gate itself, on both sides: an unconfirmed reading
  * neither answers a record nor is answered.
@@ -401,8 +413,9 @@ export function answeredByLaterDose<T extends Confirmable & SortableRecord & { n
   for (const record of confirmedOnly(records)) {
     const key = doseSeriesKey(record.kind, record.name);
     if (key === null || record.performedAt === null) continue;
-    dosed.push({ record, key, at: record.performedAt });
-    latest.set(key, Math.max(latest.get(key) ?? -Infinity, record.performedAt));
+    const day = localDayNumber(record.performedAt);
+    dosed.push({ record, key, at: day });
+    latest.set(key, Math.max(latest.get(key) ?? -Infinity, day));
   }
   return new Set(dosed.filter((d) => d.at < latest.get(d.key)!).map((d) => d.record));
 }
