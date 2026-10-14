@@ -1394,6 +1394,58 @@ export const es: Messages = {
     nothingToPrint: 'Marca al menos un animalito que ya tenga placa.',
   },
 
+  /**
+   * The printable vaccination card. Owner's decisions, 2026-10-14: Carta
+   * paper, the microchip printed, four blank rows per table.
+   *
+   * ⚠️ No "falta", no "sin registrar": an empty cell on a frozen register
+   * record is the true state of that record, and paper must not turn it into
+   * a request.
+   */
+  healthCard: {
+    title: 'Carnet de vacunación',
+    screenTitle: (name) => `Carnet de ${name}`,
+    open: 'Imprimir carnet',
+    print: 'Imprimir',
+    backToRecord: '← Ficha',
+    printTip:
+      'Sale en tamaño Carta. En las filas en blanco se pega la etiqueta de la próxima vacuna y se firma.',
+    loading: 'Cargando…',
+    loadFailed:
+      'No pudimos cargar todo lo del carnet. No lo imprimas así: revisa tu conexión e intenta de nuevo.',
+    permissionDenied:
+      'Firestore rechazó la lectura por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+    notFound: 'Esa ficha ya no existe.',
+    shelterLine: (place, phone, host) => `${place} · WhatsApp ${phone} · ${host}`,
+
+    nameLabel: 'Nombre',
+    speciesLabel: 'Especie',
+    sexLabel: 'Sexo',
+    breedLabel: 'Raza',
+    colorLabel: 'Color',
+    microchipLabel: 'Microchip',
+    ageLabel: 'Edad',
+    sterilizationLabel: 'Esterilización',
+    ageAtIntake: (text, day) => (day ? `${text} (al ingresar, ${day})` : `${text} (al ingresar)`),
+    bornOn: (date) => `nacimiento ${date}`,
+
+    vaccinationsTitle: 'Vacunas',
+    dewormingsTitle: 'Desparasitaciones',
+    dateColumn: 'Fecha',
+    vaccineColumn: 'Vacuna',
+    productColumn: 'Producto',
+    labLotColumn: 'Laboratorio y lote',
+    nextDoseColumn: 'Próxima dosis',
+    whoColumn: 'Veterinario o lugar',
+    stickerColumn: 'Etiqueta y firma',
+    signColumn: 'Firma y sello',
+    labLot: (manufacturer, batch) =>
+      [manufacturer, batch ? `lote ${batch}` : null].filter(Boolean).join(' · '),
+    who: (veterinarian, clinic) => [veterinarian, clinic].filter(Boolean).join(' · '),
+    printedOn: (date) => `Impreso el ${date}.`,
+    qrCaption: (host, formattedToken) => `${host}/id/${formattedToken}`,
+  },
+
   // ── the medical review gate, and reading a vaccination card (step 9) ──────
 
   medicalReview: {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 
 import { useAuth } from '@/components/AuthProvider';
 import { t } from '@/i18n';
@@ -312,6 +313,14 @@ export default function MedicalPanel({
       <h2 className="t-label" id="historial-medico">
         Historial médico
       </h2>
+
+      {/* The card prints confirmed records only, so it can be printed at any
+          time — a reading awaiting review simply is not on it yet. */}
+      <p>
+        <Link href={`/admin/pets/${petId}/health-card`} className="btn btn--muted">
+          {t.healthCard.open}
+        </Link>
+      </p>
 
       {error && <p className="auth__error">{error}</p>}
 
