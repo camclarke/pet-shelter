@@ -534,8 +534,14 @@ export default function MedicalPanel({
                     </span>
                   )}
 
+                  {r.product && <span className="t-data">{r.product}</span>}
                   {r.batch && <span className="t-data">Lote {r.batch}</span>}
                   {r.manufacturer && <span className="t-data">{r.manufacturer}</span>}
+                  {r.productExpiresAt !== null && (
+                    <span className="t-data">
+                      {t.medicalForm.vialExpires(formatDate(r.productExpiresAt))}
+                    </span>
+                  )}
                   {r.notes && <span className="t-data">{r.notes}</span>}
 
                   {r.source === 'llm-extracted' && (
@@ -755,6 +761,39 @@ export default function MedicalPanel({
               />
               <small className="auth__hint">{t.medicalForm.manufacturerHint}</small>
               {formHint('manufacturer')}
+            </label>
+          </div>
+
+          {/* The label's own product name and the VIAL's expiry. Neither is
+              `name`, which dose counting reads, and the expiry is never
+              `validUntil`, which is the dog's protection. */}
+          <div className="admin-form__row">
+            <label className="auth__field">
+              <span className="t-label">Producto de la etiqueta (opcional)</span>
+              <input
+                type="text"
+                value={draft.product ?? ''}
+                disabled={busy}
+                onChange={(e) => patch({ product: e.target.value || null })}
+              />
+              <small className="auth__hint">{t.medicalForm.productHint}</small>
+            </label>
+
+            <label className="auth__field">
+              <span className="t-label">Vencimiento del frasco (opcional)</span>
+              <input
+                type="date"
+                value={draft.productExpiresAt === null ? '' : toDateInput(draft.productExpiresAt)}
+                disabled={busy}
+                onChange={(e) =>
+                  patch({
+                    productExpiresAt: e.target.value
+                      ? parseDateInput(e.target.value).getTime()
+                      : null,
+                  })
+                }
+              />
+              <small className="auth__hint">{t.medicalForm.productExpiresHint}</small>
             </label>
           </div>
 

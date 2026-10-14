@@ -687,6 +687,28 @@ export interface MedicalRecord {
   batch: string | null;
   /** Vaccine manufacturer as PRINTED on the card. Null for campaign doses. */
   manufacturer: string | null;
+  /**
+   * The product name printed on the vial's label, e.g. "Vanguard Plus 5 L4".
+   * Distinct from `name`, which is the shelter's own word ("Octavalente") and
+   * is what dose counting and rabies detection read. Changing `name` to the
+   * label's wording would break the series a later dose answers.
+   *
+   * Optional rather than nullable, like `importRef`: every record written
+   * before 2026-10-14 (the 178 imported ones included) lacks it, and the type
+   * says so. Writers go through `MedicalEditFields`, where it is required, so
+   * a writer that drops it fails to compile.
+   */
+  product?: string | null;
+  /**
+   * When the VIAL expires, as printed on its label.
+   *
+   * ⚠️ NOT `validUntil` and NOT `nextDueAt`. `validUntil` is when the dog's
+   * protection lapses; this is a property of the bottle. Storing a label's
+   * expiry in `validUntil` would tell the shelter a dog is unprotected on a
+   * date that has nothing to do with the dog. Its only use is the warning that
+   * an expired product was given (`product-expired-before-dose`).
+   */
+  productExpiresAt?: Timestamp | null;
   notes: string | null;
 
   /**

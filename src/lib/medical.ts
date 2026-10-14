@@ -74,6 +74,10 @@ export interface MedicalRecordDraft {
   clinic: string | null;
   batch: string | null;
   manufacturer: string | null;
+  /** The product name on the vial's label. Not `name` — see `MedicalRecord.product`. */
+  product: string | null;
+  /** Epoch ms the VIAL expires. Never `validUntil` — see `MedicalRecord.productExpiresAt`. */
+  productExpiresAt: number | null;
   notes: string | null;
 }
 
@@ -89,6 +93,8 @@ export function medicalDraftDefaults(): MedicalRecordDraft {
     clinic: null,
     batch: null,
     manufacturer: null,
+    product: null,
+    productExpiresAt: null,
     notes: null,
   };
 }
@@ -164,7 +170,9 @@ export type MedicalWarning =
   /** A rabies record with no protection-start date, which is the date with legal force. */
   | 'rabies-no-valid-from'
   /** Vaccination with no next-due date — easy to forget, not an error. */
-  | 'vaccination-no-next-due';
+  | 'vaccination-no-next-due'
+  /** The vial had already expired on the day the dose was given. */
+  | 'product-expired-before-dose';
 
 export interface WarningContext {
   /** Epoch ms the chip was implanted, if this animal is chipped and it is known. */
@@ -207,7 +215,31 @@ export function medicalWarnings(
     warnings.push('vaccination-no-next-due');
   }
 
+  if (productExpiredBeforeDose(draft.productExpiresAt, draft.performedAt)) {
+    warnings.push('product-expired-before-dose');
+  }
+
   return warnings;
+}
+
+/**
+ * Had the vial expired before the day the dose was given?
+ *
+ * ⚠️ By CALENDAR DAY. A label's "vence 14 oct" means the product is good on
+ * the 14th, all day; it is expired from the 15th. Comparing instants would
+ * warn about a dose given on the expiry date itself, because a date typed for
+ * today is stamped at local midday and a date read from a label at 08:00 in
+ * Bolivia — the defect fixed for due dates in PR #76.
+ *
+ * Any kind, not only vaccinations: a deworming tablet expires too. Unknown
+ * either side → no opinion, like every warning here.
+ */
+export function productExpiredBeforeDose(
+  productExpiresAt: number | null,
+  performedAt: number | null
+): boolean {
+  if (productExpiresAt === null || performedAt === null) return false;
+  return localDayNumber(productExpiresAt) < localDayNumber(performedAt);
 }
 
 /**
@@ -613,6 +645,12 @@ export interface MedicalEditFields {
   clinic: string | null;
   batch: string | null;
   manufacturer: string | null;
+  /**
+   * Required here although optional on `MedicalRecord`: every writer goes
+   * through this shape, so one that forgets the field fails to compile.
+   */
+  product: string | null;
+  productExpiresAt: number | null;
   notes: string | null;
 }
 
@@ -644,6 +682,8 @@ export function medicalEditFields(draft: MedicalRecordDraft): MedicalEditFields 
     clinic: draft.clinic?.trim() || null,
     batch: draft.batch?.trim() || null,
     manufacturer: draft.manufacturer?.trim() || null,
+    product: draft.product?.trim() || null,
+    productExpiresAt: draft.productExpiresAt,
     notes: draft.notes?.trim() || null,
   };
 }
@@ -660,6 +700,13 @@ export interface DraftableRecord {
   clinic: string | null;
   batch: string | null;
   manufacturer: string | null;
+  /**
+   * Optional: a card reading (`MedicalCandidateView`) has no such fields — the
+   * card reader is not reworked to produce them — and a record written before
+   * 2026-10-14 lacks them. Absent becomes null in the draft.
+   */
+  product?: string | null;
+  productExpiresAt?: number | null;
   notes: string | null;
 }
 
@@ -681,6 +728,8 @@ export function draftFromRecord(record: DraftableRecord): MedicalRecordDraft {
     clinic: record.clinic,
     batch: record.batch,
     manufacturer: record.manufacturer,
+    product: record.product ?? null,
+    productExpiresAt: record.productExpiresAt ?? null,
     notes: record.notes,
   };
 }

@@ -88,8 +88,23 @@ export interface HealthCardMessages {
   readonly whoColumn: string;
   readonly stickerColumn: string;
   readonly signColumn: string;
-  /** "Zoetis · lote 726501"; either part may be absent, and both absent is empty. */
-  labLot(manufacturer: string | null, batch: string | null): string;
+  /**
+   * "Vanguard Plus 5 L4 · Zoetis · lote 726501 · frasco vence 11/05/2027";
+   * any part may be absent, and all absent is empty. `vialExpires` arrives
+   * already formatted. It must say "frasco": a bare "vence" beside "Próxima
+   * dosis" reads as the dog's protection running out.
+   */
+  labLot(
+    product: string | null,
+    manufacturer: string | null,
+    batch: string | null,
+    vialExpires: string | null
+  ): string;
+  /**
+   * A deworming's "Producto" cell: the shelter's word, then the label's product
+   * when there is one and it says something else. "Desparasitación · Drontal Plus".
+   */
+  dewormingProduct(name: string | null, product: string | null): string;
   /** Veterinarian and clinic, either may be absent. */
   who(veterinarian: string | null, clinic: string | null): string;
   /** The footer line. */
@@ -886,6 +901,11 @@ export interface MedicalFormCopy {
   readonly nextDueHint: string;
   readonly batchHint: string;
   readonly manufacturerHint: string;
+  readonly productHint: string;
+  /** Must say it is the BOTTLE's date, not when the dog's protection ends. */
+  readonly productExpiresHint: string;
+  /** The history row's line: "Frasco vence 11 may 2027". */
+  vialExpires(date: string): string;
   /** Replaces "El veterinario y el lote pueden quedar vacíos…". */
   readonly campaignNote: string;
 }

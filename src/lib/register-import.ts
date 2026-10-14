@@ -881,6 +881,8 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
         clinic: null,
         batch: null,
         manufacturer: null,
+        product: null,
+        productExpiresAt: null,
         notes: record.notes,
       };
       const errors = validateMedicalDraft(draftForValidation, todayMs);

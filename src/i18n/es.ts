@@ -336,6 +336,8 @@ const MEDICAL_WARNING: Record<MedicalWarning, string> = {
     'Falta desde cuándo protege. Para viajar a la Unión Europea, una primera antirrábica protege desde 21 días después de la dosis; un refuerzo puesto a tiempo, desde el mismo día.',
   'vaccination-no-next-due':
     'Esta vacuna se guarda sin fecha de próxima dosis. Si la tarjeta tiene «Fecha refuerzo», cópiala de ahí.',
+  'product-expired-before-dose':
+    'El producto ya estaba vencido el día en que se aplicó. Puede que no proteja: el veterinario decide si hay que repetirlo. Igual puedes guardar el registro tal como pasó.',
 };
 
 const MEASUREMENT_ERROR: Record<MeasurementError, string> = {
@@ -1439,8 +1441,22 @@ export const es: Messages = {
     whoColumn: 'Veterinario o lugar',
     stickerColumn: 'Etiqueta y firma',
     signColumn: 'Firma y sello',
-    labLot: (manufacturer, batch) =>
-      [manufacturer, batch ? `lote ${batch}` : null].filter(Boolean).join(' · '),
+    labLot: (product, manufacturer, batch, vialExpires) =>
+      [
+        product,
+        manufacturer,
+        batch ? `lote ${batch}` : null,
+        vialExpires ? `frasco vence ${vialExpires}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    dewormingProduct: (name, product) => {
+      const fold = (s: string) =>
+        s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+      if (!product) return name ?? '';
+      if (!name || fold(name) === fold(product)) return product;
+      return `${name} · ${product}`;
+    },
     who: (veterinarian, clinic) => [veterinarian, clinic].filter(Boolean).join(' · '),
     printedOn: (date) => `Impreso el ${date}.`,
     qrCaption: (host, formattedToken) => `${host}/id/${formattedToken}`,
@@ -1587,6 +1603,11 @@ export const es: Messages = {
       'Cópiala de «Fecha refuerzo» o «Próxima aplicación». No es la fecha de vencimiento de la etiqueta.',
     batchHint: 'Está en la etiqueta pegada, como «Lote» o «N. Lote».',
     manufacturerHint: 'El laboratorio que fabrica la vacuna, también en la etiqueta.',
+    productHint:
+      'El nombre impreso en la etiqueta, como «Vanguard Plus 5 L4». Arriba, en «Nombre», sigue la palabra de siempre.',
+    productExpiresHint:
+      'La fecha de vencimiento del frasco, de la etiqueta. No es hasta cuándo protege al animalito. Si dice solo mes y año, pon el último día de ese mes.',
+    vialExpires: (date) => `Frasco vence ${date}`,
     campaignNote:
       'Si la vacuna no trae etiqueta, como en las campañas municipales, el veterinario, el lote y el laboratorio pueden quedar vacíos. Es un registro válido y completo.',
   },

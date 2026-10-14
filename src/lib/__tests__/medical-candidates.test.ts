@@ -179,3 +179,29 @@ test('the newest card comes first, and a card’s rows keep their order', () => 
     ['new-0', 'new-1', 'old-0', 'old-1']
   );
 });
+
+// ─── the label's product and the vial's expiry (C2, 2026-10-14) ──────────────
+
+test('correcting a card reading can add the label product and vial expiry, and they are kept', () => {
+  // The card reader never produces these; a person types them in the
+  // correct-and-confirm form, and the confirmed record must carry them.
+  const plan = planConfirmation(
+    PROVENANCE,
+    draft({ product: ' Vanguard Plus 5 L4 ', productExpiresAt: NOW + 200 * DAY }),
+    'reviewer@example.com',
+    NOW
+  );
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.record.product, 'Vanguard Plus 5 L4');
+  assert.equal(plan.record.productExpiresAt, NOW + 200 * DAY);
+  assert.equal(plan.record.validUntil, null);
+});
+
+test('a card reading confirmed as it stands has both fields empty, never absent', () => {
+  const plan = planConfirmation(PROVENANCE, draft(), 'reviewer@example.com', NOW);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.record.product, null);
+  assert.equal(plan.record.productExpiresAt, null);
+});
