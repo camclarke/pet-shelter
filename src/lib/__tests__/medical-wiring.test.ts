@@ -187,3 +187,42 @@ test('the route checks the admin claim before it checks configuration', () => {
   assert.ok(auth >= 0, 'must authenticate through requireAdmin');
   assert.ok(configured > auth, 'authentication must come first');
 });
+
+// ─── the form asks nothing of an imported record, and hints at the card ──────
+
+test('the form takes its warnings and the +21 offer from the pure helpers, given the open record', () => {
+  const src = code(PANEL);
+  assert.ok(/const openRecord = editing\?\.kind === 'record' \? editing\.record : null;/.test(src));
+  assert.ok(/formWarnings\(draft, \{[^}]*\}, openRecord\)/.test(src), 'warnings must know which record is open');
+  assert.equal(/\bmedicalWarnings\(/.test(src), false, 'call medicalWarnings through formWarnings');
+  assert.ok(/offersRabiesProtectionStart\(draft, openRecord\) && \(/.test(src), 'the +21 button needs its gate');
+  assert.equal(/draft\.performedAt !== null && draft\.validFrom === null && \(/.test(src), false, 'the old ungated condition must not return');
+});
+
+test('the name field offers the names already on this animal', () => {
+  const src = code(PANEL);
+  assert.ok(/list="medical-known-names"/.test(src));
+  assert.ok(/<datalist id="medical-known-names">/.test(src));
+  assert.ok(/const knownNames = /.test(src));
+});
+
+test('the history and the review rows show the laboratory', () => {
+  const src = code(PANEL);
+  assert.ok(/r\.manufacturer && <span className="t-data">\{r\.manufacturer\}<\/span>/.test(src));
+  assert.ok(/c\.manufacturer && <span className="t-data">\{c\.manufacturer\}<\/span>/.test(src));
+});
+
+test('no copy promises reminders that do not exist', () => {
+  // "recordatorios" named a feature nobody had built. If a reminder screen is
+  // built later, the sentence comes back WITH it, in the same change.
+  assert.equal(/recordatorio/i.test(read('src/i18n/es.ts')), false);
+});
+
+test('the next-dose hint says what the date is NOT: the sticker expiry', () => {
+  // Every sticker on a real Bolivian booklet prints an expiry date beside the
+  // "Fecha refuerzo" column (photographed 2026-10-14).
+  const es = read('src/i18n/es.ts');
+  const hint = es.slice(es.indexOf('nextDueHint:'), es.indexOf('batchHint:'));
+  assert.ok(hint.includes('Fecha refuerzo'));
+  assert.ok(/vencimiento/i.test(hint));
+});

@@ -5,9 +5,11 @@ import {
   RABIES_MIN_AGE_WEEKS,
   RABIES_PROTECTION_DELAY_DAYS,
   byMostRecent,
+  formWarnings,
   isOverdue,
   medicalDraftDefaults,
   medicalWarnings,
+  offersRabiesProtectionStart,
   nextDue,
   protectionLapsed,
   rabiesAgeIsValid,
@@ -290,4 +292,35 @@ test('nextDue returns null when nothing is scheduled', () => {
     ]),
     null
   );
+});
+
+// ─── frozen register records ask for nothing ─────────────────────────────────
+
+const imported = { imported: true };
+const typedNow = { imported: false };
+
+function rabiesDraft(over: Partial<MedicalRecordDraft> = {}): MedicalRecordDraft {
+  return { ...medicalDraftDefaults(), kind: 'vaccination', name: 'Antirrábica', performedAt: NOW - DAY, ...over };
+}
+
+test('an imported record raises no warning, even one a new record would', () => {
+  const draft = rabiesDraft({ name: 'Octavalente' });
+  // Control: the same draft, as a new record, IS warned about its next date.
+  assert.ok(formWarnings(draft, {}, null).includes('vaccination-no-next-due'));
+  assert.ok(formWarnings(draft, {}, typedNow).includes('vaccination-no-next-due'));
+  assert.deepEqual(formWarnings(draft, {}, imported), []);
+});
+
+test('the +21 offer is for a rabies dose only', () => {
+  assert.equal(offersRabiesProtectionStart(rabiesDraft(), null), true);
+  for (const name of ['Octavalente', 'Vanguard Plus 5 L4']) {
+    assert.equal(offersRabiesProtectionStart(rabiesDraft({ name }), null), false, name);
+  }
+  assert.equal(offersRabiesProtectionStart(rabiesDraft({ kind: 'deworming', name: 'Rabia' }), null), false);
+});
+
+test('the +21 offer never appears on an imported record, nor once a start date is set', () => {
+  assert.equal(offersRabiesProtectionStart(rabiesDraft(), imported), false);
+  assert.equal(offersRabiesProtectionStart(rabiesDraft({ validFrom: NOW }), null), false);
+  assert.equal(offersRabiesProtectionStart(rabiesDraft({ performedAt: null }), null), false);
 });

@@ -619,6 +619,8 @@ export interface Messages {
 
   readonly intakeForm: IntakeFormCopy;
 
+  readonly medicalForm: MedicalFormCopy;
+
   /** Where an extracted record came from: "Leído de una tarjeta de vacunación". */
   extractionSourceLabel(source: MedicalExtractionSource | null): string;
 
@@ -807,6 +809,26 @@ export interface IntakeFormCopy {
   /** "Para publicar su página faltan 3 datos" — the summary of a closed list. */
   publishMissingSummary(count: number): string;
   readonly publishMissingIntro: string;
+}
+
+/**
+ * Hints under the fields of the medical record form, worded after the real
+ * Bolivian booklet (COMVETCO "Cartilla Sanitaria") the owner photographed on
+ * 2026-10-14: a "Vacuna" column in the vet's handwriting, "Fecha refuerzo",
+ * and a product sticker that prints a lot and an EXPIRY date.
+ *
+ * ⚠️ None of these may name a screen or a feature that does not exist, and
+ * none may suggest a date can be worked out: a next date is copied, never
+ * computed.
+ */
+export interface MedicalFormCopy {
+  readonly nameHint: string;
+  readonly dateHint: string;
+  readonly nextDueHint: string;
+  readonly batchHint: string;
+  readonly manufacturerHint: string;
+  /** Replaces "El veterinario y el lote pueden quedar vacíos…". */
+  readonly campaignNote: string;
 }
 
 export interface MedicalReviewCopy {
