@@ -45,20 +45,28 @@
    proxy round-trip per thumbnail on a screen nobody browses, and these are
    blob-backed previews whose dimensions vary per upload. */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useAuth } from '@/components/AuthProvider';
 import {
   applyPhotoPrefill,
+  blockersForField,
   draftDefaults,
+  firstBlockingField,
+  hasPublishIntent,
+  INTAKE_ERROR_FIELD,
+  INTAKE_FIELD_STEP,
+  INTAKE_FIELDS_IN_MORE,
   publishBlockers,
+  publishButtonFace,
   registerBlockers,
   sexConflict,
   slugify,
   validateStep,
   type IntakeError,
+  type IntakeFieldKey,
   type IntakeStep,
   type PetDraft,
   type RegisterRef,
@@ -100,7 +108,7 @@ import PhotoSuggestions, {
   SEX_WITHHELD_REASON,
   WITHHELD_REASON,
 } from './PhotoSuggestions';
-import EditableField, { type FieldOffer } from './EditableField';
+import EditableField, { FieldProblem, type FieldOffer } from './EditableField';
 import GuidedPhotoCapture from './GuidedPhotoCapture';
 import { PetPhoto } from './PetPhoto';
 import { t } from '@/i18n';
@@ -137,6 +145,46 @@ const SEX_OPTIONS: { value: PetSex; label: string }[] = [
  * invites someone to create a record for a dog that was adopted last year.
  */
 const STATUS_OPTIONS: PetStatus[] = ['shelter', 'quarantine', 'foster', 'inbound', 'available'];
+
+/** Every row the wizard renders: the blocker-fixing fields plus four that never block. */
+type RowKey = IntakeFieldKey | 'colorPattern' | 'coatType' | 'weight' | 'status';
+
+function isIntakeFieldKey(key: RowKey): key is IntakeFieldKey {
+  return key in INTAKE_FIELD_STEP;
+}
+
+/** DOM id of a field's row or section, the target of the blocker list. */
+function fieldAnchorId(key: RowKey): string {
+  return `intake-field-${key}`;
+}
+
+/** Ids the publish button describes itself with. */
+const PUBLISH_BLOCKERS_ID = 'intake-publish-blockers';
+const PUBLISH_STATUS_ID = 'intake-publish-status';
+
+/**
+ * A part of the form that is not an `EditableField` row but can still be the
+ * thing blocking publication: the microchip fieldset, the cover photo, the
+ * photo descriptions. Same mark and reason as a row, above its content so the
+ * reason is what scrolling to it lands on.
+ */
+function FieldSection({
+  anchorId,
+  problem,
+  children,
+}: {
+  anchorId: string;
+  problem: ReactNode | undefined;
+  children: ReactNode;
+}) {
+  const hasProblem = problem !== undefined;
+  return (
+    <div id={anchorId} className={hasProblem ? 'intake-section intake-section--problem' : 'intake-section'}>
+      {hasProblem && <FieldProblem id={`${anchorId}-problem`}>{problem}</FieldProblem>}
+      {children}
+    </div>
+  );
+}
 
 /** Spanish for the three-way "we don't know yet" answers. */
 const TRISTATE: { value: string; label: string }[] = [
@@ -316,6 +364,22 @@ export function IntakeWizard() {
   const [aiOpen, setAiOpen] = useState<boolean | null>(null);
   const [moreOpen, setMoreOpen] = useState<boolean | null>(null);
 
+  /**
+   * Publish intent, half of it: "Publicar" was tapped while something was
+   * missing. The other half is choosing «Disponible»; `hasPublishIntent()`
+   * combines them. Until one of the two happens nothing is marked, because
+   * registering (a name and one photo) must stay as calm as PR #74 made it.
+   */
+  const [publishTapped, setPublishTapped] = useState(false);
+  /** The blocker list's own open state; `null` follows publish intent. */
+  const [publishListOpen, setPublishListOpen] = useState<boolean | null>(null);
+  /**
+   * The field the screen should scroll to once it is rendered. A state rather
+   * than a direct call, because reaching it may first need a step change or the
+   * "Más datos" section to open, and the element does not exist until then.
+   */
+  const [scrollTarget, setScrollTarget] = useState<IntakeFieldKey | null>(null);
+
   // A new intake opens with the name ready to type: it is one of only two
   // things asked for, and a collapsed row would hide it behind a tap. Keyed on
   // the draft's id, so it fires once per animal and never while typing.
@@ -454,6 +518,27 @@ export function IntakeWizard() {
     };
   }, [chipLookupCode]);
 
+  // Scroll to the field a blocker points at, once it exists. Re-runs when the
+  // step, the open editor or the "Más datos" section change, because each of
+  // those can be what makes the element appear; it clears itself only once it
+  // has found the element.
+  useEffect(() => {
+    if (scrollTarget === null) return;
+    const element = document.getElementById(fieldAnchorId(scrollTarget));
+    if (!element) return;
+    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Focus follows, so a keyboard or screen-reader user lands where a sighted
+    // one does. The open editor's control first; otherwise the row's button.
+    const focusable =
+      element.querySelector<HTMLElement>(
+        '.field-row__editor input, .field-row__editor select, .field-row__editor textarea',
+      ) ??
+      element.querySelector<HTMLElement>('input[aria-invalid="true"]') ??
+      element.querySelector<HTMLElement>('button, input, select, textarea');
+    focusable?.focus({ preventScroll: true });
+    setScrollTarget(null);
+  }, [scrollTarget, step, openField, moreOpen]);
+
   if (!draft) {
     return (
       <div className="admin-gate" aria-busy="true">
@@ -464,6 +549,28 @@ export function IntakeWizard() {
 
   const blockers = publishBlockers(draft);
   const missingToRegister = registerBlockers(draft);
+
+  // ⚠️ Marks appear only after publish intent (owner decision 2026-10-15). The
+  // count on the button is visible always; the per-field "!" and reasons are
+  // not, so registering a dog never reads as a nine-field job again.
+  const publishIntent = hasPublishIntent(publishTapped, draft.status);
+  const publishFace = publishButtonFace(blockers.length, draft.status);
+  const publishListIsOpen = publishListOpen ?? publishIntent;
+  const onWall = draft.status === 'available';
+  const offWallParts = t.intakeForm.publishOffWall(t.statusLabel(draft.status));
+
+  /** The reason a field blocks publishing, or undefined when it should look calm. */
+  function problemFor(key: IntakeFieldKey): ReactNode | undefined {
+    if (!publishIntent) return undefined;
+    const codes = blockersForField(blockers, key);
+    if (codes.length === 0) return undefined;
+    return codes.map((code) => t.intakeError(code)).join(' ');
+  }
+
+  /** Wiring for the sections that are not rows. */
+  function sectionProps(key: IntakeFieldKey) {
+    return { anchorId: fieldAnchorId(key), problem: problemFor(key) };
+  }
 
   const captured = draft.media.map((m) => ({
     slot: m.slot,
@@ -794,12 +901,50 @@ export function IntakeWizard() {
   })();
 
   /** Wiring shared by every row, so a new field cannot forget half of it. */
-  function fieldProps(key: string) {
+  function fieldProps(key: RowKey) {
     return {
       editing: openField === key,
       onToggle: () => setOpenField((cur) => (cur === key ? null : key)),
       disabled: busy,
+      anchorId: fieldAnchorId(key),
+      problem: isIntakeFieldKey(key) ? problemFor(key) : undefined,
     };
+  }
+
+  /**
+   * Take the person to the part of the form that fixes a blocker: the right
+   * step, the "Más datos" section open if it lives there, its editor open if
+   * it is a row (one editor at a time, as everywhere else), then scroll.
+   */
+  function revealField(key: IntakeFieldKey) {
+    if (INTAKE_FIELDS_IN_MORE.has(key)) setMoreOpen(true);
+    // The three sections have no editor of their own; closing whichever one
+    // is open keeps the screen from jumping under the scroll.
+    const isSection = key === 'microchip' || key === 'photo' || key === 'photoAlt';
+    setOpenField(isSection ? null : key);
+    const target = INTAKE_FIELD_STEP[key];
+    if (step !== target) void goToStep(target);
+    setScrollTarget(key);
+  }
+
+  /**
+   * The footer button. While something is missing it is `aria-disabled`, not
+   * `disabled`, so the tap lands — and that tap is publish intent: it turns
+   * the marks on, opens the list, and goes to the first field to fix. Until
+   * 2026-10-15 a blocked button looked enabled and did nothing.
+   */
+  function handlePublishTap() {
+    if (blockers.length > 0) {
+      setPublishTapped(true);
+      setPublishListOpen(true);
+      if (blockers.some((code) => INTAKE_FIELDS_IN_MORE.has(INTAKE_ERROR_FIELD[code]))) {
+        setMoreOpen(true);
+      }
+      const first = firstBlockingField(blockers);
+      if (first !== null) revealField(first);
+      return;
+    }
+    void handlePublish();
   }
 
   function setAlt(id: string, alt: string) {
@@ -824,6 +969,9 @@ export function IntakeWizard() {
 
   async function handlePublish() {
     if (!user) return;
+    // Defence in depth: the button no longer carries `disabled` while blocked,
+    // so this is the line that keeps an incomplete page off the site.
+    if (publishBlockers(draft!).length > 0) return;
     setBusy(true);
     setError(null);
     try {
@@ -950,6 +1098,9 @@ export function IntakeWizard() {
     setDirty(false);
     setAiOpen(null);
     setMoreOpen(null);
+    setPublishTapped(false);
+    setPublishListOpen(null);
+    setScrollTarget(null);
     setDraft(draftDefaults(mintPetId()));
     // Only when a stale `?draft=` is still in the URL; otherwise the effect
     // does not re-run and would leave the resumed id in the address bar.
@@ -1285,15 +1436,17 @@ export function IntakeWizard() {
           {/* ── the one required photo ────────────────────────────────────
               Cover mode: a single slot and NO analysis control. Registering
               an animal must never look like it needs a model. */}
-          <GuidedPhotoCapture
-            mode="cover"
-            captured={captured}
-            busy={busy}
-            disabled={busy || suggesting}
-            analysing={false}
-            onPick={(slot, file) => void handlePickPhoto(slot, file)}
-            onAnalyze={() => undefined}
-          />
+          <FieldSection {...sectionProps('photo')}>
+            <GuidedPhotoCapture
+              mode="cover"
+              captured={captured}
+              busy={busy}
+              disabled={busy || suggesting}
+              analysing={false}
+              onPick={(slot, file) => void handlePickPhoto(slot, file)}
+              onAnalyze={() => undefined}
+            />
+          </FieldSection>
 
           {/* ── registered, or what is still missing to be ────────────────
               ⚠️ Two requirements, and only two. The nine things a public page
@@ -1745,6 +1898,7 @@ export function IntakeWizard() {
             </EditableField>
           </div>
 
+          <FieldSection {...sectionProps('microchip')}>
           <fieldset className="admin-form__fieldset">
             <legend className="t-label">Microchip</legend>
             <label className="admin-form__check">
@@ -1888,6 +2042,7 @@ export function IntakeWizard() {
               </>
             )}
           </fieldset>
+          </FieldSection>
           </details>
         </section>
       )}
@@ -1915,6 +2070,7 @@ export function IntakeWizard() {
           </label>
 
           {draft.media.length > 0 && (
+            <FieldSection {...sectionProps('photoAlt')}>
             <ul className="admin-photos">
               {draft.media.map((media, index) => (
                 <li key={media.id} className="admin-photo">
@@ -1939,6 +2095,9 @@ export function IntakeWizard() {
                         value={media.alt}
                         placeholder="Perra mestiza café echada en el patio"
                         disabled={busy}
+                        aria-invalid={
+                          publishIntent && media.alt.trim().length === 0 ? 'true' : undefined
+                        }
                         onChange={(e) => setAlt(media.id, e.target.value)}
                       />
                     </label>
@@ -1954,6 +2113,7 @@ export function IntakeWizard() {
                 </li>
               ))}
             </ul>
+            </FieldSection>
           )}
         </section>
       )}
@@ -2102,20 +2262,62 @@ export function IntakeWizard() {
       {/* ⚠️ Not errors, and not shown as errors. These are what a PUBLIC page
           needs; an animal is registered without any of them. Until 2026-10-10
           this was a red list visible from the first keystroke, which made
-          admitting a dog read as a nine-field job. Closed by default. */}
+          admitting a dog read as a nine-field job. Closed by default, and
+          opened by publish intent only: tapping Publicar, or choosing
+          «Disponible». Each item takes the person to the field it names. */}
       {blockers.length > 0 && (
-        <details className="intake-more intake-more--publish">
+        <details
+          className="intake-more intake-more--publish"
+          open={publishListIsOpen}
+          onToggle={(e) => setPublishListOpen(e.currentTarget.open)}
+        >
           <summary>{t.intakeForm.publishMissingSummary(blockers.length)}</summary>
           <p className="admin__sub">{t.intakeForm.publishMissingIntro}</p>
-          <ul className="intake-more__list">
+          <ul className="intake-more__list" id={PUBLISH_BLOCKERS_ID}>
             {blockers.map((code: IntakeError) => (
-              <li key={code}>{t.intakeError(code)}</li>
+              <li key={code}>
+                <button
+                  type="button"
+                  className="intake-more__goto"
+                  onClick={() => revealField(INTAKE_ERROR_FIELD[code])}
+                  disabled={busy}
+                >
+                  {t.intakeError(code)}
+                </button>
+              </li>
             ))}
           </ul>
         </details>
       )}
 
-      <footer className="admin__footer">
+      <footer className="admin__footer admin__footer--intake">
+        {/* Always visible, whatever is missing: publishing with a status other
+            than «Disponible» is allowed (owner decision 2026-10-15), so the
+            screen says plainly that the page will exist off the wall. */}
+        <div className="intake-publish-status" data-wall={onWall ? 'true' : 'false'}>
+          <p className="intake-publish-status__text" id={PUBLISH_STATUS_ID}>
+            {onWall ? (
+              t.intakeForm.publishOnWall
+            ) : (
+              <>
+                {offWallParts[0]}
+                <strong>{offWallParts[1]}</strong>
+                {offWallParts[2]}
+              </>
+            )}
+          </p>
+          {!onWall && (
+            <button
+              type="button"
+              className="btn btn--muted intake-publish-status__fix"
+              onClick={() => update({ status: 'available' })}
+              disabled={busy}
+            >
+              {t.intakeForm.switchToAvailable}
+            </button>
+          )}
+        </div>
+
         <div className="admin__footer-left">
           <button
             type="button"
@@ -2151,13 +2353,21 @@ export function IntakeWizard() {
         </div>
 
         <div className="admin__footer-right">
+          {/* `aria-disabled`, not `disabled`, while something is missing: the
+              tap has to land, because it is what shows the person why. Real
+              `disabled` stays for a save in flight and for no signed-in user.
+              handlePublish() refuses on blockers regardless. */}
           <button
             type="button"
             className="btn btn--action"
-            onClick={() => void handlePublish()}
-            disabled={busy || blockers.length > 0 || !user}
+            onClick={handlePublishTap}
+            disabled={busy || !user}
+            aria-disabled={blockers.length > 0 ? 'true' : undefined}
+            aria-describedby={
+              blockers.length > 0 ? `${PUBLISH_BLOCKERS_ID} ${PUBLISH_STATUS_ID}` : PUBLISH_STATUS_ID
+            }
           >
-            Publicar
+            {t.intakeForm.publishAction(publishFace)}
           </button>
         </div>
       </footer>

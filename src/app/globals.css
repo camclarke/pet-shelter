@@ -1863,6 +1863,146 @@ textarea {
   opacity: 0.75;
 }
 
+/* ---- intake: why "Publicar" cannot publish yet --------------------------
+   Scoped to the intake screen on purpose: the global .btn has no :disabled
+   state, and fixing that is its own change. Every colour here is a token that
+   already flips at night, so there is no dark-mode block to keep in step.
+
+   The marks appear only after publish intent (a tap on Publicar, or choosing
+   «Disponible»). Coral is a FILL here, where it passes on cream; the reason
+   text stays in reading ink. */
+.field-row--problem {
+  box-shadow: inset 4px 0 0 var(--coral);
+}
+
+.intake-section--problem {
+  border-left: 4px solid var(--coral);
+  padding-left: var(--space-2);
+}
+
+.field-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  color: var(--jade-deep);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.intake-section > .field-problem {
+  padding: 0 0 var(--space-1);
+}
+
+.field-problem__mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: var(--coral);
+  color: var(--charcoal);
+  font-weight: 800;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.field-row__label .field-problem__mark {
+  margin-right: 6px;
+  vertical-align: text-bottom;
+}
+
+.field-problem__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Each blocker is a way to the field that fixes it. 44px tall for a thumb. */
+.intake-more__goto {
+  /* Block, so the list bullet sits on the first line of a wrapped reason
+     rather than on its last (measured at 360px). */
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.intake-more__goto:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Blocked, but the tap still lands — so it must look inactive without looking
+   dead. No coral fill and no stamp shadow; the pointer stays, because tapping
+   shows what is missing. */
+.admin__footer .btn[aria-disabled='true'] {
+  background: var(--cream-2);
+  color: var(--jade-deep);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.admin__footer .btn[aria-disabled='true']:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* A long face ("Publicar sin mostrar en el muro") wraps rather than pushing
+   the page sideways at 360px. Intake's footer only: 20 other admin footers
+   share .admin__footer and are not part of this change. */
+.admin__footer--intake .admin__footer-right {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.admin__footer--intake .admin__footer-right .btn {
+  max-width: 100%;
+  min-height: 44px;
+  white-space: normal;
+  text-align: center;
+}
+
+/* Whether publishing reaches the wall. Always visible, above both halves. */
+.intake-publish-status {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: 10px var(--space-2);
+  border-left: 3px solid var(--jade);
+  background: var(--cream-2);
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.intake-publish-status[data-wall='false'] {
+  border-left-color: var(--sun);
+}
+
+.intake-publish-status__text {
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.intake-publish-status__fix {
+  min-height: 44px;
+}
+
 /* ---- lists -------------------------------------------------------------- */
 .admin-list {
   margin-top: var(--space-4);

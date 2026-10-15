@@ -419,6 +419,14 @@ test('what a public page needs is a closed list, never the red error list', () =
 
 test('publishing is still gated on everything it was', () => {
   const src = source(WIZARD_SRC);
-  assert.ok(/disabled=\{busy \|\| blockers\.length > 0 \|\| !user\}/.test(src));
+  // Since 2026-10-15 the button carries `aria-disabled` while blocked, so a
+  // tap lands and explains itself. The gate moved into the handler, which
+  // must refuse on the same blockers the screen computes.
+  assert.ok(/disabled=\{busy \|\| !user\}/.test(src));
+  assert.ok(/aria-disabled=\{blockers\.length > 0 \? 'true' : undefined\}/.test(src));
   assert.ok(/const blockers = publishBlockers\(draft\)/.test(src));
+  const handler = src.slice(src.indexOf('async function handlePublish()'));
+  const refuse = handler.indexOf('if (publishBlockers(draft!).length > 0) return;');
+  const write = handler.indexOf('await publishDraft(');
+  assert.ok(refuse >= 0 && write > refuse, 'handlePublish must refuse on blockers before it writes');
 });
