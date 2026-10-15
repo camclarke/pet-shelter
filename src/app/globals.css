@@ -28,6 +28,10 @@
   --brand-mark: var(--jade);
 
   --line: rgba(18, 70, 59, 0.16);
+  /* A line that has to be SEEN, not just felt: the base bar of a muted button.
+     3.33:1 on cream, so it passes WCAG 1.4.11 (3:1 for a control's edge),
+     where --line is about 1.3:1. Redefined in BOTH dark blocks below. */
+  --line-strong: rgba(18, 70, 59, 0.6);
   --shadow: 0 1px 0 rgba(18, 70, 59, 0.08), 0 12px 26px -14px rgba(18, 70, 59, 0.45);
   --shadow-high: 0 1px 0 rgba(18, 70, 59, 0.1), 0 28px 46px -20px rgba(18, 70, 59, 0.5);
 
@@ -64,6 +68,7 @@
   --jade-deep: #efe9dc;
   --brand-mark: var(--jade-light);
   --line: rgba(239, 233, 220, 0.15);
+  --line-strong: rgba(239, 233, 220, 0.42); /* 3.58:1 on the night page */
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 14px 30px -16px rgba(0, 0, 0, 0.9);
   --shadow-high: 0 1px 0 rgba(0, 0, 0, 0.4), 0 30px 50px -20px rgba(0, 0, 0, 0.95);
 }
@@ -75,6 +80,7 @@
     --jade-deep: #efe9dc;
     --brand-mark: var(--jade-light);
     --line: rgba(239, 233, 220, 0.15);
+    --line-strong: rgba(239, 233, 220, 0.42);
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 14px 30px -16px rgba(0, 0, 0, 0.9);
     --shadow-high: 0 1px 0 rgba(0, 0, 0, 0.4), 0 30px 50px -20px rgba(0, 0, 0, 0.95);
   }
@@ -213,50 +219,146 @@ textarea {
 /* Contrast rule, enforced by convention:
    jade (3.5:1) and coral (3.1:1) on crema are FILLS, never body text.
    Reading text is jade-hondo. Text sitting on coral is carbon (5.3:1). */
+
+/* ── buttons: «Tinta plana» ─────────────────────────────────────────────────
+   Flat ink: no border, no offset stamp shadow. The label speaks in the
+   poster's own face — Fraunces, sentence case, 19px bold — and one thick bar
+   at the base is the ink that pooled when the block was printed. It thickens
+   on hover and squeezes thin on press, as the block goes down onto the paper.
+   Rendered in design/estilo.html §06.
+
+   ⚠️ THE 19px IS A CONTRAST DECISION, NOT A TASTE ONE. Cream on jade (the
+   brand button) is 3.45:1 by day. That fails WCAG AA for normal text (4.5:1)
+   and passes only as "large text" (3:1), which for bold means ≥ 18.66px
+   (14pt). So no rule may set a .btn below 18.66px on anything that can carry
+   .btn--brand. A compact context shrinks height and padding, never the type
+   (see .btn--compact). A rule that does shrink the type must say "exempt" in
+   its comment and must be one where .btn--brand cannot appear — muted and
+   action labels pass at any size (9.49:1 and 5.38:1). Guarded by
+   src/lib/__tests__/button-system.test.ts.
+
+   The state selectors are written once, in words:
+     hover / press — :not(:disabled, [aria-disabled='true']): a control that
+                     cannot act must not pretend to;
+     focus         — a jade-deep ring 3px OFF the button, on the page. The
+                     global coral ring vanished on a coral fill (≈1:1).
+   Every colour is a token that already flips at night, so there is no dark
+   block for the buttons themselves; --line-strong has one in each. */
 .btn {
-  font-family: var(--text);
-  font-weight: 700;
-  font-size: 13.5px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  padding: 15px 27px;
-  border: 2px solid var(--jade-deep);
-  border-radius: var(--radius);
-  background: transparent;
-  cursor: pointer;
+  --btn-fill: transparent;
+  --btn-ink: var(--jade-deep);
+  --btn-bar: var(--line-strong);
+  --btn-bw: 3px;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  justify-content: center;
+  gap: 8px;
+  min-height: 50px;
+  max-width: 100%;
+  padding: 6px 22px 10px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 19px;
+  line-height: 1.15;
+  font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 30;
+  letter-spacing: -0.006em;
+  text-align: center;
+  color: var(--btn-ink);
+  background: var(--btn-fill);
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
   text-decoration: none;
-  box-shadow: 4px 4px 0 var(--jade-deep);
-  transition: transform 0.16s var(--ease), box-shadow 0.16s ease;
-}
-
-.btn:hover {
-  transform: translate(2px, 2px);
-  box-shadow: 1px 1px 0 var(--jade-deep);
+  box-shadow: inset 0 calc(-1 * var(--btn-bw)) 0 var(--btn-bar);
+  transition: box-shadow 0.12s ease, transform 0.12s ease, background-color 0.12s ease;
 }
 
 /* The single loudest thing on any given screen. If a second one appears,
-   it stops meaning "click here". */
+   it stops meaning "click here". Charcoal on coral: 5.38:1. */
 .btn--action {
-  background: var(--coral);
-  color: var(--charcoal);
+  --btn-fill: var(--coral);
+  --btn-ink: var(--charcoal);
+  --btn-bar: color-mix(in srgb, var(--coral), var(--charcoal) 50%);
+  --btn-bw: 5px;
 }
 
+/* Cream on jade: 3.45:1 by day, 4.70:1 at night — legal only at 19px bold. */
 .btn--brand {
-  background: var(--jade);
-  color: var(--cream);
+  --btn-fill: var(--jade);
+  --btn-ink: var(--cream);
+  --btn-bar: color-mix(in srgb, var(--jade), var(--charcoal) 50%);
+  --btn-bw: 5px;
 }
 
+/* The most common button (~70 uses). Quiet on purpose: ink and a 3px bar of
+   --line-strong, so the one coral action stays the loud thing. */
 .btn--muted {
-  border-color: var(--line);
-  box-shadow: none;
+  --btn-bar: var(--line-strong);
 }
 
-.btn--muted:hover {
+.btn:hover:not(:disabled, [aria-disabled='true']) {
+  --btn-bw: 8px;
+}
+
+.btn--muted:hover:not(:disabled, [aria-disabled='true']) {
+  --btn-bw: 3px;
+  --btn-fill: var(--cream-2);
+}
+
+/* Pressed: the block goes down 3px and the pooled ink is squeezed thin. */
+.btn:active:not(:disabled, [aria-disabled='true']) {
+  --btn-bw: 2px;
+  transform: translateY(3px);
+}
+
+.btn--muted:active:not(:disabled, [aria-disabled='true']) {
+  --btn-fill: var(--cream-2);
+  --btn-bar: var(--jade-deep);
+  transform: translateY(1px);
+}
+
+/* 9.49:1 on the day page, 15.10:1 at night, and visible on coral because the
+   ring sits 3px out, on the page rather than on the fill. */
+.btn:focus-visible:not(:disabled) {
+  outline: 3px solid var(--jade-deep);
+  outline-offset: 3px;
+}
+
+/* Blocked, but the tap still lands (aria-disabled, not disabled): tapping
+   shows what is missing, so it keeps the pointer and the focus ring. It must
+   look inactive without looking dead — no coral, no pooled ink; a dashed rule
+   at the base instead, the way a form shows a line still to fill in. Global
+   since 2026-10-15; it used to be scoped to the intake footer. */
+.btn[aria-disabled='true'] {
+  --btn-fill: var(--cream-2);
+  --btn-ink: var(--jade-deep);
   box-shadow: none;
-  background: var(--cream-2);
+  cursor: pointer;
+  background:
+    linear-gradient(90deg, var(--jade-deep) 55%, transparent 0) 0 100% / 12px 3px repeat-x,
+    var(--cream-2);
+}
+
+.btn[aria-disabled='true']:active {
+  transform: translateY(1px);
+}
+
+/* Really disabled (busy, signed out): greyed, and never focusable — the
+   browser skips a disabled <button>, and it gets no hover or press above.
+   45% ink is exempt from 1.4.3, which excludes inactive controls. */
+.btn:disabled {
+  --btn-fill: transparent;
+  --btn-ink: color-mix(in srgb, var(--jade-deep) 45%, transparent);
+  --btn-bar: var(--line);
+  --btn-bw: 3px;
+  cursor: not-allowed;
+}
+
+/* Dense places: rows, slots, short footers. Height and padding shrink; the
+   type stays 19px, because below 18.66px bold the brand label fails. */
+.btn--compact {
+  min-height: 44px;
+  padding: 4px 16px 8px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -366,9 +468,15 @@ textarea {
   cursor: pointer;
   font-size: 15px;
 }
+/* A .btn--muted in the header, beside the theme toggle, holding an email
+   local part that ellipsises. Exempt from the 19px floor: it is ALWAYS muted
+   (AccountLink.tsx; never .btn--brand), and jade-deep on the page is 9.49:1
+   at any size. 16px keeps it about as wide as the old 11.5px uppercase label,
+   so the 360px header row keeps the room it was measured with. */
 .header__account {
-  padding: 10px 17px;
-  font-size: 11.5px;
+  min-height: 44px;
+  padding: 4px 14px 7px;
+  font-size: 16px;
 }
 
 /* min-width:0 is what actually lets a flex item shrink below its content
@@ -493,21 +601,24 @@ textarea {
   /* The label is the email local part, which can be long. Cap the button and
      let the inner span do the ellipsis — see AccountLink.tsx for why the span
      is required rather than tidy. */
+  /* Exempt from the 19px floor, as above: always muted, never brand. */
   .header__account {
     max-width: 42vw;
-    padding: 11px 14px;
-    font-size: 11px;
+    padding: 4px 12px 7px;
+    font-size: 16px;
   }
 
   /* Touch targets. Both header controls are tapped with a thumb, often
      one-handed while holding an animal. 38px was a mouse-sized target. */
-  .header__account,
-  .icon {
-    min-height: 42px;
+  .header__account {
+    min-height: 44px;
   }
+  /* 44px, the floor every other control meets (measured 42px at 360px on
+     2026-10-15). */
   .icon {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
   }
 }
 
@@ -728,17 +839,36 @@ textarea {
   gap: 13px;
   margin-top: var(--space-4);
 }
-.hero__actions .btn {
-  border-color: var(--charcoal);
-  box-shadow: 4px 4px 0 var(--charcoal);
+/* The hero is jade, which changes three things for the buttons on it.
+   1. Coral against jade is about 1:1 in luminance, so the coral block has no
+      edge of its own here. Its pooled ink goes full charcoal (≈5:1 against
+      jade) so at least the base reads as an edge, the job the old charcoal
+      border and stamp shadow did.
+   2. The default jade-deep focus ring is only 2.75:1 on jade. Charcoal is
+      ≈4.9:1 on jade, by day and at night (the hero stays jade at night).
+   3. The muted button wears the hero's own text colour (--cream, which is
+      dark at night) and a full-strength bar of it: 3.45:1 by day, 4.70:1 at
+      night — legal for its 19px bold label. Its hover does NOT tint the fill:
+      lightening jade drops cream to ≈2.9:1 by day, and darkening it does the
+      same to the dark night label. The bar thickens instead. */
+.hero__actions .btn:focus-visible:not(:disabled) {
+  outline-color: var(--charcoal);
+}
+.hero__actions .btn--action {
+  --btn-bar: var(--charcoal);
 }
 .hero__actions .btn--muted {
-  border-color: rgba(246, 241, 231, 0.5);
-  color: var(--cream);
-  box-shadow: none;
+  --btn-ink: var(--cream);
+  --btn-bar: var(--cream);
 }
-.hero__actions .btn--muted:hover {
-  background: rgba(246, 241, 231, 0.12);
+.hero__actions .btn--muted:hover:not(:disabled, [aria-disabled='true']) {
+  --btn-fill: transparent;
+  --btn-bw: 6px;
+}
+.hero__actions .btn--muted:active:not(:disabled, [aria-disabled='true']) {
+  --btn-fill: transparent;
+  --btn-bar: var(--cream);
+  --btn-bw: 2px;
 }
 
 .view-all {
@@ -975,26 +1105,65 @@ textarea {
   margin-bottom: 7px;
 }
 
+/* The text link that sits beside a button (and on its own, as the secondary
+   control of a form). It must look like a link and reach like a button: the
+   44px is a hit area made of empty height, not a box — no fill, no frame —
+   and the 3px underline is the cue that does not depend on colour (jade on
+   the page is 3.45:1 by day). Same family as the «Tinta plana» buttons: the
+   underline thickens on press the way their pooled ink does. */
 .auth__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 3px;
+  margin-inline: -3px;
   background: none;
   border: 0;
-  padding: 0;
+  border-radius: 2px;
   cursor: pointer;
-  font-size: 14px;
+  font-family: var(--text);
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1.3;
   color: var(--jade-deep);
   text-decoration: underline;
-  text-underline-offset: 3px;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 6px;
   text-decoration-color: var(--jade);
+  text-decoration-skip-ink: none;
 }
 
-.auth__link:hover {
+.auth__link:hover:not(:disabled) {
   text-decoration-color: var(--coral);
 }
 
+.auth__link:active:not(:disabled) {
+  text-decoration-color: var(--coral);
+  text-decoration-thickness: 5px;
+}
+
+.auth__link:focus-visible:not(:disabled) {
+  outline: 3px solid var(--jade-deep);
+  outline-offset: 2px;
+}
+
+/* Greyed, and the underline drops to the faint --line so it stops promising
+   a destination. Exempt from 1.4.3 as an inactive control. */
 .auth__link:disabled {
-  opacity: 0.5;
-  cursor: default;
+  color: color-mix(in srgb, var(--jade-deep) 45%, transparent);
+  text-decoration-color: var(--line);
+  cursor: not-allowed;
+}
+
+/* The one place a .auth__link sits INSIDE a running sentence ("Todavía no hay
+   áreas. Crea las del refugio para…", PetAdminPanel.tsx). A 44px inline-flex
+   box there would make that one line 44px tall. WCAG 2.5.8 exempts targets
+   inside a sentence, so it stays inline; the vertical padding still widens
+   what a thumb can hit without moving the line. */
+.admin__sub .auth__link {
+  display: inline;
+  min-height: 0;
+  padding-block: 12px;
 }
 
 .auth__switch {
@@ -1246,8 +1415,22 @@ textarea {
   white-space: nowrap;
 }
 
+/* The irreversible "delete my account" submit. It used to say so with a coral
+   border; «Tinta plana» buttons have no border, so the coral moves to the base
+   bar (3.12:1 on cream, a fill, never text). It stays muted on purpose — the
+   one loud coral on this screen is not "destroy everything". */
 .account__delete {
-  border-color: var(--coral);
+  --btn-bar: var(--coral);
+  --btn-bw: 4px;
+}
+
+.account__delete:hover:not(:disabled, [aria-disabled='true']) {
+  --btn-bw: 6px;
+}
+
+.account__delete:active:not(:disabled, [aria-disabled='true']) {
+  --btn-bar: var(--coral);
+  --btn-bw: 2px;
 }
 
 @media (max-width: 760px) {
@@ -1499,9 +1682,10 @@ textarea {
   align-self: stretch;
 }
 
+/* The 46px floor that used to live here is gone: the base .btn is 50px now,
+   and a higher-specificity 46 would have shrunk it. */
 .admin-suggest__actions .btn {
   flex: 1 1 auto;
-  min-height: 46px;
 }
 
 /* Off-screen but still RENDERED and focusable-by-script.
@@ -1598,11 +1782,11 @@ textarea {
   margin-top: 6px;
 }
 
-/* Tapped one-handed while holding an animal. */
+/* Tapped one-handed while holding an animal. Compact geometry, full 19px type
+   on a desktop-width slot; the phone rule below is the one that shrinks. */
 .capture__actions .btn {
   min-height: 44px;
-  padding: 10px 16px;
-  font-size: 11.5px;
+  padding: 4px 16px 8px;
 }
 
 .capture__submit {
@@ -1682,14 +1866,18 @@ textarea {
      taken, so two buttons must fit inside that or they wrap and every slot
      grows by ~45px. min-width:0 lets them share it; the smaller type is what
      makes both labels fit on one line. */
+  /* Exempt from the 19px floor: these two are only ever a bare .btn or
+     .btn--muted ("Tomar foto" / "Repetir" and "Galería",
+     GuidedPhotoCapture.tsx) — never .btn--brand — and jade-deep on the page
+     is 9.49:1 at any size. 19px would not fit two labels in ~186px; 15px
+     sentence case is still larger than the 10px uppercase it replaces. */
   .capture__actions .btn {
     flex: 1 1 0;
     min-width: 0;
-    padding: 13px 6px;
-    font-size: 10px;
-    letter-spacing: 0.04em;
-    /* One line. Without this "TOMAR FOTO" wraps inside a 91px button and every
-       slot grows by ~18px for no benefit. */
+    padding: 4px 6px 8px;
+    font-size: 15px;
+    /* One line. Without this "Tomar foto" wraps inside a ~91px button and
+       every slot grows by ~18px for no benefit. */
     white-space: nowrap;
   }
 
@@ -1864,9 +2052,9 @@ textarea {
 }
 
 /* ---- intake: why "Publicar" cannot publish yet --------------------------
-   Scoped to the intake screen on purpose: the global .btn has no :disabled
-   state, and fixing that is its own change. Every colour here is a token that
-   already flips at night, so there is no dark-mode block to keep in step.
+   The blocked button itself is styled by the global .btn[aria-disabled='true']
+   rule (the «Tinta plana» block near the top). Every colour here is a token
+   that already flips at night, so there is no dark-mode block to keep in step.
 
    The marks appear only after publish intent (a tap on Publicar, or choosing
    «Disponible»). Coral is a FILL here, where it passes on cream; the reason
@@ -1943,24 +2131,10 @@ textarea {
   opacity: 0.6;
 }
 
-/* Blocked, but the tap still lands — so it must look inactive without looking
-   dead. No coral fill and no stamp shadow; the pointer stays, because tapping
-   shows what is missing. */
-.admin__footer .btn[aria-disabled='true'] {
-  background: var(--cream-2);
-  color: var(--jade-deep);
-  border-style: dashed;
-  box-shadow: none;
-}
-
-.admin__footer .btn[aria-disabled='true']:hover {
-  transform: none;
-  box-shadow: none;
-}
-
 /* A long face ("Publicar sin mostrar en el muro") wraps rather than pushing
-   the page sideways at 360px. Intake's footer only: 20 other admin footers
-   share .admin__footer and are not part of this change. */
+   the page sideways at 360px — more likely now that labels are 19px Fraunces.
+   The 44px floor that used to sit here is gone: the base .btn is 50px, and a
+   higher-specificity 44 would have shrunk the publish button. */
 .admin__footer--intake .admin__footer-right {
   min-width: 0;
   max-width: 100%;
@@ -1968,7 +2142,6 @@ textarea {
 
 .admin__footer--intake .admin__footer-right .btn {
   max-width: 100%;
-  min-height: 44px;
   white-space: normal;
   text-align: center;
 }
@@ -2262,7 +2435,9 @@ textarea {
 /* The lot offer: the label's text, then a full-width button that is easy to
    hit with one thumb on a phone. */
 .label-scan__offer .btn {
-  display: block;
+  /* flex, not block: the 50px .btn centres its label vertically only while
+     it is a flex box. */
+  display: flex;
   width: 100%;
   margin-top: 6px;
 }
@@ -2781,9 +2956,11 @@ textarea {
   font-size: clamp(24px, 6vw, 34px);
 }
 
+/* The finder's WhatsApp button. The 15px that used to sit here enlarged the
+   old 13.5px label; the base .btn is 19px now, so it is dropped rather than
+   left to shrink the type. */
 .tag-page__cta {
   min-height: 52px;
-  font-size: 15px;
 }
 
 .tag-page__phone {
@@ -2882,8 +3059,9 @@ textarea {
   margin-top: var(--space-2);
 }
 
-/* Long uppercase labels ("DAR DE BAJA Y EMITIR OTRA") must wrap inside the
-   button at 360px rather than push the row wider than the phone. */
+/* Long labels ("Dar de baja y emitir otra") must wrap inside the button at
+   360px rather than push the row wider than the phone. Still needed after the
+   move to 19px Fraunces, which is about 25% wider than the old uppercase. */
 .qr-panel__actions .btn,
 .qr-print .admin__footer .btn {
   white-space: normal;
