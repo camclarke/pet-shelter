@@ -36,7 +36,7 @@ import type { AuthError } from '@/lib/auth-errors';
 import type { AuthEmailCopy } from '@/lib/auth-config';
 import type { NewPasswordError, ProfileError } from '@/lib/profile';
 import type { AccountDeleteFailure } from '@/lib/account-delete';
-import type { IntakeError } from '@/lib/intake';
+import type { IntakeError, PublishButtonFace } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
 import type { TagTone } from '@/lib/qr-tokens';
@@ -924,6 +924,21 @@ export interface IntakeFormCopy {
   /** "Para publicar su página faltan 3 datos" — the summary of a closed list. */
   publishMissingSummary(count: number): string;
   readonly publishMissingIntro: string;
+  /**
+   * The footer button's face: "Publicar · faltan 3" while blocked, otherwise
+   * whether the animal will reach the wall. Never just "Publicar" — a blocked
+   * button that says nothing is the defect this replaces.
+   */
+  publishAction(face: PublishButtonFace): string;
+  /** Footer line when the status is «Disponible». */
+  readonly publishOnWall: string;
+  /**
+   * Footer line for any other status, in three parts so the middle one — "no
+   * aparece en el muro" — can be emphasised without markup in the copy.
+   */
+  publishOffWall(statusLabel: string): readonly [string, string, string];
+  /** The one-tap fix beside that line. */
+  readonly switchToAvailable: string;
 }
 
 /**

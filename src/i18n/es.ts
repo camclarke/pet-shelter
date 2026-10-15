@@ -1687,6 +1687,22 @@ export const es: Messages = {
         : `Para publicar su página faltan ${count} datos`,
     publishMissingIntro:
       'Solo hace falta si se va a publicar. Para tenerlo registrado en el refugio no.',
+    publishAction: (face) =>
+      face.kind === 'blocked'
+        ? face.missing === 1
+          ? 'Publicar · falta 1'
+          : `Publicar · faltan ${face.missing}`
+        : face.kind === 'wall'
+          ? 'Publicar en el muro'
+          : 'Publicar sin mostrar en el muro',
+    publishOnWall: 'Al publicar, aparece en el muro de adopción.',
+    publishOffWall: (statusLabel: string) =>
+      [
+        `Estado «${statusLabel}»: al publicar, su página existe pero `,
+        'no aparece en el muro',
+        '. Para el muro, elige «Disponible».',
+      ] as const,
+    switchToAvailable: 'Cambiar a Disponible',
   },
 
   yesNo: (value) => (value ? 'Sí' : 'No'),

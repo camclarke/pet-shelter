@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 /**
  * One field of the intake form, shown as its VALUE and edited by clicking it.
@@ -58,8 +58,33 @@ export interface EditableFieldProps {
   editing: boolean;
   onToggle: () => void;
   disabled?: boolean;
+  /**
+   * Set when this field is what stands between the animal and its public
+   * page, AND the person has shown they mean to publish. The wizard decides
+   * the second half (`hasPublishIntent`), never this component — the register
+   * path must stay calm, so a row is never marked just for being empty.
+   */
+  problem?: ReactNode;
+  /** DOM id of the row, so the blocker list can scroll to it. */
+  anchorId?: string;
   /** The real control. Rendered only while open, so nothing is duplicated. */
   children: ReactNode;
+}
+
+/**
+ * The mark and the reason, shared by rows and by the three sections that are
+ * not rows (microchip, the cover photo, the descriptions). The "!" is coral as
+ * a FILL, where it passes on cream; the reason stays in reading ink.
+ */
+export function FieldProblem({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <p className="field-problem" id={id}>
+      <span className="field-problem__mark" aria-hidden="true">
+        !
+      </span>
+      <span className="field-problem__text">{children}</span>
+    </p>
+  );
 }
 
 export default function EditableField({
@@ -71,20 +96,37 @@ export default function EditableField({
   editing,
   onToggle,
   disabled = false,
+  problem,
+  anchorId,
   children,
 }: EditableFieldProps) {
   const empty = value === null || value === '';
+  const problemId = useId();
+  const hasProblem = problem !== undefined && problem !== null && problem !== false;
 
   return (
-    <div className="field-row" data-editing={editing ? 'true' : undefined}>
+    <div
+      className={hasProblem ? 'field-row field-row--problem' : 'field-row'}
+      id={anchorId}
+      data-editing={editing ? 'true' : undefined}
+    >
       <button
         type="button"
         className="field-row__summary"
         onClick={onToggle}
         disabled={disabled}
         aria-expanded={editing}
+        aria-invalid={hasProblem ? 'true' : undefined}
+        aria-describedby={hasProblem ? problemId : undefined}
       >
-        <span className="field-row__label t-label">{label}</span>
+        <span className="field-row__label t-label">
+          {hasProblem && (
+            <span className="field-problem__mark" aria-hidden="true">
+              !
+            </span>
+          )}
+          {label}
+        </span>
         <span className={empty ? 'field-row__empty' : 'field-row__value'}>
           {empty ? 'Sin definir' : value}
         </span>
@@ -94,6 +136,8 @@ export default function EditableField({
           {editing ? 'Listo' : 'Cambiar'}
         </span>
       </button>
+
+      {hasProblem && <FieldProblem id={problemId}>{problem}</FieldProblem>}
 
       {note && <p className="field-row__note">{note}</p>}
 

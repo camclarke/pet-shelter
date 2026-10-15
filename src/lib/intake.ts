@@ -483,6 +483,125 @@ export function canRegister(draft: PetDraft): boolean {
   return registerBlockers(draft).length === 0;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Where each publish blocker is fixed
+//
+// Until 2026-10-15 a blocked "Publicar" looked exactly like a working one, the
+// reasons sat in a closed list above the footer, and no field said it was the
+// one missing. This map is what lets the screen point at the row that fixes a
+// code. `Record` makes a new `IntakeError` without a home a compile error.
+//
+// ⚠️ It does not decide WHEN anything is marked. PR #74 removed a red list
+// that was visible from the first keystroke, and the register path (a name and
+// one photo) must stay calm: marks appear only after publish intent — see
+// `hasPublishIntent` below.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The part of the intake screen that fixes a blocker.
+ *
+ * Most are `EditableField` rows keyed by the same string the wizard passes to
+ * `fieldProps()`. Three are sections rather than rows: `microchip` (its
+ * fieldset), `photo` (the one required cover photo on the first step) and
+ * `photoAlt` (the descriptions, which live on the photos step).
+ */
+export type IntakeFieldKey =
+  | 'name'
+  | 'species'
+  | 'sex'
+  | 'size'
+  | 'breed'
+  | 'age'
+  | 'slug'
+  | 'microchip'
+  | 'photo'
+  | 'photoAlt';
+
+export const INTAKE_ERROR_FIELD: Record<IntakeError, IntakeFieldKey> = {
+  'name-required': 'name',
+  'species-required': 'species',
+  'sex-required': 'sex',
+  'size-required': 'size',
+  'breed-required': 'breed',
+  'age-required': 'age',
+  'age-range': 'age',
+  'slug-invalid': 'slug',
+  'microchip-required': 'microchip',
+  'microchip-conflict': 'microchip',
+  'photo-required': 'photo',
+  'alt-required': 'photoAlt',
+};
+
+/** Which step of the wizard shows each field. */
+export const INTAKE_FIELD_STEP: Record<IntakeFieldKey, IntakeStep> = {
+  name: 'identity',
+  species: 'identity',
+  sex: 'identity',
+  size: 'identity',
+  breed: 'identity',
+  age: 'identity',
+  slug: 'identity',
+  microchip: 'identity',
+  photo: 'identity',
+  photoAlt: 'media',
+};
+
+/**
+ * The fields that sit inside the collapsed "Más datos (opcional)" section, so
+ * pointing at one has to open it first. `name` and `photo` are the two things
+ * registering asks for and are never hidden; `photoAlt` is on another step.
+ */
+export const INTAKE_FIELDS_IN_MORE: ReadonlySet<IntakeFieldKey> = new Set<IntakeFieldKey>([
+  'species',
+  'sex',
+  'size',
+  'breed',
+  'age',
+  'slug',
+  'microchip',
+]);
+
+/** The blocker codes a given field is responsible for, in gate order. */
+export function blockersForField(blockers: readonly IntakeError[], key: IntakeFieldKey): IntakeError[] {
+  return blockers.filter((code) => INTAKE_ERROR_FIELD[code] === key);
+}
+
+/** The field to open first: the one fixing the first blocker, or null. */
+export function firstBlockingField(blockers: readonly IntakeError[]): IntakeFieldKey | null {
+  return blockers.length > 0 ? INTAKE_ERROR_FIELD[blockers[0]!] : null;
+}
+
+/**
+ * Whether the person has shown they mean to PUBLISH, which is the only thing
+ * that turns the per-field marks on.
+ *
+ * Two signals, and both are actions rather than keystrokes: tapping "Publicar"
+ * while something is missing, or choosing «Disponible», which is the status
+ * whose whole meaning is "show this animal on the wall". Registering — a name
+ * and one photo — never sets either, so it stays as calm as PR #74 made it.
+ */
+export function hasPublishIntent(tappedPublishWhileBlocked: boolean, status: PetStatus): boolean {
+  return tappedPublishWhileBlocked || status === 'available';
+}
+
+/**
+ * What the footer's publish button says, as a choice the copy layer renders.
+ *
+ * `blocked` carries the count so the face reads "Publicar · faltan 3"; the two
+ * ready faces differ by whether the animal will reach the wall, because a
+ * published page that is not on the wall is allowed (owner decision
+ * 2026-10-15) but must never be a surprise.
+ */
+export type PublishButtonFace =
+  | { kind: 'blocked'; missing: number }
+  | { kind: 'wall' }
+  | { kind: 'off-wall' };
+
+export function publishButtonFace(blockerCount: number, status: PetStatus): PublishButtonFace {
+  if (blockerCount > 0) return { kind: 'blocked', missing: blockerCount };
+  return status === 'available' ? { kind: 'wall' } : { kind: 'off-wall' };
+}
+
 /**
  * How complete a draft is, for the dashboard's progress hint.
  *
