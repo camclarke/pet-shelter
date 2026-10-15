@@ -23,6 +23,7 @@
   --sol:#F5B72B;        /* cinta, subrayados, destaques */
   --carbon:#1A0E08;     /* texto sobre coral y sol */
   --linea:rgba(18,70,59,.16);
+  --linea-fuerte:rgba(18,70,59,.6); /* 3.33:1 sobre crema: el borde que sí se ve */
   --sombra:0 1px 0 rgba(18,70,59,.08), 0 12px 26px -14px rgba(18,70,59,.45);
   --display:"Fraunces",Georgia,serif;
   --texto:"Instrument Sans",system-ui,sans-serif;
@@ -31,6 +32,7 @@
 [data-tema="noche"]{
   --crema:#0D1714; --crema-2:#142320; --jade-hondo:#EFE9DC;
   --linea:rgba(239,233,220,.15);
+  --linea-fuerte:rgba(239,233,220,.42); /* 3.58:1 de noche */
   --sombra:0 1px 0 rgba(0,0,0,.4), 0 14px 30px -16px rgba(0,0,0,.9);
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -162,17 +164,37 @@ h1,h2,h3,h4{font-family:var(--display);font-variation-settings:var(--w-suave);li
   opacity:0;translate:0 5px;transition:opacity .3s,translate .3s}
 .cartel:hover .cta,.cartel:focus-visible .cta{opacity:1;translate:0 0}
 
-/* ══ BOTONES ══ */
+/* ══ BOTONES — «Tinta plana» ══
+   La misma regla que src/app/globals.css (.btn): tinta plana, sin marco ni
+   sombra, y una barra gruesa en la base — la tinta que se acumuló al
+   imprimir. Fraunces 19px negrita: por debajo de 18,66px el texto crema
+   sobre jade (3,45:1) deja de ser legal. */
 .fila{display:flex;flex-wrap:wrap;gap:13px;align-items:center;margin-top:26px}
-.btn{font-family:var(--texto);font-weight:700;font-size:13.5px;letter-spacing:.09em;text-transform:uppercase;
-  padding:15px 27px;border:2px solid var(--jade-hondo);cursor:pointer;display:inline-flex;align-items:center;gap:9px;
-  box-shadow:4px 4px 0 var(--jade-hondo);border-radius:3px;
-  transition:transform .16s cubic-bezier(.2,.8,.3,1),box-shadow .16s}
-.btn:hover{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--jade-hondo)}
-.btn-1{background:var(--coral);color:var(--carbon)}
-.btn-2{background:var(--jade);color:var(--crema)}
-.btn-3{background:transparent;color:var(--jade-hondo);box-shadow:none;border-color:var(--linea)}
-.btn-3:hover{box-shadow:none;background:var(--crema-2)}
+.fila figure{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.fila figcaption{font-size:12px;opacity:.65}
+.btn{--relleno:transparent;--tinta:var(--jade-hondo);--barra:var(--linea-fuerte);--grosor:3px;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:50px;max-width:100%;padding:6px 22px 10px;
+  font-family:var(--display);font-weight:700;font-size:19px;line-height:1.15;font-variation-settings:"SOFT" 50,"WONK" 1,"opsz" 30;letter-spacing:-.006em;
+  color:var(--tinta);background:var(--relleno);border:0;border-radius:2px;cursor:pointer;text-decoration:none;
+  box-shadow:inset 0 calc(-1 * var(--grosor)) 0 var(--barra);transition:box-shadow .12s ease,transform .12s ease,background-color .12s ease}
+.btn-1{--relleno:var(--coral);--tinta:var(--carbon);--barra:color-mix(in srgb,var(--coral),var(--carbon) 50%);--grosor:5px}
+.btn-2{--relleno:var(--jade);--tinta:var(--crema);--barra:color-mix(in srgb,var(--jade),var(--carbon) 50%);--grosor:5px}
+.btn:hover:not(:disabled,[aria-disabled="true"]){--grosor:8px}
+.btn-3:hover:not(:disabled,[aria-disabled="true"]){--grosor:3px;--relleno:var(--crema-2)}
+.btn:active:not(:disabled,[aria-disabled="true"]){--grosor:2px;transform:translateY(3px)}
+.btn-3:active:not(:disabled,[aria-disabled="true"]){--relleno:var(--crema-2);--barra:var(--jade-hondo);transform:translateY(1px)}
+.btn:focus-visible:not(:disabled){outline:3px solid var(--jade-hondo);outline-offset:3px}
+.btn[aria-disabled="true"]{--relleno:var(--crema-2);--tinta:var(--jade-hondo);box-shadow:none;cursor:pointer;
+  background:linear-gradient(90deg,var(--jade-hondo) 55%,transparent 0) 0 100%/12px 3px repeat-x,var(--crema-2)}
+.btn[aria-disabled="true"]:active{transform:translateY(1px)}
+.btn:disabled{--relleno:transparent;--tinta:color-mix(in srgb,var(--jade-hondo) 45%,transparent);--barra:var(--linea);--grosor:3px;cursor:not-allowed}
+.btn-compacto{min-height:44px;padding:4px 16px 8px}
+.enlace{display:inline-flex;align-items:center;min-height:44px;padding:0 3px;margin-inline:-3px;
+  font:600 15px/1.3 var(--texto);color:var(--jade-hondo);background:none;border:0;border-radius:2px;cursor:pointer;
+  text-decoration:underline;text-decoration-thickness:3px;text-underline-offset:6px;text-decoration-color:var(--jade);text-decoration-skip-ink:none}
+.enlace:hover:not(:disabled){text-decoration-color:var(--coral)}
+.enlace:active:not(:disabled){text-decoration-color:var(--coral);text-decoration-thickness:5px}
+.enlace:focus-visible:not(:disabled){outline:3px solid var(--jade-hondo);outline-offset:2px}
 
 .etqs{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
 .etq{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
@@ -316,11 +338,23 @@ footer{padding:58px 0 90px;border-top:2px solid var(--linea)}
 <!-- ═══ 06 ═══ -->
 <section class="sec"><div class="env">
   <div class="eyebrow">06 — Acciones y estados</div>
-  <p class="nota">Botones de tinta plana con sombra sólida desplazada: se hunden al presionarlos, como un sello. La acción principal siempre termina en WhatsApp con el nombre del perrito ya escrito — <code>wa.me/59177903553?text=Hola,%20me%20interesa%20adoptar%20a%20Mocca</code></p>
+  <p class="nota"><strong>Tinta plana.</strong> Sin marco y sin sombra: el botón es un bloque de tinta, y en su base queda una barra gruesa — la tinta que se acumuló al imprimir. Al pasar el cursor la barra engorda; al presionar, el bloque baja y la tinta se aplasta. La etiqueta habla con la voz del cartel: <strong>Fraunces 19px negrita</strong>, con mayúscula solo al inicio, para que los acentos se lean (<em>Adóptame</em>, no ADÓPTAME). La acción principal siempre termina en WhatsApp con el nombre del perrito ya escrito — <code>wa.me/59177903553?text=Hola,%20me%20interesa%20adoptar%20a%20Mocca</code></p>
   <div class="fila">
     <button class="btn btn-1">Adóptame ↗</button>
     <button class="btn btn-2">Ver el muro</button>
     <button class="btn btn-3">Cómo adoptar</button>
+    <button class="enlace">Ver el muro</button>
+  </div>
+  <div class="fila">
+    <figure><button class="btn btn-1" aria-disabled="true">Publicar · faltan 3</button><figcaption>Bloqueado, pero el toque llega y muestra qué falta</figcaption></figure>
+    <figure><button class="btn btn-1" disabled>Guardar</button><figcaption>Desactivado: ni cursor ni foco</figcaption></figure>
+    <figure><button class="btn btn-3 btn-compacto">Descartar</button><figcaption>Compacto: 44px de alto, misma letra</figcaption></figure>
+  </div>
+  <div class="reglas">
+    <div class="regla"><h4>19px no es gusto, es contraste</h4><p>Crema sobre jade da 3,45:1. Para texto normal hace falta 4,5:1; como «texto grande» basta 3:1, y en negrita eso empieza en 18,66px. Por eso el botón compacto achica el alto y el relleno, nunca la letra. Coral con carbón da 5,38:1 y el botón discreto 9,5:1, así que esos sí pueden achicarse donde no cabe otra cosa.</p></div>
+    <div class="regla"><h4>El foco se ve sobre coral</h4><p>El anillo de teclado va en jade hondo, 3px por fuera del botón, sobre el papel y no sobre el relleno: 9,5:1 de día y 15,1:1 de noche. El anillo coral de antes desaparecía encima del botón coral.</p></div>
+    <div class="regla"><h4>Bloqueado no es apagado</h4><p>Un botón que todavía no puede publicar no se apaga: se vuelve papel con una línea punteada en la base, como un renglón por llenar, y al tocarlo muestra lo que falta. Solo se desactiva de verdad mientras algo está en curso.</p></div>
+    <div class="regla"><h4>El enlace alcanza como un botón</h4><p>Un enlace de texto mide 44px de alto aunque no lo parezca: es altura vacía, no una caja. El subrayado de 3px es la señal que no depende del color.</p></div>
   </div>
   <div class="etqs">
     <span class="etq on">Disponible</span><span class="etq n">Urgente</span><span class="etq a">En hogar de tránsito</span>
