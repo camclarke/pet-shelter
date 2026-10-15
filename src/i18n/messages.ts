@@ -39,6 +39,7 @@ import type { AccountDeleteFailure } from '@/lib/account-delete';
 import type { IntakeError, PublishButtonFace } from '@/lib/intake';
 import type { MedicalError, MedicalWarning } from '@/lib/medical';
 import type { MeasurementError, MeasurementWarning } from '@/lib/measurements';
+import type { EventError, EventWarning } from '@/lib/events';
 import type { TagTone } from '@/lib/qr-tokens';
 import type { TimingResult as SterilizationTimingResult } from '@/lib/sterilization-timing';
 
@@ -359,6 +360,99 @@ import type { FoodParseFailure } from '@/lib/food-parse-client';
 import type { MeasuredRatio } from '@/lib/food-stock';
 import type { PotShareRow, RationResult } from '@/lib/rations';
 import type { StockEntryKind } from '@/lib/types';
+
+/**
+ * The events admin screen, `/admin/events`.
+ *
+ * ⚠️ No gap language ("todavía", "próximamente", "por ahora", "aún no",
+ * "pronto") and no voseo — a test reads every string here for both. Times are
+ * shown as the shelter's own clock, so the zone is named in the copy rather
+ * than assumed.
+ */
+export interface EventsCopy {
+  readonly navLabel: string;
+  readonly screenTitle: string;
+  readonly screenIntro: string;
+  readonly backToPanel: string;
+  readonly newEvent: string;
+  readonly loading: string;
+  readonly loadFailed: string;
+  readonly permissionDenied: string;
+  readonly saveFailed: string;
+  readonly actionFailed: string;
+  readonly idExhausted: string;
+  readonly emptyList: string;
+
+  readonly groupDrafts: string;
+  readonly groupUpcoming: string;
+  readonly groupPast: string;
+
+  readonly stateDraft: string;
+  readonly statePublished: string;
+  readonly statePast: string;
+  readonly stateCancelled: string;
+
+  readonly edit: string;
+  readonly publish: string;
+  readonly unpublish: string;
+  readonly cancelEvent: string;
+  readonly reactivate: string;
+  readonly duplicate: string;
+  readonly delete: string;
+  /** The confirm before deleting a draft — it names the event. */
+  deleteConfirm(title: string): string;
+  /** The confirm before publishing — it names the event. */
+  publishConfirm(title: string): string;
+  /** The confirm before cancelling a PUBLISHED event — it names the event. */
+  cancelConfirm(title: string): string;
+  readonly confirmPublish: string;
+  readonly confirmCancel: string;
+  readonly confirmDelete: string;
+  /** Backs out of any of the three confirms. */
+  readonly confirmNo: string;
+  /** An action met a doc that changed or vanished under it; the list reloads. */
+  readonly eventChanged: string;
+  readonly deleteOnlyDrafts: string;
+
+  readonly editorNew: string;
+  readonly editorEdit: string;
+  readonly editorDuplicate: string;
+  readonly duplicateNote: string;
+
+  readonly fieldTitle: string;
+  readonly titlePlaceholder: string;
+  readonly fieldPlace: string;
+  readonly placePlaceholder: string;
+  /** Under the place field: a venue is public, never a person's home. */
+  readonly placeHint: string;
+  readonly fieldAddress: string;
+  readonly addressPlaceholder: string;
+  readonly fieldDescription: string;
+  readonly descriptionPlaceholder: string;
+  readonly fieldAllDay: string;
+  readonly fieldStart: string;
+  readonly fieldEnd: string;
+  readonly fieldStartDay: string;
+  readonly fieldEndDay: string;
+  readonly endOptional: string;
+  /** "Hora de Bolivia" — next to every time input. */
+  timeZoneNote(country: string): string;
+  /**
+   * "Se verá así: sábado, 31 de octubre · 15:00–19:00 (hora de Bolivia)".
+   * `country` null drops the zone, for an all-day event that shows no time.
+   */
+  preview(when: string, country: string | null): string;
+
+  readonly saveDraft: string;
+  readonly saveChanges: string;
+  readonly saving: string;
+  readonly cancelEdit: string;
+  readonly draftNote: string;
+  readonly liveNote: string;
+
+  error(error: EventError): string;
+  warning(warning: EventWarning): string;
+}
 
 /**
  * Fixed labels for the food screens, `/admin/food`.
@@ -862,6 +956,9 @@ export interface Messages {
   foodParseFailure(failure: FoodParseFailure): string;
 
   readonly food: FoodCopy;
+
+  /** Adoption fairs and other events — the admin screen (PR 3a). */
+  readonly events: EventsCopy;
 
   stockEntryKindLabel(kind: StockEntryKind): string;
 

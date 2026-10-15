@@ -40,7 +40,113 @@ import type {
   ApprovalWarning,
 } from '@/lib/applications';
 import type { ApplicationSection } from '@/config/shelter';
-import type { ApplicationCopy } from './messages';
+import type { ApplicationCopy, EventsCopy } from './messages';
+import { EVENT_LIMITS, type EventError, type EventWarning } from '@/lib/events';
+import { WALL_YEAR_MAX, WALL_YEAR_MIN } from '@/lib/zoned-time';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Events — the admin screen, /admin/events
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The limits come from EVENT_LIMITS, the same constants the validator and the
+// rules mirror, so a message can never name a cap the form does not enforce.
+const EVENT_ERROR: Record<EventError, string> = {
+  'title-too-short': `El nombre necesita al menos ${EVENT_LIMITS.titleMin} caracteres.`,
+  'title-too-long': `El nombre puede tener hasta ${EVENT_LIMITS.titleMax} caracteres.`,
+  'description-too-long': `La descripción puede tener hasta ${EVENT_LIMITS.descriptionMax} caracteres.`,
+  'place-too-short': `Escribe el lugar (al menos ${EVENT_LIMITS.placeMin} caracteres).`,
+  'place-too-long': `El lugar puede tener hasta ${EVENT_LIMITS.placeMax} caracteres.`,
+  'address-too-long': `La dirección puede tener hasta ${EVENT_LIMITS.addressMax} caracteres.`,
+  'start-missing': 'Elige cuándo empieza.',
+  'end-missing': 'La fecha de cierre no es válida.',
+  'end-before-start': 'El final es antes del inicio.',
+  'span-too-long': `Un evento puede durar hasta ${EVENT_LIMITS.maxSpanDays} días.`,
+  'year-out-of-range': `Revisa el año: tiene que estar entre ${WALL_YEAR_MIN} y ${WALL_YEAR_MAX}, con sus cuatro cifras.`,
+};
+
+const EVENT_WARNING: Record<EventWarning, string> = {
+  'start-in-past': 'La fecha de inicio ya pasó. Si el evento ya se hizo, puedes guardarlo igual.',
+  'start-far-future': 'Empieza en más de un año. Revisa el año.',
+  'all-day-long': 'Dura más de una semana entera. Revisa el último día.',
+};
+
+const EVENTS_COPY: EventsCopy = {
+  navLabel: 'Eventos',
+  screenTitle: 'Eventos',
+  screenIntro:
+    'Ferias de adopción y otros encuentros del refugio. Cada evento nace como borrador y aparece en el sitio cuando lo publicas.',
+  backToPanel: '← Panel',
+  newEvent: '+ Nuevo evento',
+  loading: 'Cargando…',
+  loadFailed: 'No pudimos cargar los eventos. Revisa tu conexión e intenta de nuevo.',
+  permissionDenied:
+    'Firestore rechazó la operación por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+  saveFailed: 'No pudimos guardar el evento. Revisa tu conexión e intenta de nuevo.',
+  actionFailed: 'No pudimos aplicar el cambio. Revisa tu conexión e intenta de nuevo.',
+  idExhausted: 'Hay demasiados eventos con este nombre en esta fecha. Cambia un poco el nombre.',
+  emptyList: 'No hay eventos registrados. Crea el primero con «+ Nuevo evento».',
+
+  groupDrafts: 'Borradores',
+  groupUpcoming: 'Publicados',
+  groupPast: 'Pasados',
+
+  stateDraft: 'Borrador',
+  statePublished: 'Publicado',
+  statePast: 'Realizado',
+  stateCancelled: 'Cancelado',
+
+  edit: 'Editar',
+  publish: 'Publicar',
+  unpublish: 'Ocultar',
+  cancelEvent: 'Cancelar evento',
+  reactivate: 'Reactivar',
+  duplicate: 'Duplicar',
+  delete: 'Borrar',
+  deleteConfirm: (title) => `¿Borrar el borrador «${title}»? No se puede deshacer.`,
+  publishConfirm: (title) => `¿Publicar «${title}»? Aparecerá en el sitio en unos minutos.`,
+  cancelConfirm: (title) =>
+    `¿Cancelar «${title}»? En el sitio se verá como cancelado en unos minutos; puedes reactivarlo después.`,
+  confirmPublish: 'Sí, publicar',
+  confirmCancel: 'Sí, cancelar el evento',
+  confirmDelete: 'Sí, borrar',
+  confirmNo: 'No',
+  eventChanged: 'Este evento cambió o ya no existe; recargamos la lista.',
+  deleteOnlyDrafts: 'Solo se borran los borradores. Para borrar un evento publicado, primero ocúltalo.',
+
+  editorNew: 'Nuevo evento',
+  editorEdit: 'Editar evento',
+  editorDuplicate: 'Copia de un evento',
+  duplicateNote:
+    'Copiamos el nombre, la descripción y el lugar. Elige las fechas nuevas: no se copian, porque el día de la semana cambia de un año a otro.',
+
+  fieldTitle: 'Nombre del evento',
+  titlePlaceholder: 'Feria de adopción de Halloween',
+  fieldPlace: 'Lugar',
+  placePlaceholder: 'Plaza Colón',
+  placeHint: 'Solo lugares públicos: nunca la casa de una persona.',
+  fieldAddress: 'Dirección (opcional)',
+  addressPlaceholder: 'Av. Heroínas esq. Ayacucho',
+  fieldDescription: 'Descripción',
+  descriptionPlaceholder: 'Qué habrá, qué traer, a quién preguntar.',
+  fieldAllDay: 'Todo el día (sin hora)',
+  fieldStart: 'Empieza',
+  fieldEnd: 'Termina',
+  fieldStartDay: 'Primer día',
+  fieldEndDay: 'Último día',
+  endOptional: 'El final es opcional: si queda vacío, el evento dura ese mismo día.',
+  timeZoneNote: (country) => `Hora de ${country}`,
+  preview: (when, country) => (country ? `Se verá así: ${when} (hora de ${country}).` : `Se verá así: ${when}.`),
+
+  saveDraft: 'Guardar borrador',
+  saveChanges: 'Guardar cambios',
+  saving: 'Guardando…',
+  cancelEdit: 'Cerrar sin guardar',
+  draftNote: 'Se guarda como borrador. Aparece en el sitio cuando lo publicas desde la lista.',
+  liveNote: 'Este evento está publicado: los cambios se ven en el sitio en unos minutos.',
+
+  error: (error) => EVENT_ERROR[error],
+  warning: (warning) => EVENT_WARNING[warning],
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Online adoption applications — plan §6
@@ -1859,6 +1965,8 @@ export const es: Messages = {
   foodParseFailure: (failure) => FOOD_PARSE_FAILURE[failure],
 
   food: FOOD_COPY,
+
+  events: EVENTS_COPY,
 
   stockEntryKindLabel: (kind) => STOCK_ENTRY_KIND[kind],
 

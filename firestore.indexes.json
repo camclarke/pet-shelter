@@ -119,6 +119,15 @@
         { "fieldPath": "tier", "order": "ASCENDING" },
         { "fieldPath": "order", "order": "ASCENDING" }
       ]
+    },
+    {
+      "//": "The public events page: where('published','==',true).where('endsAt','>=',startOfDayInZone(now)).orderBy('endsAt') — published events that end today or later in La Paz. Equality plus a range on a DIFFERENT field needs a composite. The admin list (orderBy startsAt, no filter) is single-field and is deliberately NOT declared here. Like media above, a client caller must issue the published constraint itself or the rules refuse the whole query.",
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "published", "order": "ASCENDING" },
+        { "fieldPath": "endsAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "//deliberately-absent": "A pet's own placement timeline (orderBy startedAt) and its measurement trend (orderBy measuredAt) are SINGLE-FIELD orderings, which Firestore indexes automatically. Declaring them as composites is not harmless — the 2026-08-12 deploy was rejected outright with 'this index is not necessary, configure using single field index controls', and the whole file fails, not just the offending entry.",
