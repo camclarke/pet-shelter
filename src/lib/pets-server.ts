@@ -86,6 +86,31 @@ export async function getAllSlugs(): Promise<string[]> {
   return snap.docs.map((d) => d.data().slug as string);
 }
 
+export interface SitemapPetRow {
+  slug: string;
+  updatedAt?: Date;
+}
+
+/**
+ * Pets that belong in the sitemap: `available` and `lost` only (adopted and
+ * internal states are not advertised). Bounded; single-field `in`, no index.
+ */
+export async function getSitemapPets(): Promise<SitemapPetRow[]> {
+  const db = getAdminDb();
+  const snap = await db
+    .collection('pets')
+    .where('status', 'in', ['available', 'lost'])
+    .select('slug', 'updatedAt')
+    .limit(1000)
+    .get();
+  return snap.docs.flatMap((d) => {
+    const data = d.data();
+    if (typeof data.slug !== 'string' || !data.slug) return [];
+    const ts = data.updatedAt as { toDate?: () => Date } | undefined;
+    return [{ slug: data.slug, ...(ts?.toDate ? { updatedAt: ts.toDate() } : {}) }];
+  });
+}
+
 /**
  * Resolve a scanned microchip code to a pet.
  *
