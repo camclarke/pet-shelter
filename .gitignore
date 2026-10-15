@@ -61,6 +61,12 @@ _e2e/*
 !_e2e/cards/
 _e2e/cards/*
 !_e2e/cards/EXAMPLE-ground-truth.json
+# Vaccine-label photos for `npm run eval:labels`. Only the answer-key TEMPLATE
+# is tracked. A label photographed at the shelter can catch the booklet page
+# around it, and a booklet's cover carries the owner's name and address.
+!_e2e/labels/
+_e2e/labels/*
+!_e2e/labels/EXAMPLE-ground-truth.json
 
 # The shelter's own paper register: the intake spreadsheet and photographs of
 # the handwritten pages. Every row carries an adopter's name, phone number and

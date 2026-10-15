@@ -1541,6 +1541,8 @@ export const es: Messages = {
         return 'Lo leído es demasiado largo para ser un solo dato. No se completó.';
       case 'disputed':
         return 'Las dos lecturas no coinciden. No se completó.';
+      case 'unlabelled':
+        return `Leído: ${read ?? '—'}, pero junto a ese dato no se ve la palabra que dice qué es (lote, vencimiento). No se completó.`;
       default:
         return read ? `Leído: ${read} (${pct})` : 'No se leyó nada en la tarjeta.';
     }
