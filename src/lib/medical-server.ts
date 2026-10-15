@@ -68,6 +68,23 @@ export function cardBucketName(): string | null {
   return name ? name : null;
 }
 
+/**
+ * Is this a published pet OR an unpublished draft? For the label route (C4).
+ *
+ * Every resident is a draft today, and its medical history sits under the
+ * draft's id (`pets/{draftId}/medical`, with no `pets/{draftId}` document). A
+ * label route that accepted only published pets would work for nobody. The
+ * card route keeps `petExists` and still refuses drafts, as it always has.
+ */
+export async function petOrDraftExists(petId: string): Promise<boolean> {
+  const db = getAdminDb();
+  const [pet, draft] = await Promise.all([
+    db.collection('pets').doc(petId).get(),
+    db.collection('petDrafts').doc(petId).get(),
+  ]);
+  return pet.exists || draft.exists;
+}
+
 /** Does this pet exist? Candidates under a missing pet would be orphans no screen can reach. */
 export async function petExists(petId: string): Promise<boolean> {
   const snap = await getAdminDb().collection('pets').doc(petId).get();

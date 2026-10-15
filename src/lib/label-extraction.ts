@@ -33,7 +33,9 @@ import {
   CARD_DATE_PREFILL_MIN,
   CARD_HIGHLIGHT_BELOW,
   CARD_SNIPPET_MAX_CHARS,
+  CARD_PHOTO_MAX_EDGE,
   CARD_TEXT_PREFILL_MIN,
+  isValidPetId,
   parseCardDate,
 } from './card-extraction';
 import { CLOCK_SKEW_TOLERANCE_MS } from './placements';
@@ -324,4 +326,50 @@ export function reviewLabelExtraction(raw: unknown, now: number): LabelReview {
     },
     highlighted,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Where the label photo lives, and what the route will accept (plan C4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A label photo keeps the card's resolution: a lot is a couple of millimetres tall. */
+export const LABEL_PHOTO_MAX_EDGE = CARD_PHOTO_MAX_EDGE;
+
+/** Same shape as a card photo id: a UUID from `crypto.randomUUID()`. */
+const LABEL_PHOTO_ID = /^[A-Za-z0-9-]{8,64}$/;
+
+/**
+ * Where a label photo is stored: `medical/{petId}/label-{photoId}.jpg`.
+ *
+ * ⚠️ FLAT, beside the card photos, for the same reason: the deployed
+ * `storage.rules` match `medical/{petId}/{fileName}` is admin-only, so this
+ * path is covered with no rule change. A label photo can catch the booklet
+ * page around it.
+ */
+export function labelPhotoPath(petId: string, photoId: string): string {
+  return `medical/${petId}/label-${photoId}.jpg`;
+}
+
+/**
+ * Is `path` a label photo belonging to `petId`, and nothing else?
+ *
+ * The route reads the object with the Admin SDK, which can read ANY object in
+ * the bucket. Holding the path to exactly this shape is what stops the route
+ * sending another object — a card with an owner's address, an intimate intake
+ * photo, another pet's file — to a third-party model.
+ */
+export function isLabelPhotoPathFor(path: unknown, petId: string): boolean {
+  if (typeof path !== 'string' || !isValidPetId(petId)) return false;
+  const prefix = `medical/${petId}/label-`;
+  if (!path.startsWith(prefix) || !path.endsWith('.jpg')) return false;
+  return LABEL_PHOTO_ID.test(path.slice(prefix.length, -'.jpg'.length));
+}
+
+/** The route's request body, or null when it is not exactly that. */
+export function parseLabelExtractRequest(body: unknown): { petId: string; path: string } | null {
+  if (body === null || typeof body !== 'object') return null;
+  const { petId, path } = body as Record<string, unknown>;
+  if (!isValidPetId(petId)) return null;
+  if (!isLabelPhotoPathFor(path, petId)) return null;
+  return { petId, path: path as string };
 }

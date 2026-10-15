@@ -13,6 +13,7 @@ import type { MedicalReviewCopy } from './messages';
 import type { FieldEvidence, MedicalExtractionSource, WithheldReason } from '@/lib/types';
 import type { CardField } from '@/lib/card-extraction';
 import type { CardExtractFailure } from '@/lib/card-extract-client';
+import type { LabelExtractFailure } from '@/lib/label-extract-client';
 import type {
   AreaKind,
   MedicalRecordKind,
@@ -1506,6 +1507,7 @@ export const es: Messages = {
   extractionSourceLabel(source: MedicalExtractionSource | null) {
     if (source === 'vaccination-card') return 'Leído de una tarjeta de vacunación';
     if (source === 'dictation') return 'Dictado en consulta';
+    if (source === 'vaccine-label') return 'Leído de la etiqueta del frasco';
     return 'Extraído automáticamente';
   },
 
@@ -1585,6 +1587,56 @@ export const es: Messages = {
         ? 'Una fila no se pudo leer y hay que cargarla a mano.'
         : `${droppedRows} filas no se pudieron leer y hay que cargarlas a mano.`;
     return `${read} ${dropped}`;
+  },
+
+  labelScan: {
+    title: 'Escanear la etiqueta del frasco',
+    hint: 'Fotografía la etiqueta de cerca y con buena luz, antes o después de pegarla en la libreta. Se completan el producto, el laboratorio y el vencimiento del frasco: revísalos con la etiqueta antes de guardar. La fecha de aplicación y la próxima dosis las pones tú.',
+    takePhoto: 'Escanear etiqueta',
+    gallery: 'Galería',
+    retry: 'Leer otra vez',
+    uploading: 'Guardando la foto de la etiqueta…',
+    uploadFailed: 'No pudimos guardar la foto de la etiqueta. Revisa tu conexión e inténtalo de nuevo.',
+    unreadable: 'No pudimos abrir esa foto. Prueba tomarla con la cámara desde aquí, o elige una en JPG.',
+    reading: 'Leyendo la etiqueta…',
+    savedNote: 'la foto de la etiqueta ya se guardó y queda aunque la lectura falle.',
+    readFrom: (snippet) => `Leído en la etiqueta: «${snippet}».`,
+    checkIt: 'Revísalo con la etiqueta.',
+    lotOffer: (snippet) => `En la etiqueta dice «${snippet}».`,
+    useLot: 'Usar este lote',
+    lotOfferHint: 'Compara cada número con la etiqueta antes de usarlo.',
+  },
+
+  labelScanFailure(failure: LabelExtractFailure) {
+    const messages: Record<LabelExtractFailure, string> = {
+      'not-configured':
+        'La lectura de etiquetas no está disponible ahora. Completa los datos a mano; el formulario sigue igual.',
+      unauthorized:
+        'No tienes permiso para leer etiquetas. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+      'photo-rejected': 'No pudimos usar esa foto. Prueba con otra, de cerca y con buena luz.',
+      'pet-missing': 'Esta ficha ya no existe.',
+      timeout:
+        'La lectura tardó demasiado y la cortamos. La foto ya está guardada: puedes intentar otra vez.',
+      failed: 'No se pudo leer la etiqueta. Completa los datos a mano; el formulario sigue igual.',
+    };
+    return messages[failure];
+  },
+
+  labelScanSummary({ notALabel, filled, lotOffered }) {
+    if (notALabel) {
+      return 'Esa foto no parece la etiqueta de una vacuna ni de un medicamento, así que no se completó nada.';
+    }
+    const lot = lotOffered ? ' El lote está abajo, para que lo compares antes de usarlo.' : '';
+    if (filled === 0) {
+      return lotOffered
+        ? `No se completó ningún dato con seguridad.${lot}`
+        : 'No se pudo leer ningún dato con seguridad. Complétalos a mano mirando la etiqueta.';
+    }
+    const read =
+      filled === 1
+        ? 'Se completó 1 dato de la etiqueta. Revísalo antes de guardar.'
+        : `Se completaron ${filled} datos de la etiqueta. Revísalos antes de guardar.`;
+    return `${read}${lot}`;
   },
 
   awaitingReviewCount(count: number) {

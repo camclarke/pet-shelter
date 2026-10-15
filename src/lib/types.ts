@@ -616,7 +616,12 @@ export type MedicalRecordKind =
  * its UI label a dictated record correctly from its first write rather than
  * reading it as a card.
  */
-export type MedicalExtractionSource = 'vaccination-card' | 'dictation';
+/**
+ * `vaccine-label`: one vial sticker scanned while the dose was given (plan C4).
+ * Unlike a card, it never produces a candidate: the scan fills the form, and
+ * the person saving it is the confirmation.
+ */
+export type MedicalExtractionSource = 'vaccination-card' | 'dictation' | 'vaccine-label';
 
 /**
  * Why a value a model reported was deliberately NOT copied into its field.

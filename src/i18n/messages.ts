@@ -208,6 +208,35 @@ export interface TagMessages {
 import type { FieldEvidence, MedicalExtractionSource } from '@/lib/types';
 import type { CardField } from '@/lib/card-extraction';
 import type { CardExtractFailure } from '@/lib/card-extract-client';
+import type { LabelExtractFailure } from '@/lib/label-extract-client';
+
+/**
+ * Scanning one vaccine label into the medical form (plan C4).
+ *
+ * ⚠️ The label's values are shown as READINGS beside the fields, and the lot is
+ * only ever offered: wrong lot digits came back at full confidence in the eval
+ * (2026-10-15), so nothing here may present a lot as already checked.
+ */
+export interface LabelScanCopy {
+  readonly title: string;
+  readonly hint: string;
+  readonly takePhoto: string;
+  readonly gallery: string;
+  readonly retry: string;
+  readonly uploading: string;
+  readonly uploadFailed: string;
+  readonly unreadable: string;
+  readonly reading: string;
+  readonly savedNote: string;
+  /** Under a filled field: the label's own text. */
+  readFrom(snippet: string): string;
+  /** Added under a highlighted field. */
+  readonly checkIt: string;
+  /** Beside the empty lot field: what the label says. */
+  lotOffer(snippet: string): string;
+  readonly useLot: string;
+  readonly lotOfferHint: string;
+}
 import type { ApplicationStatus } from '@/lib/types';
 import type {
   ApplicationAnswerError,
@@ -715,6 +744,18 @@ export interface Messages {
 
   /** What reading a card did produce, and that none of it counts yet. */
   cardExtractSummary(result: { written: number; droppedRows: number; notACard: boolean }): string;
+
+  /** Fixed wording for scanning one vaccine label into the form (plan C4). */
+  readonly labelScan: LabelScanCopy;
+
+  /** Why scanning a label filled nothing. Says the form is unchanged. */
+  labelScanFailure(failure: LabelExtractFailure): string;
+
+  /**
+   * What a scan filled. ⚠️ Never says the values are right: it says they were
+   * READ, and asks for them to be checked against the label before saving.
+   */
+  labelScanSummary(result: { notALabel: boolean; filled: number; lotOffered: boolean }): string;
 
   /** "1 registro espera revisión", "3 registros esperan revisión". */
   awaitingReviewCount(count: number): string;
