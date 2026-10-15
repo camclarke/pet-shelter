@@ -48,6 +48,7 @@ import type {
 import { medicalEditFields, type MedicalEditFields, type MedicalRecordDraft } from './medical';
 import { readEvidence, reviewerLabel } from './review-gate';
 import { cardPhotoPath } from './card-extraction';
+import { labelPhotoPath } from './label-extraction';
 import {
   CandidateGoneError,
   MedicalConfirmationError,
@@ -137,7 +138,11 @@ function toTimestamp(ms: number | null): Timestamp | null {
   return ms === null ? null : Timestamp.fromMillis(ms);
 }
 
-const EXTRACTION_SOURCES: readonly MedicalExtractionSource[] = ['vaccination-card', 'dictation'];
+const EXTRACTION_SOURCES: readonly MedicalExtractionSource[] = [
+  'vaccination-card',
+  'dictation',
+  'vaccine-label',
+];
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
@@ -240,7 +245,26 @@ function editWrite(fields: MedicalEditFields) {
   };
 }
 
-function buildCreate(draft: MedicalRecordDraft, user: User): MedicalRecordWrite {
+/**
+ * Where a new record's values came from, when a vaccine label was scanned into
+ * the form (plan C4). Absent for a record typed by hand.
+ */
+export interface LabelProvenance {
+  /** The label photo, `medical/{petId}/label-{uuid}.jpg`. A path, never a URL. */
+  sourceDocument: string;
+  /** The stable model KEY that read it. */
+  modelKey: string;
+  /** What the model read for each field, kept beside what the person saved. */
+  evidence: Record<string, FieldEvidence>;
+  /** When the label was read, epoch ms. */
+  extractedAt: number;
+}
+
+function buildCreate(
+  draft: MedicalRecordDraft,
+  user: User,
+  fromLabel: LabelProvenance | null
+): MedicalRecordWrite {
   const by = reviewerLabel(user);
   return {
     ...editWrite(medicalEditFields(draft)),
@@ -248,15 +272,18 @@ function buildCreate(draft: MedicalRecordDraft, user: User): MedicalRecordWrite 
     // empty: neither terminology survives a volunteer transcribing a card, and
     // free text is backfillable.
     codes: [],
-    source: 'manual',
-    // A human typed this, so it is confirmed at creation.
+    // ⚠️ A record a label filled is `llm-extracted` even though a person saved
+    // it: the VALUES are what the person accepted, the PROVENANCE says a model
+    // read them first. Same split as a confirmed card reading. Saving the form
+    // is the confirmation, so `confirmedBy` is stamped either way.
+    source: fromLabel ? 'llm-extracted' : 'manual',
     confirmedBy: by,
     confirmedAt: serverTimestamp(),
-    sourceDocument: null,
-    extractedByModel: null,
-    extractedAt: null,
-    extractedFrom: null,
-    extractionEvidence: null,
+    sourceDocument: fromLabel?.sourceDocument ?? null,
+    extractedByModel: fromLabel?.modelKey ?? null,
+    extractedAt: fromLabel ? Timestamp.fromMillis(fromLabel.extractedAt) : null,
+    extractedFrom: fromLabel ? 'vaccine-label' : null,
+    extractionEvidence: fromLabel?.evidence ?? null,
     recordedBy: by,
   };
 }
@@ -264,10 +291,14 @@ function buildCreate(draft: MedicalRecordDraft, user: User): MedicalRecordWrite 
 export async function addMedicalRecord(
   petId: string,
   draft: MedicalRecordDraft,
-  user: User
+  user: User,
+  fromLabel: LabelProvenance | null = null
 ): Promise<string> {
   const { db } = getFirebase();
-  const ref = await addDoc(collection(db, 'pets', petId, 'medical'), buildCreate(draft, user));
+  const ref = await addDoc(
+    collection(db, 'pets', petId, 'medical'),
+    buildCreate(draft, user, fromLabel)
+  );
   return ref.id;
 }
 
@@ -387,6 +418,18 @@ export async function discardMedicalCandidate(petId: string, candidateId: string
 export async function uploadCardPhoto(petId: string, processed: Blob): Promise<string> {
   const { storage } = getFirebase();
   const path = cardPhotoPath(petId, crypto.randomUUID());
+  await uploadBytes(ref(storage, path), processed, { contentType: 'image/jpeg' });
+  return path;
+}
+
+/**
+ * Store a vaccine-label photo, already stripped of EXIF and resized, at
+ * `medical/{petId}/label-{uuid}.jpg` (plan C4). The same admin-only rule as a
+ * card photo covers it, and it is never given a download URL either.
+ */
+export async function uploadLabelPhoto(petId: string, processed: Blob): Promise<string> {
+  const { storage } = getFirebase();
+  const path = labelPhotoPath(petId, crypto.randomUUID());
   await uploadBytes(ref(storage, path), processed, { contentType: 'image/jpeg' });
   return path;
 }

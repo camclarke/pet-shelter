@@ -33,6 +33,12 @@ import { CandidateGoneError, MedicalConfirmationError } from '@/lib/medical-cand
 import { canConfirmAsIs, isConfirmed, type EvidenceThresholds } from '@/lib/review-gate';
 import type { MedicalExtractionSource, MedicalRecordKind } from '@/lib/types';
 import CardCapture, { type CardCaptureNotice } from './CardCapture';
+import LabelScan from './LabelScan';
+import {
+  formPatchFromLabel,
+  labelProvenanceFrom,
+  type LabelExtractSuccess,
+} from '@/lib/label-extract-client';
 import { DeleteRecordButton } from './DeleteRecordButton';
 import {
   EvidenceHint,
@@ -142,6 +148,10 @@ export default function MedicalPanel({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Editing>(null);
   const [cardShownFor, setCardShownFor] = useState<string | null>(null);
+  // The last label scanned into a NEW record's form (plan C4). Cleared whenever
+  // the form opens on something else, so a reading can never leak onto
+  // another record's save.
+  const [scan, setScan] = useState<{ result: LabelExtractSuccess; readAt: number } | null>(null);
   const [draft, setDraft] = useState<MedicalRecordDraft>(() => ({
     ...medicalDraftDefaults(),
     performedAt: parseDateInput(todayInputValue()).getTime(),
@@ -197,6 +207,7 @@ export default function MedicalPanel({
 
   function startNew() {
     setEditing(null);
+    setScan(null);
     setDraft({
       ...medicalDraftDefaults(),
       performedAt: parseDateInput(todayInputValue()).getTime(),
@@ -206,6 +217,7 @@ export default function MedicalPanel({
 
   function startEdit(record: MedicalRecordView) {
     setEditing({ kind: 'record', record });
+    setScan(null);
     setDraft(draftFromRecord(record));
     setCardShownFor(null);
     setOpen(true);
@@ -213,6 +225,7 @@ export default function MedicalPanel({
 
   function startReview(candidate: MedicalCandidateView) {
     setEditing({ kind: 'candidate', candidate });
+    setScan(null);
     setDraft(draftFromRecord(candidate));
     setCardShownFor(null);
     setOpen(true);
@@ -228,10 +241,13 @@ export default function MedicalPanel({
       } else if (editing?.kind === 'record') {
         await updateMedicalRecord(petId, editing.record.id, draft, user);
       } else {
-        await addMedicalRecord(petId, draft, user);
+        // A scanned label makes this record `llm-extracted` from the label photo;
+        // saving it is the confirmation. No scan: typed by hand, as before.
+        await addMedicalRecord(petId, draft, user, labelProvenanceFrom(scan));
       }
       setOpen(false);
       setEditing(null);
+      setScan(null);
       await reload();
     } catch (caught) {
       console.error('[medical]', caught);
@@ -294,6 +310,27 @@ export default function MedicalPanel({
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * What a scanned label read for one field, under that field (plan C4). Shown
+   * whether the value was filled or left empty: either way the person compares
+   * it with the label. Flagged when the value needs checking — a prefilled
+   * expiry always does, because the date on screen is our parse.
+   */
+  function labelHint(
+    field: 'product' | 'manufacturer' | 'expiresAt',
+    filled: 'product' | 'manufacturer' | 'productExpiresAt'
+  ) {
+    const evidence = scan?.result.evidence?.[field];
+    if (!scan || !evidence?.snippet) return null;
+    const check = scan.result.highlighted.includes(filled) || evidence.withheld !== null;
+    return (
+      <span className={`evidence${check ? ' evidence--flag' : ''}`}>
+        {t.labelScan.readFrom(evidence.snippet)}
+        {check ? ` ${t.labelScan.checkIt}` : ''}
+      </span>
+    );
   }
 
   /** The model's reading of one field, under that field's input in the form. */
@@ -591,6 +628,24 @@ export default function MedicalPanel({
             </>
           )}
 
+          {/* Only for a NEW record: scanning a label fills the form while the
+              dose is being given. An edit or a card review never offers it. */}
+          {editing === null && (
+            <LabelScan
+              petId={petId}
+              user={user}
+              disabled={busy}
+              onRead={(result, readAt) => {
+                if (result.notALabel) {
+                  setScan(null);
+                  return;
+                }
+                setScan({ result, readAt });
+                patch(formPatchFromLabel(result));
+              }}
+            />
+          )}
+
           <div className="admin-form__row">
             <label className="auth__field">
               <span className="t-label">Tipo</span>
@@ -749,6 +804,23 @@ export default function MedicalPanel({
               />
               <small className="auth__hint">{t.medicalForm.batchHint}</small>
               {formHint('batch')}
+              {/* ⚠️ OFFERED, never prefilled: wrong lot digits came back at full
+                  confidence in the eval (2026-10-15). One tap puts it in the
+                  field, with the label's own text beside it. */}
+              {scan && scan.result.offer.batch !== null && draft.batch !== scan.result.offer.batch && (
+                <span className="evidence evidence--flag label-scan__offer">
+                  {t.labelScan.lotOffer(scan.result.evidence?.lot.snippet ?? scan.result.offer.batch)}{' '}
+                  {t.labelScan.lotOfferHint}
+                  <button
+                    type="button"
+                    className="btn btn--muted"
+                    disabled={busy}
+                    onClick={() => patch({ batch: scan.result.offer.batch })}
+                  >
+                    {t.labelScan.useLot}
+                  </button>
+                </span>
+              )}
             </label>
 
             <label className="auth__field">
@@ -761,6 +833,7 @@ export default function MedicalPanel({
               />
               <small className="auth__hint">{t.medicalForm.manufacturerHint}</small>
               {formHint('manufacturer')}
+              {labelHint('manufacturer', 'manufacturer')}
             </label>
           </div>
 
@@ -777,6 +850,7 @@ export default function MedicalPanel({
                 onChange={(e) => patch({ product: e.target.value || null })}
               />
               <small className="auth__hint">{t.medicalForm.productHint}</small>
+              {labelHint('product', 'product')}
             </label>
 
             <label className="auth__field">
@@ -794,6 +868,7 @@ export default function MedicalPanel({
                 }
               />
               <small className="auth__hint">{t.medicalForm.productExpiresHint}</small>
+              {labelHint('expiresAt', 'productExpiresAt')}
             </label>
           </div>
 

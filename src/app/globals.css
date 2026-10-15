@@ -2113,6 +2113,20 @@ textarea {
   margin-top: var(--space-2);
 }
 
+/* Scanning one vaccine label into the form (plan C4). Inside the form, so it
+   sits above the fields it fills rather than up with the card capture. */
+.label-scan {
+  margin-bottom: var(--space-3);
+}
+
+/* The lot offer: the label's text, then a full-width button that is easy to
+   hit with one thumb on a phone. */
+.label-scan__offer .btn {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
+
 /* ---- areas and placements ----------------------------------------------- */
 /* The occupancy board, the move form's warnings, and the placement timeline.
    Built on the same tokens as the rest of the admin console — no new colours,
