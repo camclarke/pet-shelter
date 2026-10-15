@@ -8,14 +8,24 @@
 import type { MetadataRoute } from 'next';
 
 /** Static public routes, in the order they appear in the sitemap. */
-export const STATIC_SITEMAP_ROUTES = ['/', '/adopt', '/lost', '/help', '/about', '/privacy'] as const;
+export const STATIC_SITEMAP_ROUTES = ['/', '/adopt', '/events', '/lost', '/help', '/about', '/privacy'] as const;
 
 export interface SitemapPet {
   slug: string;
   updatedAt?: Date;
 }
 
-export function buildSitemap(siteUrl: string, pets: SitemapPet[]): MetadataRoute.Sitemap {
+/** A PUBLISHED event's page. Drafts never reach this list: the reader filters on `published == true`. */
+export interface SitemapEvent {
+  id: string;
+  updatedAt?: Date;
+}
+
+export function buildSitemap(
+  siteUrl: string,
+  pets: SitemapPet[],
+  events: SitemapEvent[] = [],
+): MetadataRoute.Sitemap {
   const base = siteUrl.replace(/\/+$/, '');
   // Static routes carry no lastModified on purpose: stamping `new Date()` on
   // every crawl would tell search engines everything changed every time.
@@ -26,5 +36,9 @@ export function buildSitemap(siteUrl: string, pets: SitemapPet[]): MetadataRoute
     url: `${base}/adopt/${encodeURIComponent(p.slug)}`,
     ...(p.updatedAt ? { lastModified: p.updatedAt } : {}),
   }));
-  return [...staticEntries, ...petEntries];
+  const eventEntries = events.map((e) => ({
+    url: `${base}/events/${encodeURIComponent(e.id)}`,
+    ...(e.updatedAt ? { lastModified: e.updatedAt } : {}),
+  }));
+  return [...staticEntries, ...petEntries, ...eventEntries];
 }

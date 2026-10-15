@@ -12,6 +12,10 @@ import { SHELTER } from '@/config/shelter';
  */
 const NAV = [
   { href: '/adopt', label: 'Adopta' },
+  // Five links do not fit a 360px phone (four already take 253 of 312px), so
+  // below ~440px the row scrolls and an edge fade hints at the rest — see
+  // `.header__nav` in globals.css. The type is never shrunk to make it fit.
+  { href: '/events', label: 'Eventos' },
   { href: '/lost', label: 'Perdidos' },
   { href: '/help', label: 'Ayuda' },
   { href: '/about', label: 'Nosotros' },
