@@ -108,14 +108,17 @@ const DELEGATED_ROUTES: Record<string, string> = {
   'src/app/api/account/delete/route.ts': 'src/lib/account-delete.ts',
 };
 
-/** Nothing on this list may run before `requireAdmin(`. */
-const WORK_BEFORE_AUTH = [
-  'request.json(',
-  'request.formData(',
-  'request.text(',
-  'request.arrayBuffer(',
-  'aiIsConfigured(',
-];
+/**
+ * Any member access on the request — `request.json()`, `request.clone().json()`,
+ * `request.headers`, `request.body` — counts as touching it. Listing the body
+ * readers by name missed `request.clone().json()`, found 2026-10-15 by a
+ * deliberate break. Passing `request` as an argument is not a member access,
+ * so `requireAdmin(request, …)` itself does not trip it.
+ */
+const REQUEST_USE = /\brequest\.[A-Za-z]/;
+
+/** Not a request read, but still work an unauthenticated caller must not trigger. */
+const WORK_BEFORE_AUTH = ['aiIsConfigured('];
 
 function walk(dir: string, keep: (name: string) => boolean): string[] {
   const out: string[] = [];
@@ -141,7 +144,7 @@ function code(file: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
-test('every API route authenticates through requireAdmin before it reads the body or checks configuration', () => {
+test('every API route authenticates through requireAdmin before it touches the request or checks configuration', () => {
   const routes = routeFiles();
   assert.ok(routes.length >= 5, `found only ${routes.length} routes — is the walk broken?`);
 
@@ -150,7 +153,12 @@ test('every API route authenticates through requireAdmin before it reads the bod
 
     const handler = DELEGATED_ROUTES[route];
     if (handler) {
-      assert.match(code(route), /handle\w+\(request\b/, `${route} must hand the request to ${handler}`);
+      const routeSrc = code(route);
+      assert.match(routeSrc, /handle\w+\(request\b/, `${route} must hand the request to ${handler}`);
+      // The handler owns the request, guard included, so the route file has no
+      // guard of its own: any use of the request there runs before it.
+      const at = routeSrc.search(REQUEST_USE);
+      assert.ok(at < 0, `${route} touches the request before handing it to ${handler}`);
     }
 
     const file = handler ?? route;
@@ -160,6 +168,11 @@ test('every API route authenticates through requireAdmin before it reads the bod
     assert.ok(
       auth >= 0,
       `${file} must call ${guard}) — a route handler sits outside firestore.rules, so that check is its entire boundary`
+    );
+    const touched = src.search(REQUEST_USE);
+    assert.ok(
+      touched < 0 || touched > auth,
+      `${file} touches the request (${src.slice(touched, touched + 24).trim()}…) before ${guard})`
     );
     for (const work of WORK_BEFORE_AUTH) {
       const at = src.indexOf(work);
@@ -179,14 +192,16 @@ test('every exemption names a route that exists, so a stale one cannot hide a ne
   }
 });
 
-test('a route open to any signed-in account never reads the request body', () => {
+test('a route open to any signed-in account never touches the request itself', () => {
   // Such a route acts on the caller's own uid. A body is the one place a
-  // different uid could arrive from, so there must be no way to read one.
+  // different uid could arrive from, so there must be no way to read one —
+  // not directly, not through `request.clone()`. requireUser() reads the
+  // Authorization header inside require-admin.ts; nothing here needs more.
   for (const route of Object.keys(USER_ROUTES)) {
     for (const file of [route, DELEGATED_ROUTES[route]].filter((f): f is string => Boolean(f))) {
-      for (const read of ['request.json(', 'request.formData(', 'request.text(', 'request.arrayBuffer(', 'request.body']) {
-        assert.equal(code(file).includes(read), false, `${file} reads ${read}`);
-      }
+      const src = code(file);
+      const at = src.search(REQUEST_USE);
+      assert.ok(at < 0, `${file} touches the request: ${src.slice(at, at + 24).trim()}…`);
     }
   }
 });
