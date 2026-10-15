@@ -67,6 +67,10 @@ export const PROCESS_LABELS = {
    * benchmarking must never read as the shelter's own spend.
    */
   card_extract_eval: 'Evaluación de lectura de tarjetas (banco de pruebas)',
+  /** Reading one vaccine or medicine label at the moment a dose is given. Plan C3/C4. */
+  label_extract: 'Lectura de etiquetas de vacunas',
+  /** `npm run eval:labels`, kept apart for the reason given above. */
+  label_extract_eval: 'Evaluación de lectura de etiquetas (banco de pruebas)',
   /** Donation text → line items, on the Flash-Lite ladder. Plan §12.1. */
   food_parse: 'Lectura de donaciones de comida',
   /** `npm run eval:food-parse`, kept apart for the reason given above. */

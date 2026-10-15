@@ -1,0 +1,18 @@
+{
+  "//": "TEMPLATE for `npm run eval:labels`. Copy to ground-truth.json beside the label photos (both gitignored). One entry per label photo. Dates are ISO calendar days; null = the correct answer is to return nothing. A field with a `…Doubt` note is not scored for correctness, only against its `…Never` list: values that must never come back (the number on a diluent tab, the manufacture date offered as the expiry).",
+  "readBy": "who read the key, and when",
+  "labels": [
+    {
+      "id": "example-rabies",
+      "file": "example-rabies.jpg",
+      "subject": "What the photo shows, and any trap in it.",
+      "product": ["Product name as printed", "a shorter accepted form"],
+      "manufacturer": "Laboratory as printed, or null",
+      "lot": "the value printed beside «Lote», or null",
+      "lotNever": ["a number printed elsewhere on the label"],
+      "expiresAt": "2027-05-11",
+      "expiresAtNever": ["2025-11-12"],
+      "manufacturedAt": "2025-11-12"
+    }
+  ]
+}

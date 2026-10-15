@@ -630,7 +630,14 @@ export type WithheldReason =
   | 'unreadable-date'
   | 'implausible-date'
   | 'too-long'
-  | 'disputed';
+  | 'disputed'
+  /**
+   * A vaccine LABEL value whose printed field word was missing or wrong: a
+   * number with no «Lote» beside it, a date with no «Venc» or «Elab». A
+   * label prints several numbers and two dates; the word is what says which
+   * is which, so without it the value is not trusted.
+   */
+  | 'unlabelled';
 
 /**
  * What a model saw for ONE field, kept beside the value so a reviewer can

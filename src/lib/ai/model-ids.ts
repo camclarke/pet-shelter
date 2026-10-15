@@ -272,3 +272,26 @@ export function cardLadderKeys(override: string | undefined): ModelKey[] {
 export const CARD_MODEL_LADDER: readonly string[] = cardLadderKeys(
   process.env.GEMINI_CARD_LADDER
 ).map(modelIdFor);
+
+/**
+ * The vaccine-label ladder. Plan C3: FLASH-LITE ONLY, decided by measurement.
+ *
+ * `npm run eval:labels`, 2026-10-15, 4 real stickers × 3 runs:
+ * - `gemini-3.1-flash-lite` answered 24 of 24 across two runs, median ≈3.6 s.
+ *   Expiry 18/18 correct where printed with its word, 0 manufacture dates
+ *   taken for the expiry, 0 lots taken from a tab, product and lab 24/24.
+ * - `gemini-3.8-flash` answered 0 of 12: overloaded, then its 20-a-day free
+ *   bucket ran out on the retries. A person stands holding the vial while
+ *   this runs, so a tier that cannot answer on a busy day is the wrong one.
+ *
+ * No Flash fallback, on purpose. Every Flash bucket is 20 a day and already
+ * spoken for — intake reads sex and age on 3.6, the card reader on 3.8 and
+ * 3.7 — and a failed scan costs nothing but typing: the form stays as it was.
+ * ⚠️ Flash's ACCURACY on labels is unmeasured (it never answered). Re-run the
+ * eval on a calm day before adding it.
+ */
+export const LABEL_MODEL_LADDER_DEFAULT_KEYS: readonly ModelKey[] = ['flash-lite'];
+
+/** The label ladder as model IDs to call. */
+export const LABEL_MODEL_LADDER: readonly string[] =
+  LABEL_MODEL_LADDER_DEFAULT_KEYS.map(modelIdFor);
