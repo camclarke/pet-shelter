@@ -916,6 +916,90 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── events/{eventId} ───────────────────────────────────────────────────
+    // Adoption fairs and other one-off events the shelter announces. Published
+    // docs are PUBLIC (they are advertising); drafts are admin-only, in the
+    // same collection, because a draft is the same shape and moving a doc
+    // between collections would change its id — which is its public URL.
+    //
+    // ⚠️ Rules are not filters. A client `list` that does not itself say
+    // `where('published', '==', true)` is refused WHOLE, drafts or not. And
+    // the public pages read through the Admin SDK, which bypasses this block
+    // entirely — so the server query must constrain `published` in code too.
+    // These rules guard DIRECT client access; they are not what keeps a draft
+    // off /events.
+    //
+    // The id IS the slug (`<slug>-YYYY-MM-DD`, La Paz date) and never changes,
+    // so a link shared on WhatsApp survives a title edit. A draft and a missing
+    // doc both answer permission-denied to a stranger, so ids cannot be probed
+    // to discover unpublished events.
+    //
+    // Every limit here is mirrored in src/lib/events.ts (EVENT_LIMITS); change
+    // both together. scripts/rules-test-events.mjs has a case on each edge.
+    match /events/{eventId} {
+      function eventKeys() {
+        return ['title', 'description', 'startsAt', 'endsAt', 'allDay',
+                'placeName', 'address', 'status', 'published',
+                'createdAt', 'createdBy', 'updatedAt', 'updatedBy'];
+      }
+
+      // The whole document, on create AND update — an update is checked as the
+      // merged result, so no write can leave an event half-valid.
+      function validEvent(d) {
+        return d.keys().hasOnly(eventKeys())
+          && d.keys().hasAll(eventKeys())
+          // size() counts UTF-16 code units (measured on the :test API: 60
+          // emoji fit 120, 61 do not). The minimum is on the TRIMMED text, so
+          // a title of three spaces is not a title.
+          && d.title is string && d.title.trim().size() >= 3 && d.title.size() <= 120
+          && d.description is string && d.description.size() <= 4000
+          && d.startsAt is timestamp
+          && d.endsAt is timestamp
+          && d.endsAt >= d.startsAt
+          // Longer than a month is a typo, or not an event.
+          && d.endsAt <= d.startsAt + duration.value(31, 'd')
+          && d.allDay is bool
+          && d.placeName is string && d.placeName.trim().size() >= 2 && d.placeName.size() <= 120
+          && optionalString(d.address, 200)
+          && d.status in ['scheduled', 'cancelled']
+          && d.published is bool
+          // Attribution is the caller's own uid and the server's clock, never
+          // values the client chose.
+          && d.updatedBy == request.auth.uid
+          && d.updatedAt == request.time;
+      }
+
+      // On a missing doc `resource` is null, so for a non-admin the right-hand
+      // side errors and the read is denied — which is what a stranger should
+      // get. Operand order does not decide that: a rules `||` is true when
+      // either side is true even if the other errors, so an admin reads a
+      // missing doc (an empty snapshot) whichever way round this is written.
+      allow get, list: if isAdmin() || resource.data.published == true;
+
+      // Every event is born a draft. Publishing is a separate, deliberate
+      // update, because a mistaken publish lingers in the CDN for minutes even
+      // after it is hidden again.
+      allow create: if isAdmin()
+        && eventId.size() <= 120
+        && eventId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+        && validEvent(request.resource.data)
+        && request.resource.data.published == false
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid;
+
+      allow update: if isAdmin()
+        && validEvent(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy;
+
+      // Only an unpublished event can be deleted: hide it first. Deleting
+      // something live therefore takes two deliberate taps, and a published
+      // event's history is kept. An admin deleting a doc that is already gone
+      // (another admin got there first) is a no-op rather than a permission
+      // error that would read like a lost claim.
+      allow delete: if isAdmin() && (resource == null || resource.data.published == false);
+    }
+
     // ── default deny ───────────────────────────────────────────────────────
     // Anything not matched above is inaccessible. New collections must opt in
     // deliberately rather than inherit access by accident.

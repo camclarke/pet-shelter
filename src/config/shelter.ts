@@ -46,6 +46,13 @@ export interface ShelterConfig {
   country: string;
   /** BCP 47, used for <html lang> and Intl formatting. */
   locale: string;
+  /**
+   * IANA time zone the shelter lives in. Every event time is ENTERED, STORED
+   * and SHOWN as this zone's wall clock — never the device's, so an admin
+   * whose phone is set to Madrid still publishes Cochabamba's 15:00. An
+   * invalid name makes `Intl` throw a RangeError, and a test checks it.
+   */
+  timeZone: string;
   /** Production origin, for canonical URLs and Open Graph. */
   siteUrl: string;
 
@@ -194,6 +201,10 @@ export const SHELTER: ShelterConfig = {
   city: 'Cochabamba',
   country: 'Bolivia',
   locale: 'es-BO',
+  // Bolivia: UTC−4 all year, no daylight saving. The conversion code still
+  // reads the offset from Intl rather than assuming −4, so a fork in a zone
+  // with DST gets it right.
+  timeZone: 'America/La_Paz',
   siteUrl: 'https://wawitas.org',
 
   species: ['dog', 'cat'],

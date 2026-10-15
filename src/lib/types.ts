@@ -1116,6 +1116,67 @@ export interface QrToken {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// EVENTS — events/{eventId}. Published docs are PUBLIC; drafts are admin-only.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A cancelled event keeps its page and its shared links: "se canceló" is
+ * honest, a 404 on a link someone already sent around is not. Stored value,
+ * so English; the words live in `src/i18n`.
+ */
+export type EventStatus = 'scheduled' | 'cancelled';
+
+/**
+ * An adoption fair or any other one-off event the shelter announces.
+ *
+ * Named `ShelterEvent`, never `Event`: `Event` is the DOM global, and
+ * shadowing it in a client component is a trap that type-checks.
+ *
+ * One collection, drafts included (`published: false`), rather than the
+ * `petDrafts` → `pets` split: a draft event is the same shape as a published
+ * one, and moving it between collections would change its id — which IS its
+ * public URL — on every unpublish and republish.
+ *
+ * ⚠️ The document id is the slug, `${slugify(title)}-${YYYY-MM-DD}` with the
+ * date taken in the shelter's zone (see `eventIdBase`), and it never changes,
+ * so a WhatsApp link survives a title edit. It is not stored as a field.
+ *
+ * Deliberately absent in v1: featured pets, a cover photo, any recurrence
+ * rule (one-off events plus a "Duplicar" action instead).
+ */
+export interface ShelterEvent {
+  /** The document id. Not a stored field — the rules reject a create carrying one. */
+  id: string;
+  /** 3–120 characters. */
+  title: string;
+  /** ≤ 4000 characters of plain text. Rendered as text with line breaks, never as HTML. */
+  description: string;
+  /** Instants. The wall clock they mean is the shelter's zone (`SHELTER.timeZone`). */
+  startsAt: Timestamp;
+  /** `>= startsAt` and at most 31 days later, enforced by the rules too. */
+  endsAt: Timestamp;
+  /**
+   * Changes how the times are entered and shown, nothing else. An all-day
+   * event still stores instants: the start of its first day and the last
+   * millisecond of its last day, both in the shelter's zone.
+   */
+  allDay: boolean;
+  /** A PUBLIC venue ("Plaza Colón"), never a person's home. 2–120 characters. */
+  placeName: string;
+  /** Optional street line, ≤ 200 characters. */
+  address: string | null;
+  status: EventStatus;
+  /** Every event is born `false`; publishing is a separate, deliberate update. */
+  published: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  /** The creating admin's uid. Immutable. */
+  createdBy: string;
+  /** The uid of the admin who wrote last. */
+  updatedBy: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FOOD — foodDonations, foodStock/{category}/stockEntries, cookBatches,
 // feedingLog. ADMIN only.
 //

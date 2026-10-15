@@ -2459,6 +2459,52 @@ textarea {
   font-weight: 600;
 }
 
+/* ---- events (admin) ------------------------------------------------------
+   The row reuses .admin-list__item--record and .admin-list__actions; only the
+   state chips are new. Outlined, not filled: jade or coral as a FILL under
+   12px text fails contrast, while --jade-deep text on the row's cream is the
+   reading pair (9.5:1). Every colour is a token that already flips at night. */
+.event-row__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.event-state {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--jade-deep);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.event-state--published {
+  border-color: var(--jade);
+}
+
+.event-state--cancelled {
+  border-color: var(--coral);
+}
+
+/* The publish / cancel / delete confirm replaces the row's content, so the
+   block's own vertical margin would only double the row's padding. Its two
+   buttons keep the 44px floor from .btn and .auth__link. */
+.event-confirm.register-warning {
+  margin: 0;
+}
+
+/* The label is the tap target for "Todo el día"; measured 24px tall at 360px
+   on 2026-10-15, so it gets the same 44px floor as every other control. */
+.event-editor .admin-form__check {
+  min-height: 44px;
+  align-items: center;
+}
+
 .area-board {
   list-style: none;
   margin-top: var(--space-3);

@@ -122,6 +122,9 @@ export function AdminDashboard() {
           <Link href="/admin/food" className="btn btn--muted">
             {t.food.navLabel}
           </Link>
+          <Link href="/admin/events" className="btn btn--muted">
+            {t.events.navLabel}
+          </Link>
           <Link href="/admin/intake" className="btn btn--action">
             + Nuevo ingreso
           </Link>
