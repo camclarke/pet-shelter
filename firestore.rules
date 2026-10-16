@@ -44,10 +44,14 @@ service cloud.firestore {
     // Clamp coordinates to the service area. Keeps a spammer from scattering
     // fake sightings across the planet. Mirrors SHELTER.bounds in
     // src/config/shelter.ts — update both together; this copy is the one that
-    // is actually enforced.
+    // is actually enforced. A stored GeoPoint is a rules `latlng`, which has
+    // METHODS `latitude()` / `longitude()` and no such fields: `geo.latitude`
+    // is a type error that denies every sighting, in or out of the area
+    // (measured 2026-10-16 on the Rules :test API). Callers check
+    // `geo is latlng` first. scripts/rules-test-sightings.mjs pins the edges.
     function withinServiceArea(geo) {
-      return geo.latitude  >= -17.75 && geo.latitude  <= -17.15
-          && geo.longitude >= -66.45 && geo.longitude <= -65.85;
+      return geo.latitude()  >= -17.75 && geo.latitude()  <= -17.15
+          && geo.longitude() >= -66.45 && geo.longitude() <= -65.85;
     }
 
     // ── pets/{petId} ───────────────────────────────────────────────────────
@@ -440,17 +444,13 @@ service cloud.firestore {
         return resource.data.idDocument.get('front', null) is map;
       }
 
-      // SHELTER.bounds, for a home-address pin. NOT withinServiceArea() above:
-      // a stored GeoPoint is a rules `latlng`, and a latlng has no
-      // `.latitude` FIELD, only `.latitude()` and `.longitude()` METHODS.
-      // MEASURED 2026-10-16 on the Rules :test API: `g.latitude` on a latlng is
-      // a type error ("Received: [latlng] Expected: [map,path]"), which denies.
-      // withinServiceArea() uses that same property access, so it errors on a
-      // latlng: a sighting carrying a GeoPoint is denied, which means sightings
-      // currently CANNOT be created. That is a pre-existing bug, left alone here
-      // on purpose; the fix (method form) is a separate PR, because it changes
-      // what the public `sightings` create accepts. Same numbers; a test fails
-      // if pinWithinServiceArea() drifts from shelter.ts.
+      // SHELTER.bounds, for a home-address pin. A stored GeoPoint is a rules
+      // `latlng`, and a latlng has no `.latitude` FIELD, only `.latitude()`
+      // and `.longitude()` METHODS. MEASURED 2026-10-16 on the Rules :test
+      // API: `g.latitude` on a latlng is a type error ("Received: [latlng]
+      // Expected: [map,path]"), which denies. Same numbers and form as
+      // withinServiceArea() above; a test fails if either drifts from
+      // shelter.ts or goes back to property access.
       function pinWithinServiceArea(geo) {
         return geo.latitude()  >= -17.75 && geo.latitude()  <= -17.15
             && geo.longitude() >= -66.45 && geo.longitude() <= -65.85;

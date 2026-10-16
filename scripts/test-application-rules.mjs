@@ -26,8 +26,8 @@
  * ── Encoding (MEASURED 2026-10-16 on this API) ─────────────────────────────
  * A JSON map with exactly `latitude` and `longitude` numbers arrives in the
  * rules as a `latlng`: it passes `is latlng`, fails `is map`, and `.latitude`
- * on it is a TYPE ERROR — only `.latitude()` works. That is why the home pin
- * is checked by pinWithinServiceArea() and not by withinServiceArea().
+ * on it is a TYPE ERROR — only `.latitude()` works. pinWithinServiceArea()
+ * uses the method form; withinServiceArea() (sightings) was fixed to match.
  *
  * ── What it CANNOT show ────────────────────────────────────────────────────
  * - LIST requests. The real backend checks a query's CONSTRAINTS against the
