@@ -280,22 +280,23 @@ test('the approval rule requires the received ID marker for exactly the configur
   );
 });
 
-test('pinWithinServiceArea uses the latlng METHOD form and SHELTER.bounds', () => {
-  // A stored GeoPoint is a rules `latlng`: `.latitude()` works, `.latitude` is a
-  // type error. withinServiceArea() (sightings) still uses property access,
-  // which is a known bug fixed in a separate PR — deliberately NOT pinned here.
-  const { minLat, maxLat, minLng, maxLng } = SHELTER.bounds;
-  const body = rulesFunctionBody('pinWithinServiceArea').replace(/\s+/g, ' ');
-  for (const needle of [
-    `geo.latitude() >= ${minLat}`,
-    `geo.latitude() <= ${maxLat}`,
-    `geo.longitude() >= ${minLng}`,
-    `geo.longitude() <= ${maxLng}`,
-  ]) {
-    assert.ok(body.includes(needle), `pinWithinServiceArea() no longer says ${needle}`);
-  }
-  assert.ok(!/geo\.(latitude|longitude)\b(?!\()/.test(body), 'pinWithinServiceArea() uses property access on a latlng');
-});
+for (const fn of ['pinWithinServiceArea', 'withinServiceArea']) {
+  test(`${fn} uses the latlng METHOD form and SHELTER.bounds`, () => {
+    // A stored GeoPoint is a rules `latlng`: `.latitude()` works, `.latitude`
+    // is a type error that denies every write carrying one.
+    const { minLat, maxLat, minLng, maxLng } = SHELTER.bounds;
+    const body = rulesFunctionBody(fn).replace(/\s+/g, ' ');
+    for (const needle of [
+      `geo.latitude() >= ${minLat}`,
+      `geo.latitude() <= ${maxLat}`,
+      `geo.longitude() >= ${minLng}`,
+      `geo.longitude() <= ${maxLng}`,
+    ]) {
+      assert.ok(body.includes(needle), `${fn}() no longer says ${needle}`);
+    }
+    assert.ok(!/geo\.(latitude|longitude)\b(?!\()/.test(body), `${fn}() uses property access on a latlng`);
+  });
+}
 
 // ─── the contract — portion 4a, plan §5 ─────────────────────────────────────
 
