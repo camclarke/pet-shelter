@@ -13,13 +13,20 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { SHELTER, type ApplicationSection } from '@/config/shelter';
 import {
+  ADOPTION_CONTRACT,
+  contractCanonicalText,
+  type AdoptionContract,
+} from '@/config/adoption-contract';
+import {
   ANSWER_MAX_CHARS,
   APPLICATION_STATUS_TRANSITIONS,
+  ContractUnavailableError,
   MAX_APPLICATION_QUESTIONS,
   RULES_ANSWER_MAX_CHARS,
   RULES_ANSWER_MAX_COUNT,
@@ -31,6 +38,20 @@ import type { ApplicationStatus } from '../types';
 
 const config = SHELTER.adoptionApplications;
 const RULES = readFileSync(join(process.cwd(), 'firestore.rules'), 'utf8');
+
+/**
+ * A contract for the tests only. Its text is the string a test below forbids
+ * anywhere outside __tests__, so it can never be published as the shelter's.
+ */
+const FIXTURE_TEXT = {
+  title: 'TEXTO DE PRUEBA',
+  clauses: ['TEXTO DE PRUEBA, cláusula uno.', 'TEXTO DE PRUEBA, cláusula dos.'],
+};
+const FIXTURE: AdoptionContract = {
+  version: '2000-01-01',
+  ...FIXTURE_TEXT,
+  sha256: createHash('sha256').update(contractCanonicalText(FIXTURE_TEXT)).digest('hex'),
+};
 
 /** The body of a rules function, or a thrown error naming it. */
 function rulesFunctionBody(name: string): string {
@@ -129,14 +150,34 @@ test('the draft covers every heading plan §6 names', () => {
   }
 });
 
-test('the form never asks for a street address or an identity document', () => {
-  // A private person's application must not become a list of where strangers
-  // live. Asked in words, because the ids alone could be renamed around this.
+test('no screening QUESTION asks for a street address or an identity document', () => {
+  // Re-worded in portion 4a, not removed. The application now collects a home
+  // address and an ID photo — but only through their own restricted steps:
+  // the address into `private/home`, the photo through its upload route into
+  // Storage. An answer lives in the main application document, so a question
+  // asking for either would put it where the queue lists it and where the
+  // retention policy cannot erase it separately. Asked in words, because the
+  // ids alone could be renamed around this.
   for (const q of config.questions) {
     const text = `${q.id} ${q.label} ${q.hint ?? ''}`.toLowerCase();
-    assert.ok(!/\b(address|carnet|passport|pasaporte)\b/.test(text), q.id);
+    assert.ok(
+      !/\b(address|direcci[oó]n|domicilio|carnet|c[eé]dula|passport|pasaporte|documento de identidad)\b/.test(text),
+      q.id,
+    );
     assert.ok(!/tu dirección\??$/.test(q.label.toLowerCase()), q.id);
   }
+});
+
+test('the zone question is gone, because the home address replaces it', () => {
+  // A recorded decision reversed in portion 4a: shelter.ts said the form asks
+  // for a ZONE, never an address. Keeping `zone` would duplicate the address
+  // into the main document.
+  assert.ok(!config.questions.some((q) => q.id === 'zone'));
+});
+
+test('the shelter asks for exactly the front of the identity card', () => {
+  // Owner decision, 2026-10-16: front only.
+  assert.deepEqual([...config.idDocumentSides], ['front']);
 });
 
 // ─── drift against firestore.rules ──────────────────────────────────────────
@@ -199,9 +240,181 @@ test('the rules require exactly the fields the writer creates an application wit
       applicantEmail: 'e@example.com',
       applicantEmailVerified: true,
       answers: {},
+      contract: { version: FIXTURE.version, sha256: FIXTURE.sha256 },
     }),
   );
   assert.deepEqual([...ruleKeys].sort(), [...written].sort());
+  // The 11 of step 14 plus the 5 of portion 4a. A literal, so a key dropped
+  // from BOTH lists at once still fails.
+  assert.equal(ruleKeys.length, 16);
+});
+
+test('no browser may change the five portion-4a fields after create', () => {
+  // The two update rules each list exactly which fields may change. None of
+  // the new ones may be on either list: `idDocument` and `identityErasedAt`
+  // are written only through the Admin SDK, and the contract fields are a
+  // record of what was accepted.
+  const frozen = ['contractVersion', 'contractSha256', 'termsAcceptedAt', 'idDocument', 'identityErasedAt'];
+  for (const fn of ['applicantWithdraws', 'adminMovesApplication']) {
+    const match = /affectedKeys\(\)\s*\.hasOnly\(\[([^\]]*)\]\)/.exec(rulesFunctionBody(fn));
+    assert.ok(match, `${fn}() no longer gates on an affectedKeys() list — the guard cannot compare`);
+    const allowed = quotedStrings(match[1]!);
+    assert.ok(allowed.length > 0, `${fn}() lists no fields`);
+    for (const key of frozen) assert.ok(!allowed.includes(key), `${fn}() lets a browser change ${key}`);
+  }
+});
+
+test('the approval rule requires the received ID marker for exactly the configured sides', () => {
+  const body = rulesFunctionBody('idDocumentReceived');
+  const checked = [...body.matchAll(/idDocument\.get\('([a-z]+)', null\) is map/g)].map((m) => m[1]!);
+  assert.ok(checked.length > 0, 'idDocumentReceived() no longer checks a side — the drift guard cannot compare');
+  assert.deepEqual(
+    [...checked].sort(),
+    [...config.idDocumentSides].sort(),
+    'firestore.rules idDocumentReceived() and shelter.ts idDocumentSides differ — change both, deploy the rules',
+  );
+  const admin = rulesFunctionBody('adminMovesApplication');
+  assert.ok(
+    /status != 'approved'\s*\|\|\s*\(approvalIsOneBatch\(\) && idDocumentReceived\(\)\)/.test(admin),
+    'approval no longer requires both the one-batch pairing and the received ID',
+  );
+});
+
+test('pinWithinServiceArea uses the latlng METHOD form and SHELTER.bounds', () => {
+  // A stored GeoPoint is a rules `latlng`: `.latitude()` works, `.latitude` is a
+  // type error. withinServiceArea() (sightings) still uses property access,
+  // which is a known bug fixed in a separate PR — deliberately NOT pinned here.
+  const { minLat, maxLat, minLng, maxLng } = SHELTER.bounds;
+  const body = rulesFunctionBody('pinWithinServiceArea').replace(/\s+/g, ' ');
+  for (const needle of [
+    `geo.latitude() >= ${minLat}`,
+    `geo.latitude() <= ${maxLat}`,
+    `geo.longitude() >= ${minLng}`,
+    `geo.longitude() <= ${maxLng}`,
+  ]) {
+    assert.ok(body.includes(needle), `pinWithinServiceArea() no longer says ${needle}`);
+  }
+  assert.ok(!/geo\.(latitude|longitude)\b(?!\()/.test(body), 'pinWithinServiceArea() uses property access on a latlng');
+});
+
+// ─── the contract — portion 4a, plan §5 ─────────────────────────────────────
+
+/** Everything wrong with a contract, in words. Empty when it may be published. */
+function contractProblems(contract: AdoptionContract): string[] {
+  const problems: string[] = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(contract.version)) problems.push(`version ${contract.version} is not YYYY-MM-DD`);
+  if (contract.title.trim() === '') problems.push('the title is empty');
+  if (contract.clauses.length === 0 || contract.clauses.some((c) => c.trim() === '')) {
+    problems.push('a clause is empty, or there are none');
+  }
+  const expected = createHash('sha256').update(contractCanonicalText(contract), 'utf8').digest('hex');
+  if (contract.sha256 !== expected) problems.push(`sha256 should be ${expected}`);
+  return problems;
+}
+
+/** The {version: sha256} pairs acceptedContracts() returns. */
+function rulesContracts(): Record<string, string> {
+  const body = rulesFunctionBody('acceptedContracts');
+  const literal = /return\s+\{([^{}]*)\}\s*;/.exec(body);
+  assert.ok(literal, 'acceptedContracts() no longer returns a map literal — the drift guard cannot compare');
+  const pairs: Record<string, string> = {};
+  for (const m of literal[1]!.matchAll(/'([^']+)'\s*:\s*'([^']+)'/g)) pairs[m[1]!] = m[2]!;
+  // Every non-space character in the literal must belong to a parsed pair, or
+  // a pair written in another style would be silently skipped.
+  const leftover = literal[1]!.replace(/'[^']+'\s*:\s*'[^']+'\s*,?/g, '').trim();
+  assert.equal(leftover, '', `acceptedContracts() holds something this guard cannot read: ${leftover}`);
+  return pairs;
+}
+
+test('the canonical contract text is the title and each clause, separated by a blank line', () => {
+  assert.equal(
+    contractCanonicalText({ title: 'T', clauses: ['a', 'b'] }),
+    'T\n\na\n\nb',
+  );
+});
+
+test('the contract checker catches a wrong hash, a bad version and an empty clause', () => {
+  // The checker is what guards the real contract once it exists, so it is
+  // proven on a fixture now, while ADOPTION_CONTRACT is still null.
+  assert.deepEqual(contractProblems(FIXTURE), []);
+  assert.equal(contractProblems({ ...FIXTURE, clauses: [...FIXTURE.clauses, 'una más'] }).length, 1, 'an edited clause kept its old hash');
+  assert.equal(contractProblems({ ...FIXTURE, version: '16-10-2026' }).length, 1);
+  assert.equal(contractProblems({ ...FIXTURE, clauses: ['  '] }).length, 2);
+});
+
+test('the configured contract, if any, is internally consistent', () => {
+  if (ADOPTION_CONTRACT === null) return; // null until the shelter supplies it
+  assert.deepEqual(contractProblems(ADOPTION_CONTRACT), []);
+});
+
+test('the rules accept exactly the configured contract, and nothing while there is none', () => {
+  const pairs = rulesContracts();
+  if (ADOPTION_CONTRACT === null) {
+    assert.deepEqual(pairs, {}, 'acceptedContracts() lists a contract while ADOPTION_CONTRACT is null');
+  } else {
+    assert.deepEqual(
+      pairs,
+      { [ADOPTION_CONTRACT.version]: ADOPTION_CONTRACT.sha256 },
+      'firestore.rules acceptedContracts() and adoption-contract.ts differ — change both, deploy the rules',
+    );
+  }
+});
+
+test('the contract parser reads a populated acceptedContracts()', () => {
+  // So the guard above is not only ever run against `{}`.
+  const populated = `{'${FIXTURE.version}': '${FIXTURE.sha256}'}`;
+  const pairs: Record<string, string> = {};
+  for (const m of populated.matchAll(/'([^']+)'\s*:\s*'([^']+)'/g)) pairs[m[1]!] = m[2]!;
+  assert.deepEqual(pairs, { [FIXTURE.version]: FIXTURE.sha256 });
+});
+
+test('the application create rule checks the contract and the home document', () => {
+  const create = [...RULES.replace(/\r\n/g, '\n').matchAll(/allow create:[^;]*/g)]
+    .map((m) => m[0])
+    .find((rule) => rule.includes('petAcceptsApplications('));
+  assert.ok(create, 'no adoptionApplications create rule found');
+  assert.ok(create.includes('acceptedContracts().get(request.resource.data.contractVersion, null)'));
+  assert.ok(create.includes('request.resource.data.termsAcceptedAt == request.time'));
+  assert.ok(create.includes('request.resource.data.identityErasedAt == null'));
+  assert.ok(create.includes('/private/home)'), 'the create no longer requires private/home in the same batch');
+});
+
+test('the form cannot be switched on while there is no contract', () => {
+  assert.ok(
+    !(config.enabled && ADOPTION_CONTRACT === null),
+    'adoptionApplications.enabled is true while ADOPTION_CONTRACT is null — the shelter has not supplied its contract',
+  );
+});
+
+test('with the configured contract, nothing can be accepted while it is null', () => {
+  // The browser half of the third lock, through the same call the client makes.
+  const make = () =>
+    buildApplicationCreate({
+      petId: 'p',
+      applicantUid: 'u',
+      applicantEmail: 'e@example.com',
+      applicantEmailVerified: true,
+      answers: {},
+      contract: ADOPTION_CONTRACT,
+    });
+  if (ADOPTION_CONTRACT === null) assert.throws(make, ContractUnavailableError);
+  else assert.doesNotThrow(make);
+});
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return entry.name === '__tests__' ? [] : sourceFiles(path);
+    return /\.(ts|tsx|js|mjs|json)$/.test(entry.name) ? [path] : [];
+  });
+}
+
+test('the fixture contract text never leaves __tests__', () => {
+  // So no test text can be published as though the shelter wrote it.
+  const offenders = sourceFiles(join(process.cwd(), 'src')).filter((file) =>
+    readFileSync(file, 'utf8').includes('TEXTO DE PRUEBA'),
+  );
+  assert.deepEqual(offenders, []);
 });
 
 test('the internal notes rule is admin-only and refuses delete', () => {
@@ -244,6 +457,7 @@ function allApplicationCopy(): string[] {
     es.approvalBlocker('pet-already-adopted'),
     es.approvalBlocker('pet-not-ready'),
     es.approvalBlocker('application-not-approvable'),
+    es.approvalBlocker('id-document-missing'),
     es.approvalWarning('other-open-applications', { otherOpenCount: 1 }),
     es.approvalWarning('other-open-applications', { otherOpenCount: 3 }),
     es.approvalWarning('email-unverified', { otherOpenCount: 0 }),

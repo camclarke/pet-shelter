@@ -36,6 +36,7 @@ import type { IntakeError } from '@/lib/intake';
 import type { ApplicationStatus } from '@/lib/types';
 import type {
   ApplicationAnswerError,
+  ApplicationHomeError,
   ApprovalBlocker,
   ApprovalWarning,
 } from '@/lib/applications';
@@ -255,6 +256,22 @@ const APPROVAL_BLOCKER: Record<ApprovalBlocker, string> = {
     'Este animalito ya figura como adoptado. Aprobar ahora le daría su microchip y su historial a una segunda familia. Si volvió al refugio, regístralo primero como reingreso.',
   'pet-not-ready':
     'Este animalito todavía no puede pasar a adoptado: está en camino, en cuarentena o su rescate se canceló. Primero tiene que llegar y tener el alta.',
+  'id-document-missing':
+    'Todavía no llegó la foto del carnet de identidad de esta persona, y sin ella no se puede aprobar. Pídele por WhatsApp que la suba desde «Mis solicitudes» en su cuenta.',
+};
+
+/**
+ * Addressed to the applicant, as an instruction, like the answer errors above.
+ * The 300s are literals so this file imports only TYPES from applications.ts;
+ * application-home.test.ts fails if they stop matching HOME_*_MAX_CHARS.
+ */
+const APPLICATION_HOME_ERROR: Record<ApplicationHomeError, string> = {
+  'address-required': 'Escribe tu dirección: calle, número y zona.',
+  'address-too-short': 'Escribe tu dirección completa: calle, número y zona.',
+  'address-too-long': 'La dirección es muy larga. Usa 300 caracteres o menos.',
+  'reference-too-long': 'La referencia es muy larga. Usa 300 caracteres o menos.',
+  'pin-invalid': 'No pudimos leer ese punto del mapa. Ubícalo de nuevo, o envía solo tu dirección.',
+  'pin-outside-area': `Las solicitudes en línea son para ${SHELTER.city} y alrededores, porque el equipo visita cada hogar. Escríbenos por WhatsApp y lo conversamos.`,
 };
 
 const APPLICATION_COPY: ApplicationCopy = {
@@ -1874,6 +1891,8 @@ export const es: Messages = {
   applicationSectionLabel: (section) => APPLICATION_SECTION[section],
 
   applicationAnswerError: (error) => APPLICATION_ANSWER_ERROR[error],
+
+  applicationHomeError: (error) => APPLICATION_HOME_ERROR[error],
 
   approvalBlocker: (blocker) => APPROVAL_BLOCKER[blocker],
 

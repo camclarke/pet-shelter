@@ -14,7 +14,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import type { Species } from '@/lib/types';
+import type { IdDocumentSide, Species } from '@/lib/types';
 
 export interface ShelterConfig {
   name: string;
@@ -181,6 +181,15 @@ export interface ApplicationConfig {
    */
   questionsAreDraft: boolean;
   questions: readonly ApplicationQuestion[];
+  /**
+   * Which sides of the applicant's identity card are photographed. Every side
+   * listed must have arrived before an application can be approved.
+   *
+   * ⚠️ MIRRORED in `firestore.rules` as `idDocumentReceived()`, which is the
+   * enforcing copy for the approval. Change both, then deploy the rules — a
+   * test fails if the sides differ.
+   */
+  idDocumentSides: readonly IdDocumentSide[];
 }
 
 export const SHELTER: ShelterConfig = {
@@ -230,9 +239,16 @@ export const SHELTER: ShelterConfig = {
     // changes, update `applicationAnswerKeys()` in firestore.rules and deploy
     // the rules — the rules reject any key they do not list.
     //
-    // Two choices here are deliberate and worth keeping in the real set: the
-    // form asks for a ZONE, never an address, because an application must not
-    // become a list of where strangers live; and nothing asks for an ID number.
+    // ⚠️ A RECORDED DECISION, REVERSED in portion 4a (owner, 2026-10-16). This
+    // comment used to say the form asks for a ZONE, never an address, and that
+    // nothing asks for an ID. The application now collects a home address and
+    // a photo of the front of the identity card — but NOT as questions here.
+    // Answers live in the main application document; the address goes only
+    // into its own restricted `private/home` document, and the ID photo only
+    // through its upload route into Storage. So the old rule still holds for
+    // this list: no question may ask for a street address or an identity
+    // document (a test reads every label). `zone` was removed because the
+    // address replaces it.
     questions: [
       {
         id: 'fullName',
@@ -250,14 +266,6 @@ export const SHELTER: ShelterConfig = {
         kind: 'phone',
         required: true,
         purpose: 'applicantPhone',
-      },
-      {
-        id: 'zone',
-        section: 'contact',
-        label: '¿En qué zona o barrio vives?',
-        hint: 'Solo la zona. No necesitamos tu dirección.',
-        kind: 'shortText',
-        required: true,
       },
       {
         id: 'housingType',
@@ -365,6 +373,9 @@ export const SHELTER: ShelterConfig = {
         required: true,
       },
     ],
+
+    // Owner decision, 2026-10-16: the front only, required before approval.
+    idDocumentSides: ['front'],
   },
 
   // The owner is providing these (plan §11 #6). Deliberately null until then.

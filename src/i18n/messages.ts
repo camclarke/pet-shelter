@@ -241,6 +241,7 @@ export interface LabelScanCopy {
 import type { ApplicationStatus } from '@/lib/types';
 import type {
   ApplicationAnswerError,
+  ApplicationHomeError,
   ApprovalBlocker,
   ApprovalWarning,
 } from '@/lib/applications';
@@ -940,6 +941,9 @@ export interface Messages {
 
   /** Why one answer cannot be sent. Addressed to the applicant, as an instruction. */
   applicationAnswerError(error: ApplicationAnswerError): string;
+
+  /** Why the home address cannot be sent. Addressed to the applicant, as an instruction. */
+  applicationHomeError(error: ApplicationHomeError): string;
 
   /** Why an approval cannot be recorded. Structural only — these BLOCK. */
   approvalBlocker(blocker: ApprovalBlocker): string;

@@ -956,6 +956,34 @@ export type ApplicationStatus =
 /** An answer as stored. Never null: an unanswered optional question is absent. */
 export type ApplicationAnswer = string | boolean | number;
 
+/**
+ * A side of an identity card. `SHELTER.adoptionApplications.idDocumentSides`
+ * says which ones an applicant photographs, and `idDocumentReceived()` in
+ * `firestore.rules` checks exactly those.
+ */
+export type IdDocumentSide = 'front' | 'back';
+
+/**
+ * What the upload route records once an ID photo is stored. Written ONLY
+ * through the Admin SDK — no browser may write it, and the rules freeze it.
+ * Never a URL: the photo itself is read by an admin, on tap, under
+ * `storage.rules`.
+ */
+export interface IdDocumentReceipt {
+  receivedAt: Timestamp;
+  bytes: number;
+  /** The Storage object's generation, so the exact version can be named later. */
+  generation: string;
+}
+
+/**
+ * On the application: which sides have been RECEIVED. Null until then, and
+ * null again after erasure. It reveals that a photo arrived, never the photo,
+ * so the admin queue can show "Sin carnet" and the approval rule can check it
+ * without loading anything private.
+ */
+export type ApplicationIdDocument = Partial<Record<IdDocumentSide, IdDocumentReceipt | null>>;
+
 export interface AdoptionApplication {
   id: string;
   petId: string;
@@ -979,6 +1007,62 @@ export interface AdoptionApplication {
   decidedAt: Timestamp | null;
   /** The admin who approved or rejected. Null otherwise. */
   decidedBy: string | null;
+
+  // ── Portion 4a. All five are frozen for every browser after create. ────────
+
+  /**
+   * The contract version the applicant applied under — a date, from
+   * `src/config/adoption-contract.ts`. The online "acepto" means "I apply
+   * under this contract"; the contract itself is signed on paper at handover.
+   */
+  contractVersion: string;
+  /**
+   * sha256 of the exact contract text shown. The rules accept only a pair
+   * listed in `acceptedContracts()`, so this proves WHICH text was shown at
+   * submit. It does not prove the person read it.
+   */
+  contractSha256: string;
+  /** The server's clock when the application was sent (`== request.time`). */
+  termsAcceptedAt: Timestamp;
+  /** Which ID photo sides have arrived. All null at create. */
+  idDocument: ApplicationIdDocument;
+  /**
+   * When the ID photo and the home address were erased under the retention
+   * policy. Null until then. Written only through the Admin SDK.
+   */
+  identityErasedAt: Timestamp | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// adoptionApplications/{id}/private/home — ADMINS, and the APPLICANT reading
+// their own
+//
+// The applicant's home address, for the home visit. A separate DOCUMENT so the
+// admin queue's list never loads an address, and so it can be erased on its own
+// schedule while the application is kept. Created in the SAME batch as the
+// application, never updated by the applicant, corrected only by an admin.
+//
+// ⚠️ PRIVATE PERSON'S HOME. Never copied to `pets/*/location/current`, never
+// logged, never public.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface ApplicationHome {
+  applicantUid: string;
+  /** As typed: street, number, zone. 5–300 characters. */
+  addressText: string;
+  /** A landmark ("frente a la cancha"). At most 300 characters; may be empty. */
+  reference: string;
+  /**
+   * The pin the person placed on their own home, rounded in the browser to 4
+   * decimals (about 11 m) and inside `SHELTER.bounds`. Null when they sent the
+   * address without a pin.
+   */
+  geo: GeoPoint | null;
+  /** `'exact'` exactly when `geo` is set; null when it is not. */
+  precision: Extract<LocationPrecision, 'exact'> | null;
+  createdAt: Timestamp;
+  /** Set when an admin corrects the address after a conversation. */
+  correctedAt?: Timestamp;
+  correctedBy?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
