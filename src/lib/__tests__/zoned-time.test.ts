@@ -12,6 +12,7 @@ import {
   isUpcoming,
   nextDayKey,
   startOfDayInZone,
+  toZonedIso,
   wallClockToInstant,
   wallClockYearOutOfRange,
   zonedDayKey,
@@ -284,6 +285,25 @@ test('the year appears only when it is not the current one', () => {
   const at = wallClockToInstant('2027-10-30T15:00', LA_PAZ)!;
   const text = formatEventWhen({ startsAt: at, endsAt: at, allDay: false }, LA_PAZ, 'es-BO', NOW_2026);
   assert.match(text, /2027/);
+});
+
+// ── ISO with the zone's offset (JSON-LD) ───────────────────────────────────
+
+test('toZonedIso writes the La Paz wall clock with -04:00, never Z', () => {
+  assert.equal(toZonedIso(Date.parse('2026-10-31T19:00:00Z'), LA_PAZ), '2026-10-31T15:00:00-04:00');
+  // Crosses UTC midnight: still 31 October in La Paz.
+  assert.equal(toZonedIso(Date.parse('2026-11-01T01:30:00Z'), LA_PAZ), '2026-10-31T21:30:00-04:00');
+  assert.equal(toZonedIso(Date.parse('2026-10-31T19:00:00Z'), 'UTC'), '2026-10-31T19:00:00+00:00');
+});
+
+test('toZonedIso reads the offset at THAT instant: daylight saving and half hours', () => {
+  // New York leaves daylight saving on 1 November 2026.
+  assert.equal(toZonedIso(Date.parse('2026-10-31T19:00:00Z'), 'America/New_York'), '2026-10-31T15:00:00-04:00');
+  assert.equal(toZonedIso(Date.parse('2026-11-02T20:00:00Z'), 'America/New_York'), '2026-11-02T15:00:00-05:00');
+  assert.equal(toZonedIso(Date.parse('2026-07-01T12:00:00Z'), 'Asia/Kolkata'), '2026-07-01T17:30:00+05:30');
+  // Round trip: the string parses back to the same instant.
+  const at = Date.parse('2026-12-24T23:00:00Z');
+  assert.equal(Date.parse(toZonedIso(at, LA_PAZ)), at);
 });
 
 // ── source guard ───────────────────────────────────────────────────────────

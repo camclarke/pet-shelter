@@ -452,6 +452,55 @@ export interface EventsCopy {
 
   error(error: EventError): string;
   warning(warning: EventWarning): string;
+
+  /** What a VISITOR reads: /events, /events/[slug] and the homepage card (PR 3b). */
+  readonly site: EventsSiteCopy;
+}
+
+/**
+ * The public events pages and the homepage card.
+ *
+ * ⚠️ Visitor copy, so stricter than the admin strings above: it must never
+ * signal a gap — no "aún no", "todavía", "próximamente", "pronto", "por
+ * ahora", "no hay eventos" — and it never describes an event that does not
+ * exist, not even as an example. A test reads every string here for both, and
+ * for voseo.
+ */
+export interface EventsSiteCopy {
+  /** <h1> and the <title>. */
+  readonly pageTitle: string;
+  /** The meta description and the line under the heading. */
+  intro(shelterShortName: string, city: string): string;
+
+  /** The empty state — owner-approved wording, 2026-10-15. */
+  readonly emptyTitle: string;
+  readonly emptyBody: string;
+  readonly instagram: string;
+  readonly facebook: string;
+  readonly whatsapp: string;
+
+  /** The query threw. Never the empty state. */
+  readonly loadFailed: string;
+
+  /** Where a timed event shows its hours. */
+  readonly allDay: string;
+  readonly cancelledBadge: string;
+  /** Opens Google Maps in a new tab. */
+  readonly mapLink: string;
+  readonly askOnWhatsapp: string;
+  /** The prefilled WhatsApp message: names the event and its day. */
+  inquiry(title: string, day: string): string;
+
+  readonly whenLabel: string;
+  readonly placeLabel: string;
+  /** A detail page whose event is over. `last` null for a one-day event. */
+  pastNotice(first: string, last: string | null): string;
+  readonly cancelledNotice: string;
+  readonly backToEvents: string;
+
+  /** The homepage card's heading, by how many events it shows. */
+  homeHeading(count: number): string;
+  readonly homeSeeAll: string;
 }
 
 /**

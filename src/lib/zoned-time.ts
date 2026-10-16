@@ -178,6 +178,25 @@ export function instantToWallClock(date: Date | number, timeZone: string): strin
   return `${pad(p.year, 4)}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
 }
 
+/**
+ * The instant as ISO 8601 with the ZONE'S offset, never `Z`:
+ * "2026-10-31T15:00:00-04:00". What schema.org's `startDate` reads, and what a
+ * person reading the page source can check against the poster. The offset is
+ * read from `Intl` at that instant, so a fork in a zone with daylight saving
+ * gets the right one on each side of its switch.
+ */
+export function toZonedIso(date: Date | number, timeZone: string): string {
+  const ms = +date;
+  const p = zonedParts(ms, timeZone);
+  const offsetMinutes = Math.round(zoneOffsetMs(ms, timeZone) / 60_000);
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const abs = Math.abs(offsetMinutes);
+  return (
+    `${pad(p.year, 4)}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  );
+}
+
 /** The calendar day of an instant in `timeZone`, as "2026-10-31". */
 export function zonedDayKey(date: Date | number, timeZone: string): string {
   return instantToWallClock(date, timeZone).slice(0, 10);

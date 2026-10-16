@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { AdoptionWall } from '@/components/AdoptionWall';
+import { UpcomingEvents } from '@/components/UpcomingEvents';
 import { SHELTER } from '@/config/shelter';
 
 /**
@@ -88,6 +89,10 @@ export default function HomePage() {
           Ver todos los animalitos
         </Link>
       </div>
+
+      {/* Renders nothing unless a published event is upcoming, and nothing if
+          the events query fails — the wall above never depends on it. */}
+      <UpcomingEvents limit={3} />
 
       <section className="steps">
         <div className="container">

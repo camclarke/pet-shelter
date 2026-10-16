@@ -592,7 +592,15 @@ textarea {
   .header__nav::-webkit-scrollbar {
     display: none;
   }
+  /* 44px tap target, the floor every other control meets. Without it a link
+     was 12px × 1.62 + 2 × 6px + 2px border ≈ 33px (measured 33.44px at 360px,
+     2026-10-15), on a row that now scrolls sideways — a thumb aimed at one link
+     lands on its neighbour or scrolls the row. The type stays 12px; the box
+     grows (box-sizing is border-box, so padding and border sit inside it). */
   .header__nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
     white-space: nowrap;
     font-size: 12px;
     letter-spacing: 0.1em;
@@ -619,6 +627,26 @@ textarea {
     width: 44px;
     height: 44px;
     min-height: 44px;
+  }
+}
+
+/* Five links on a phone. "Eventos" made the row ~383px (INFERRED from the 253px
+   measured for four, plus ~66px and a 16px gap) against 312px at 360px, so it
+   scrolls — and a row that scrolls with no visible edge looks finished at
+   "Ayuda", hiding "Nosotros". The right edge fades to say "there is more".
+   The type is never shrunk to make it fit.
+   The ::after is a spacer, not decoration: it lets the last link scroll clear
+   of the faded band, so "Nosotros" is fully readable once you reach it.
+   A mask is alpha only, so this needs no dark-mode variant. 430px is where five
+   links stop fitting (383px + 2 × 24px gutter) — re-measure if a label changes. */
+@media (max-width: 430px) {
+  .header__nav {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  .header__nav::after {
+    content: '';
+    flex: 0 0 12px;
   }
 }
 
@@ -4193,4 +4221,203 @@ textarea {
     align-self: stretch;
     justify-content: center;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Public events — /events, /events/[slug] (app/events/), and the homepage card
+   (components/UpcomingEvents.tsx).
+
+   Every colour is a token that already flips at night, so there is no dark
+   block here. No rule below sets a font-size on a class that sits on a .btn:
+   the WhatsApp buttons keep the 19px floor .btn--brand needs.
+   Coral stays the action's colour: the "Cancelado" badge is drawn in ink, not
+   coral, so it never reads as something to tap.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.events {
+  padding-block: var(--space-5);
+}
+.events__intro {
+  margin-top: var(--space-1);
+  max-width: 60ch;
+  opacity: 0.8;
+}
+.events__failed {
+  padding: var(--space-4) 0;
+  font-size: 15.5px;
+  opacity: 0.8;
+}
+.events__list {
+  list-style: none;
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  max-width: 760px;
+}
+
+.event-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2);
+  background: var(--cream);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+.event-card__when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-weight: 700;
+  font-size: 15px;
+}
+.event-card__badge {
+  display: inline-block;
+  padding: 1px 8px 2px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.event-card__title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-variation-settings: var(--wonk);
+  font-size: 24px;
+  line-height: 1.1;
+  letter-spacing: -0.012em;
+}
+/* display:block + 9px of padding: a one-line title is a 44px tap target. */
+.event-card__title a {
+  display: block;
+  padding-block: 9px;
+  color: inherit;
+  text-decoration: none;
+}
+.event-card__title a:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--coral);
+  text-underline-offset: 4px;
+}
+.event-card--cancelled .event-card__title a {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+.event-card__map {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 600;
+  color: var(--jade-deep);
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.event-card__excerpt {
+  opacity: 0.85;
+}
+.event-card__cta {
+  align-self: flex-start;
+  margin-top: 6px;
+}
+
+.events__empty {
+  margin-top: var(--space-4);
+  max-width: 60ch;
+}
+.events__empty-title {
+  font-family: var(--display);
+  font-weight: 600;
+  font-variation-settings: var(--wonk);
+  font-size: 24px;
+  line-height: 1.2;
+}
+.events__empty-body {
+  margin-top: var(--space-1);
+  opacity: 0.85;
+}
+.events__empty-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: var(--space-3);
+}
+
+/* The detail page. The column is capped per child, not centred, so it stays
+   aligned with the header's left edge on a wide screen. */
+.event-page {
+  padding-block: var(--space-4) var(--space-5);
+}
+.event-page__body > * {
+  max-width: 68ch;
+}
+.event-page__body {
+  overflow-wrap: anywhere;
+}
+.event-page__back a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 600;
+}
+.event-page__title {
+  margin-top: var(--space-1);
+}
+.event-page__notice {
+  margin-top: var(--space-3);
+  padding: 12px 16px;
+  border-left: 4px solid var(--jade-deep);
+  background: var(--cream-2);
+  font-weight: 600;
+}
+.event-page__notice--cancelled {
+  border-left-width: 8px;
+}
+.event-page__facts {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.event-page__facts dd {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.event-page__description {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.event-page__cta {
+  margin-top: var(--space-4);
+}
+
+/* The homepage card. Present only when an event is upcoming. */
+.home-events {
+  border-top: 1px solid var(--line);
+  padding-block: var(--space-5);
+}
+.home-events__title {
+  margin-bottom: var(--space-3);
+}
+.home-events__list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+.home-events__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-2);
+  background: var(--cream);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+.home-events__all {
+  margin-top: var(--space-3);
 }

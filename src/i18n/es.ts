@@ -146,6 +146,39 @@ const EVENTS_COPY: EventsCopy = {
 
   error: (error) => EVENT_ERROR[error],
   warning: (warning) => EVENT_WARNING[warning],
+
+  site: {
+    pageTitle: 'Eventos',
+    intro: (shortName, city) => `Ferias de adopción y encuentros de ${shortName} en ${city}.`,
+
+    // Owner-approved, 2026-10-15. Keep these words. Deliberately no line
+    // pointing at /adopt: the wall has no animals published yet, and the link
+    // would land a visitor on an empty page.
+    emptyTitle: 'Las ferias y jornadas se anuncian primero en nuestras redes.',
+    emptyBody:
+      'Síguenos en Instagram y Facebook, o escríbenos por WhatsApp para saber de la próxima feria de adopción.',
+    instagram: 'Instagram ↗',
+    facebook: 'Facebook ↗',
+    whatsapp: 'WhatsApp ↗',
+
+    loadFailed: 'No pudimos cargar los eventos en este momento. Intenta de nuevo en un rato.',
+
+    allDay: 'Todo el día',
+    cancelledBadge: 'Cancelado',
+    mapLink: 'Ver en el mapa ↗',
+    askOnWhatsapp: 'Pregunta por WhatsApp ↗',
+    inquiry: (title, day) => `Hola, quiero saber más sobre «${title}» del ${day}.`,
+
+    whenLabel: 'Cuándo',
+    placeLabel: 'Dónde',
+    pastNotice: (first, last) =>
+      last ? `Este evento se realizó del ${first} al ${last}.` : `Este evento se realizó el ${first}.`,
+    cancelledNotice: 'Este evento se canceló.',
+    backToEvents: '← Todos los eventos',
+
+    homeHeading: (count) => (count === 1 ? 'Próximo evento' : 'Próximos eventos'),
+    homeSeeAll: 'Ver todos los eventos',
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
