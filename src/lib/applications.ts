@@ -37,23 +37,30 @@
  * Same split as `medical.ts` and `areas.ts`. Approval BLOCKS only on states that
  * are structurally unsafe: an animal that already belongs to a family (approving
  * would hand its microchip and location to a second one), an animal that
- * `arrival.ts` says cannot become adopted, and an application nobody has moved
- * into review. Everything the shelter can have a good reason for — other people
+ * `arrival.ts` says cannot become adopted, an application nobody has moved
+ * into review, and — since portion 4a, by owner decision — an application whose
+ * ID photo has not arrived. Everything the shelter can have a good reason for — other people
  * still waiting, an unverified email, an animal taken off the wall mid-interview
  * — only WARNS. Nothing here ever changes another application automatically:
  * turning someone down is a conversation, not a side effect.
  */
 
-import type { ApplicationQuestion } from '@/config/shelter';
+import { SHELTER, type ApplicationQuestion } from '@/config/shelter';
+import type { AdoptionContract } from '@/config/adoption-contract';
 import { canTransition } from './arrival';
 import type {
   Adoption,
   AdoptionApplication,
   ApplicationAnswer,
+  ApplicationHome,
   ApplicationStatus,
   CustodyEvent,
+  IdDocumentSide,
   PetStatus,
 } from './types';
+
+/** The sides this shelter asks for. Overridable per call so the tests can vary it. */
+const CONFIGURED_ID_SIDES: readonly IdDocumentSide[] = SHELTER.adoptionApplications.idDocumentSides;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Statuses and the transition table
@@ -380,7 +387,16 @@ export function isServerTime(value: unknown): value is ServerTime {
 /** The exact shape a new application is created with. Mirrors the rules' create branch. */
 export type ApplicationCreateWrite = Omit<
   AdoptionApplication,
-  'id' | 'submittedAt' | 'updatedAt' | 'withdrawnAt' | 'decidedAt' | 'decidedBy' | 'status'
+  | 'id'
+  | 'submittedAt'
+  | 'updatedAt'
+  | 'withdrawnAt'
+  | 'decidedAt'
+  | 'decidedBy'
+  | 'status'
+  | 'termsAcceptedAt'
+  | 'idDocument'
+  | 'identityErasedAt'
 > & {
   status: 'submitted';
   submittedAt: ServerTime;
@@ -388,15 +404,71 @@ export type ApplicationCreateWrite = Omit<
   withdrawnAt: null;
   decidedAt: null;
   decidedBy: null;
+  termsAcceptedAt: ServerTime;
+  /** Every configured side present and null: nothing has been received yet. */
+  idDocument: Partial<Record<IdDocumentSide, null>>;
+  identityErasedAt: null;
 };
 
+/** What an application records about the contract: which text, by version and hash. */
+export type ContractAcceptance = Pick<AdoptionContract, 'version' | 'sha256'>;
+
+/**
+ * There is no contract to apply under. `ADOPTION_CONTRACT` is null until the
+ * shelter supplies its real text, and while it is, nothing can be accepted —
+ * so no application can even be described, let alone sent.
+ */
+export class ContractUnavailableError extends Error {
+  constructor(reason = 'no adoption contract is configured') {
+    super(`contract unavailable: ${reason}`);
+    this.name = 'ContractUnavailableError';
+  }
+}
+
+const CONTRACT_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * The contract an application may be created under, or a thrown
+ * `ContractUnavailableError`. A null contract — today's state — and a
+ * malformed one are both refused, because either would write a version or a
+ * hash the rules cannot match.
+ */
+export function requireContract(contract: ContractAcceptance | null): ContractAcceptance {
+  if (contract === null) throw new ContractUnavailableError();
+  if (!CONTRACT_VERSION_PATTERN.test(contract.version)) {
+    throw new ContractUnavailableError('the contract version is not a YYYY-MM-DD date');
+  }
+  if (!SHA256_HEX_PATTERN.test(contract.sha256)) {
+    throw new ContractUnavailableError('the contract hash is not a lower-case hex sha256');
+  }
+  return contract;
+}
+
+/**
+ * A new application, as written.
+ *
+ * `contract` is REQUIRED and has no default on purpose: the caller must pass
+ * `ADOPTION_CONTRACT` explicitly, and while that is null this throws
+ * `ContractUnavailableError` — the browser half of the third lock. The rules
+ * half is the empty `acceptedContracts()`.
+ */
 export function buildApplicationCreate(input: {
   petId: string;
   applicantUid: string;
   applicantEmail: string;
   applicantEmailVerified: boolean;
   answers: Record<string, ApplicationAnswer>;
+  contract: ContractAcceptance | null;
+  /** Defaults to `SHELTER.adoptionApplications.idDocumentSides`. */
+  idDocumentSides?: readonly IdDocumentSide[];
 }): ApplicationCreateWrite {
+  const contract = requireContract(input.contract);
+  const sides = input.idDocumentSides ?? CONFIGURED_ID_SIDES;
+  if (sides.length === 0) throw new Error('buildApplicationCreate: no identity document side is configured');
+  const idDocument: Partial<Record<IdDocumentSide, null>> = {};
+  for (const side of sides) idDocument[side] = null;
+
   return {
     petId: input.petId,
     applicantUid: input.applicantUid,
@@ -409,6 +481,194 @@ export function buildApplicationCreate(input: {
     withdrawnAt: null,
     decidedAt: null,
     decidedBy: null,
+    contractVersion: contract.version,
+    contractSha256: contract.sha256,
+    termsAcceptedAt: SERVER_TIME,
+    idDocument,
+    identityErasedAt: null,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The home address — `adoptionApplications/{id}/private/home`
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The bounds `firestore.rules` enforces on `private/home`. MIRRORED in
+ * `validHome()` there, which is the enforcing copy; a test fails if the two
+ * drift. Lengths are UTF-16 code units on both sides (JavaScript `.length`
+ * and the rules' `size()`), and the minimum is on the TRIMMED address.
+ */
+export const HOME_ADDRESS_MIN_CHARS = 5;
+export const HOME_ADDRESS_MAX_CHARS = 300;
+export const HOME_REFERENCE_MAX_CHARS = 300;
+
+/** Decimal places a pin keeps: about 11 m of latitude at Cochabamba. */
+export const PIN_DECIMALS = 4;
+
+/** A point as plain numbers. The Firestore layer turns it into a `GeoPoint`. */
+export interface PinCoordinates {
+  latitude: number;
+  longitude: number;
+}
+
+/**
+ * A pin rounded to 4 decimal places — about 11 m in latitude here (INFERRED
+ * from the geometry: one degree of latitude is about 111 km).
+ *
+ * Why 4: a fingertip on a phone map is no more accurate than that, the pin's
+ * only purpose is finding the house for the home visit, and the typed address
+ * and landmark do the rest. Storing finer gains nothing; rounding to 3 (about
+ * 110 m) would defeat the purpose.
+ *
+ * Rounds half away from zero, and never returns `-0`. The caller checks the
+ * service area AFTER rounding, because the rounded value is what is stored and
+ * what the rules check: a point a few metres outside an edge can round onto it.
+ */
+export function roundPin4(pin: PinCoordinates): PinCoordinates {
+  return { latitude: roundTo4(pin.latitude), longitude: roundTo4(pin.longitude) };
+}
+
+function roundTo4(value: number): number {
+  const scale = 10 ** PIN_DECIMALS;
+  const rounded = (Math.sign(value) * Math.round(Math.abs(value) * scale)) / scale;
+  return rounded === 0 ? 0 : rounded;
+}
+
+export type ApplicationHomeError =
+  | 'address-required'
+  | 'address-too-short'
+  | 'address-too-long'
+  | 'reference-too-long'
+  /** Not a finite point on Earth — a broken map, never something a person typed. */
+  | 'pin-invalid'
+  /** Outside `SHELTER.bounds`: the team visits every home, so online is for the service area only. */
+  | 'pin-outside-area';
+
+export interface HomeDraft {
+  addressText: string;
+  reference: string;
+  /** The confirmed map point, or null when the person sends the address alone. */
+  pin: PinCoordinates | null;
+}
+
+/** A home that `validHome()` in the rules will accept. Only `validateHome` makes one. */
+export interface ValidHome {
+  addressText: string;
+  reference: string;
+  geo: PinCoordinates | null;
+  precision: 'exact' | null;
+}
+
+export interface HomeValidation {
+  /** Null unless every field is valid. */
+  home: ValidHome | null;
+  /** Per field. Empty when the home can be sent. */
+  errors: Partial<Record<'addressText' | 'reference' | 'pin', ApplicationHomeError>>;
+  valid: boolean;
+}
+
+/** One line, single spaces: an address is read back to a person on a phone. */
+function tidyLine(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Validate and normalise the address step into exactly what `validHome()`
+ * accepts. Refuses rather than cuts — a cut address is one the person never
+ * wrote.
+ */
+export function validateHome(
+  draft: HomeDraft,
+  bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number } = SHELTER.bounds,
+): HomeValidation {
+  const errors: HomeValidation['errors'] = {};
+
+  const addressText = tidyLine(draft.addressText);
+  if (addressText === '') errors.addressText = 'address-required';
+  else if (addressText.length < HOME_ADDRESS_MIN_CHARS) errors.addressText = 'address-too-short';
+  else if (addressText.length > HOME_ADDRESS_MAX_CHARS) errors.addressText = 'address-too-long';
+
+  const reference = tidyLine(draft.reference);
+  if (reference.length > HOME_REFERENCE_MAX_CHARS) errors.reference = 'reference-too-long';
+
+  let geo: PinCoordinates | null = null;
+  if (draft.pin !== null) {
+    const { latitude, longitude } = draft.pin;
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      Math.abs(latitude) > 90 ||
+      Math.abs(longitude) > 180
+    ) {
+      errors.pin = 'pin-invalid';
+    } else {
+      const rounded = roundPin4({ latitude, longitude });
+      const inside =
+        rounded.latitude >= bounds.minLat &&
+        rounded.latitude <= bounds.maxLat &&
+        rounded.longitude >= bounds.minLng &&
+        rounded.longitude <= bounds.maxLng;
+      if (inside) geo = rounded;
+      else errors.pin = 'pin-outside-area';
+    }
+  }
+
+  const valid = Object.keys(errors).length === 0;
+  return {
+    home: valid ? { addressText, reference, geo, precision: geo ? 'exact' : null } : null,
+    errors,
+    valid,
+  };
+}
+
+/** `private/home`, as written. Typed so `ApplicationHome` and the writer cannot drift. */
+export type HomeCreateWrite = Omit<
+  ApplicationHome,
+  'geo' | 'createdAt' | 'correctedAt' | 'correctedBy'
+> & {
+  geo: PinCoordinates | null;
+  createdAt: ServerTime;
+};
+
+export class InvalidHomeError extends Error {
+  readonly errors: HomeValidation['errors'];
+  constructor(errors: HomeValidation['errors']) {
+    super(`invalid home: ${Object.values(errors).join(', ')}`);
+    this.name = 'InvalidHomeError';
+    this.errors = errors;
+  }
+}
+
+/**
+ * The address document, for the SAME batch as the application.
+ *
+ * Re-validates rather than trusting its argument, and throws instead of
+ * returning a partial document: a caller that skipped `validateHome` must not
+ * be able to send something the rules would refuse — or, worse, something
+ * they accept that is not what the person typed.
+ */
+export function buildHomeCreate(input: {
+  applicantUid: string;
+  home: ValidHome;
+  bounds?: Parameters<typeof validateHome>[1];
+}): HomeCreateWrite {
+  if (!input.applicantUid) throw new Error('buildHomeCreate: the applicant is required');
+  const check = validateHome(
+    { addressText: input.home.addressText, reference: input.home.reference, pin: input.home.geo },
+    input.bounds,
+  );
+  if (!check.valid || !check.home) throw new InvalidHomeError(check.errors);
+  if ((input.home.geo === null) !== (input.home.precision === null)) {
+    throw new InvalidHomeError({ pin: 'pin-invalid' });
+  }
+  return {
+    applicantUid: input.applicantUid,
+    addressText: check.home.addressText,
+    reference: check.home.reference,
+    geo: check.home.geo,
+    precision: check.home.precision,
+    createdAt: SERVER_TIME,
   };
 }
 
@@ -479,7 +739,13 @@ export type ApprovalBlocker =
   /** Already belongs to a family. Approving would hand its tiers to a second one. */
   | 'pet-already-adopted'
   /** `arrival.ts` says this status cannot become `adopted` (not yet arrived or cleared). */
-  | 'pet-not-ready';
+  | 'pet-not-ready'
+  /**
+   * A configured side of the ID photo has not arrived. Owner decision,
+   * 2026-10-16: the front is required before approval. The rules enforce it
+   * too (`idDocumentReceived()`), so this is the screen saying so first.
+   */
+  | 'id-document-missing';
 
 export type ApprovalWarning =
   /** Other people are still waiting on this same animal. */
@@ -496,11 +762,36 @@ export type ApprovalWarning =
    */
   | 'location-will-be-visible';
 
+/**
+ * What approval needs to know about the ID photo: whether each side has a
+ * receipt. The receipt's contents do not matter here, so any non-null value
+ * counts — the admin layer converts timestamps, the rules see the raw map.
+ */
+export type IdDocumentMarker = Partial<Record<IdDocumentSide, unknown>>;
+
+/**
+ * Has every configured side of the ID photo arrived?
+ *
+ * A missing marker (an application from before portion 4a, or a malformed
+ * document) counts as NOT received — the same answer the rules give, where
+ * reading a missing `idDocument` errors and so denies.
+ */
+export function idDocumentComplete(
+  idDocument: IdDocumentMarker | null | undefined,
+  sides: readonly IdDocumentSide[] = CONFIGURED_ID_SIDES,
+): boolean {
+  if (!idDocument || sides.length === 0) return false;
+  return sides.every((side) => idDocument[side] !== null && idDocument[side] !== undefined);
+}
+
 export interface ApprovalContext {
   application: Pick<
     AdoptionApplication,
     'id' | 'petId' | 'applicantUid' | 'applicantEmailVerified' | 'status'
-  >;
+  > & {
+    /** Required, so no caller can approve without having read the marker. */
+    idDocument: IdDocumentMarker;
+  };
   /** The pet as it is NOW, or null when the document no longer exists. */
   pet: { id: string; status: PetStatus } | null;
   /** Every OTHER application for the same pet, in any status. */
@@ -516,7 +807,14 @@ export interface ApprovalCheck {
   otherOpenIds: string[];
 }
 
-export function approvalCheck(context: ApprovalContext): ApprovalCheck {
+/**
+ * `idDocumentSides` defaults to `SHELTER.adoptionApplications.idDocumentSides`;
+ * the parameter exists so the tests can vary it.
+ */
+export function approvalCheck(
+  context: ApprovalContext,
+  idDocumentSides: readonly IdDocumentSide[] = CONFIGURED_ID_SIDES,
+): ApprovalCheck {
   const blockers: ApprovalBlocker[] = [];
   const warnings: ApprovalWarning[] = [];
 
@@ -537,6 +835,10 @@ export function approvalCheck(context: ApprovalContext): ApprovalCheck {
     blockers.push('pet-not-ready');
   } else if (pet.status !== 'available') {
     warnings.push('pet-not-on-wall');
+  }
+
+  if (!idDocumentComplete(context.application.idDocument, idDocumentSides)) {
+    blockers.push('id-document-missing');
   }
 
   const otherOpenIds = context.otherApplications

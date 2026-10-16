@@ -12,10 +12,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 import {
   APPLICATION_STATUS_TRANSITIONS,
   ApprovalBlockedError,
+  ContractUnavailableError,
   IllegalApplicationTransition,
   SERVER_TIME,
   adminStatusPatch,
@@ -30,6 +32,7 @@ import {
   choiceLabel,
   emptyAnswerDraft,
   groupApplicationsByPet,
+  idDocumentComplete,
   isServerTime,
   parseApplicationId,
   phoneDigits,
@@ -329,14 +332,27 @@ test('a stored choice whose option was removed still renders its raw value', () 
   assert.equal(choiceLabel(undefined, 'boat'), 'boat');
 });
 
-test('a new application starts submitted with every decision field null', () => {
-  const write = buildApplicationCreate({
+// A contract acceptance for the tests only. The text is the fixture string
+// application-config.test.ts forbids anywhere outside __tests__.
+const TEST_CONTRACT = {
+  version: '2000-01-01',
+  sha256: createHash('sha256').update('TEXTO DE PRUEBA').digest('hex'),
+};
+
+function createInput(over: Partial<Parameters<typeof buildApplicationCreate>[0]> = {}) {
+  return {
     petId: 'pet1',
     applicantUid: 'uid1',
     applicantEmail: 'a@example.com',
     applicantEmailVerified: false,
     answers: { fullName: 'Ana' },
-  });
+    contract: TEST_CONTRACT,
+    ...over,
+  };
+}
+
+test('a new application starts submitted with every decision field null', () => {
+  const write = buildApplicationCreate(createInput());
   assert.equal(write.status, 'submitted');
   assert.equal(write.decidedAt, null);
   assert.equal(write.decidedBy, null);
@@ -345,9 +361,47 @@ test('a new application starts submitted with every decision field null', () => 
   assert.ok(isServerTime(write.updatedAt));
 });
 
+test('a new application records the contract shown, the server clock, and no ID yet', () => {
+  const write = buildApplicationCreate(createInput());
+  assert.equal(write.contractVersion, '2000-01-01');
+  assert.equal(write.contractSha256, TEST_CONTRACT.sha256);
+  assert.ok(isServerTime(write.termsAcceptedAt), 'termsAcceptedAt must be the server clock');
+  assert.equal(write.identityErasedAt, null);
+  // The shelter asks for the front only (owner decision, 2026-10-16).
+  assert.deepEqual(write.idDocument, { front: null });
+});
+
+test('the ID marker lists every configured side, each null', () => {
+  const both = buildApplicationCreate(createInput({ idDocumentSides: ['front', 'back'] }));
+  assert.deepEqual(both.idDocument, { front: null, back: null });
+  assert.throws(() => buildApplicationCreate(createInput({ idDocumentSides: [] })));
+});
+
+test('THE CONTRACT TIE: with no contract, nothing can be accepted and no application is described', () => {
+  // ADOPTION_CONTRACT is null until the shelter supplies its real text. The
+  // rules refuse the create too (empty acceptedContracts()); this is the
+  // browser half, which refuses before anything is sent.
+  assert.throws(() => buildApplicationCreate(createInput({ contract: null })), ContractUnavailableError);
+});
+
+test('a malformed contract version or hash is refused rather than written', () => {
+  for (const contract of [
+    { version: '16/10/2026', sha256: TEST_CONTRACT.sha256 },
+    { version: '', sha256: TEST_CONTRACT.sha256 },
+    { version: '2000-01-01', sha256: '' },
+    { version: '2000-01-01', sha256: TEST_CONTRACT.sha256.toUpperCase() },
+    { version: '2000-01-01', sha256: TEST_CONTRACT.sha256.slice(1) },
+  ]) {
+    assert.throws(() => buildApplicationCreate(createInput({ contract })), ContractUnavailableError, JSON.stringify(contract));
+  }
+});
+
 // ─── approval ───────────────────────────────────────────────────────────────
 
 const APP_ID = 'pet1__uidAna';
+
+/** What the upload route writes once the front of the carnet is stored. */
+const RECEIVED = { receivedAt: 1, bytes: 120_000, generation: '1760000000000000' };
 
 function input(over: Partial<ApprovalInput> = {}): ApprovalInput {
   return {
@@ -358,6 +412,7 @@ function input(over: Partial<ApprovalInput> = {}): ApprovalInput {
       applicantEmail: 'ana@example.com',
       applicantEmailVerified: true,
       status: 'interview',
+      idDocument: { front: RECEIVED },
     },
     pet: { id: 'pet1', status: 'available' },
     otherApplications: [],
@@ -395,6 +450,43 @@ test('an animal arrival.ts will not let become adopted BLOCKS approval', () => {
 
 test('a missing pet BLOCKS approval', () => {
   assert.deepEqual(approvalCheck(input({ pet: null })).blockers, ['pet-missing']);
+});
+
+test('an application whose ID photo has not arrived BLOCKS approval', () => {
+  // Owner decision, 2026-10-16. The rules refuse it too (idDocumentReceived()).
+  for (const idDocument of [{ front: null }, {}, { back: RECEIVED }]) {
+    const check = approvalCheck(input({ application: { ...input().application, idDocument } }));
+    assert.deepEqual(check.blockers, ['id-document-missing'], JSON.stringify(idDocument));
+  }
+});
+
+test('an application from before the ID marker existed reads as not received', () => {
+  // No `idDocument` at all — the rules deny it the same way, because reading
+  // a missing field errors.
+  const legacy = { ...input().application } as Partial<ApprovalInput['application']>;
+  delete legacy.idDocument;
+  const check = approvalCheck(input({ application: legacy as ApprovalInput['application'] }));
+  assert.ok(check.blockers.includes('id-document-missing'));
+});
+
+test('every configured side must have arrived, not just one', () => {
+  assert.equal(idDocumentComplete({ front: RECEIVED }, ['front']), true);
+  assert.equal(idDocumentComplete({ front: RECEIVED }, ['front', 'back']), false);
+  assert.equal(idDocumentComplete({ front: RECEIVED, back: RECEIVED }, ['front', 'back']), true);
+  assert.equal(idDocumentComplete({ front: RECEIVED }, []), false, 'no sides configured cannot mean "complete"');
+  assert.equal(idDocumentComplete(null, ['front']), false);
+  assert.deepEqual(
+    approvalCheck(input(), ['front', 'back']).blockers,
+    ['id-document-missing'],
+    'the check reads the configured sides',
+  );
+});
+
+test('a missing ID photo makes the approval batch throw, not commit', () => {
+  assert.throws(
+    () => buildApprovalWrites(input({ application: { ...input().application, idDocument: { front: null } } })),
+    (error: unknown) => error instanceof ApprovalBlockedError && error.blockers.includes('id-document-missing'),
+  );
 });
 
 test('an application nobody moved into review BLOCKS approval', () => {

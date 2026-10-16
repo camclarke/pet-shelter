@@ -16,23 +16,28 @@
 'use client';
 
 import {
+  GeoPoint,
   Timestamp,
   collection,
   doc,
   getDoc,
   getDocs,
   query,
-  setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 
+import { ADOPTION_CONTRACT } from '@/config/adoption-contract';
 import { getFirebase } from './firebase-client';
 import {
   applicationIdFor,
   buildApplicationCreate,
+  buildHomeCreate,
+  requireContract,
   withdrawalPatch,
+  type ValidHome,
 } from './applications';
 import { resolveServerTime } from './server-time';
 import type { ApplicationAnswer, ApplicationStatus, Pet } from './types';
@@ -74,11 +79,28 @@ export async function getMyApplication(petId: string, user: User): Promise<MyApp
 }
 
 /**
- * Submit an application.
+ * Submit an application: ONE `writeBatch` holding the application and its
+ * `private/home` address document.
  *
- * `setDoc` without merge on the deterministic id: if the document is absent
+ * One batch because the rules pair them: the application's create requires
+ * `private/home` to exist AFTER the batch, and the home's create requires the
+ * application NOT to exist before it and to exist after it. Neither can be
+ * written alone, and an address can never be attached to an application that
+ * was already sent.
+ *
+ * `set` without merge on the deterministic id: if the document is absent
  * this is a create; if the applicant already applied it is an UPDATE, which the
- * rules refuse. The duplicate guard is the database's, not this function's.
+ * rules refuse — and the home's `!exists(parent)` fails with it, so the whole
+ * batch is refused. The duplicate guard is the database's, not this function's.
+ *
+ * ── Why it can throw before sending anything ──────────────────────────────
+ * - `ContractUnavailableError` while `ADOPTION_CONTRACT` is null, which it is
+ *   until the shelter supplies its real text. The rules refuse the create
+ *   anyway (`acceptedContracts()` is empty); this says so without a round trip.
+ * - When `home` is missing or invalid. It is optional in the signature only
+ *   until the step-by-step form passes it (portion 4c): today's form does not,
+ *   and is switched off, so its submit is refused here rather than at the
+ *   rules.
  *
  * ── Why the token is refreshed first ──────────────────────────────────────
  * The rules copy `email` and `email_verified` from the ID TOKEN, and require
@@ -92,8 +114,14 @@ export async function submitApplication(
   petId: string,
   user: User,
   answers: Record<string, ApplicationAnswer>,
+  home?: ValidHome,
 ): Promise<string> {
   const { db } = getFirebase();
+  // Both checked before the network: neither can be fixed by retrying.
+  const contract = requireContract(ADOPTION_CONTRACT);
+  if (!home) throw new Error('submitApplication: a home address is required');
+  const homeWrite = buildHomeCreate({ applicantUid: user.uid, home });
+
   const token = await user.getIdTokenResult(true);
   const email = typeof token.claims.email === 'string' ? token.claims.email : user.email;
   if (!email) throw new Error('submitApplication: the account has no email address');
@@ -105,9 +133,18 @@ export async function submitApplication(
     applicantEmail: email,
     applicantEmailVerified: token.claims.email_verified === true,
     answers,
+    contract,
   });
 
-  await setDoc(doc(db, 'adoptionApplications', id), resolveServerTime(write));
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'adoptionApplications', id), resolveServerTime(write));
+  batch.set(doc(db, 'adoptionApplications', id, 'private', 'home'), {
+    ...resolveServerTime(homeWrite),
+    // A rules `latlng` comes from a real GeoPoint. A plain {latitude, longitude}
+    // object is stored as a map, which `geo is latlng` refuses.
+    geo: homeWrite.geo ? new GeoPoint(homeWrite.geo.latitude, homeWrite.geo.longitude) : null,
+  });
+  await batch.commit();
   return id;
 }
 

@@ -366,7 +366,9 @@ service cloud.firestore {
     //     applicant CREATES only their own application, with the id
     //     `{petId}__{their uid}`, for a pet whose status is `available`, with
     //     status `submitted`, their token's email, answers inside the bounds
-    //     below, and every decision field null;
+    //     below, every decision field null, a contract version and hash listed
+    //     in acceptedContracts(), no ID photo marked as received, and — in the
+    //     SAME batch — its `private/home` address document;
     //   - an applicant GETS any id ending in their own uid — including one that
     //     does not exist yet, which is how the form learns whether they already
     //     applied — and LISTS only with a query constrained to their own uid;
@@ -375,7 +377,8 @@ service cloud.firestore {
     //   - an admin reads everything and moves the status along
     //     applicationTransitions() without touching what the applicant wrote.
     //     Approving is refused unless the SAME batch writes adoptions/{petId}
-    //     for this applicant and sets the pet to `adopted`;
+    //     for this applicant and sets the pet to `adopted`, and unless the ID
+    //     photo has been received (idDocumentReceived());
     //   - nobody deletes. An application is a record of what someone said.
     //
     // ⚠️ The DOCUMENT ID is the duplicate guard. Rules cannot run a query, so
@@ -393,17 +396,64 @@ service cloud.firestore {
       // THIS is the enforcing copy: an answer under any other key is refused.
       // Replacing the draft questions means changing this list AND deploying
       // the rules. A test fails if the two lists drift.
+      //
+      // `zone` was removed in portion 4a: the home address now has its own
+      // restricted document (private/home below), so asking for the zone in
+      // an answer would duplicate it into the main document.
       function applicationAnswerKeys() {
-        return ['fullName', 'whatsapp', 'zone', 'housingType', 'housingTenure',
+        return ['fullName', 'whatsapp', 'housingType', 'housingTenure',
                 'landlordAllows', 'outdoorSpace', 'adults', 'children',
                 'everyoneAgrees', 'otherPets', 'previousPets', 'hoursAlone',
                 'whyThisAnimal'];
       }
 
+      // The last five keys arrived in portion 4a. They are FROZEN for every
+      // browser without a new update rule: applicantWithdraws() and
+      // adminMovesApplication() each list exactly which fields may change, and
+      // none of these is on either list. `idDocument` and `identityErasedAt`
+      // are written later only through the Admin SDK (the ID-photo upload
+      // route, the retention sweep), which bypasses these rules.
       function applicationKeys() {
         return ['petId', 'applicantUid', 'applicantEmail', 'applicantEmailVerified',
                 'answers', 'status', 'submittedAt', 'updatedAt', 'withdrawnAt',
-                'decidedAt', 'decidedBy'];
+                'decidedAt', 'decidedBy',
+                'contractVersion', 'contractSha256', 'termsAcceptedAt',
+                'idDocument', 'identityErasedAt'];
+      }
+
+      // ADOPTION_CONTRACT in src/config/adoption-contract.ts: version → the
+      // sha256 of the exact text shown. THIS is the enforcing copy. EMPTY until
+      // the shelter supplies its real contract, so every create is refused
+      // until then — a third lock beside applicationsEnabled(). A contract
+      // revision is a config change AND a rules deploy; a test fails if the two
+      // drift.
+      function acceptedContracts() {
+        return {};
+      }
+
+      // The marker the ID-photo upload route writes through the Admin SDK. The
+      // rules cannot see Storage, so this is what an approval checks. It says
+      // only that a photo was received, never anything about the photo.
+      // SHELTER.adoptionApplications.idDocumentSides decides which sides; a
+      // test fails if the sides checked here differ from it.
+      function idDocumentReceived() {
+        return resource.data.idDocument.get('front', null) is map;
+      }
+
+      // SHELTER.bounds, for a home-address pin. NOT withinServiceArea() above:
+      // a stored GeoPoint is a rules `latlng`, and a latlng has no
+      // `.latitude` FIELD, only `.latitude()` and `.longitude()` METHODS.
+      // MEASURED 2026-10-16 on the Rules :test API: `g.latitude` on a latlng is
+      // a type error ("Received: [latlng] Expected: [map,path]"), which denies.
+      // withinServiceArea() uses that same property access, so it errors on a
+      // latlng: a sighting carrying a GeoPoint is denied, which means sightings
+      // currently CANNOT be created. That is a pre-existing bug, left alone here
+      // on purpose; the fix (method form) is a separate PR, because it changes
+      // what the public `sightings` create accepts. Same numbers; a test fails
+      // if pinWithinServiceArea() drifts from shelter.ts.
+      function pinWithinServiceArea(geo) {
+        return geo.latitude()  >= -17.75 && geo.latitude()  <= -17.15
+            && geo.longitude() >= -66.45 && geo.longitude() <= -65.85;
       }
 
       // The bound on ANY answer. The rules cannot see a question's kind — that
@@ -424,7 +474,6 @@ service cloud.firestore {
           && answers.keys().hasOnly(applicationAnswerKeys())
           && validAnswer(answers.get('fullName', true))
           && validAnswer(answers.get('whatsapp', true))
-          && validAnswer(answers.get('zone', true))
           && validAnswer(answers.get('housingType', true))
           && validAnswer(answers.get('housingTenure', true))
           && validAnswer(answers.get('landlordAllows', true))
@@ -525,7 +574,11 @@ service cloud.firestore {
           && (request.resource.data.status == 'withdrawn'
                 ? request.resource.data.withdrawnAt == request.time
                 : request.resource.data.withdrawnAt == null)
-          && (request.resource.data.status != 'approved' || approvalIsOneBatch());
+          // No approval without a received ID photo (portion 4a). Enforced at
+          // approval rather than at create on purpose: the rules cannot see
+          // Storage, and the photo is uploaded after the application exists.
+          && (request.resource.data.status != 'approved'
+                || (approvalIsOneBatch() && idDocumentReceived()));
       }
 
       allow get: if isAdmin()
@@ -551,7 +604,23 @@ service cloud.firestore {
         && request.resource.data.decidedAt == null
         && request.resource.data.decidedBy == null
         && validAnswers(request.resource.data.answers)
-        && petAcceptsApplications(request.resource.data.petId);
+        && petAcceptsApplications(request.resource.data.petId)
+        // The contract shown, by version and hash. `get(…, null)`, not
+        // `get(…, '')`: with a '' default, a version that is NOT listed plus an
+        // empty hash would compare '' == '' and pass.
+        && request.resource.data.contractVersion is string
+        && request.resource.data.contractSha256 is string
+        && acceptedContracts().get(request.resource.data.contractVersion, null)
+             == request.resource.data.contractSha256
+        && request.resource.data.termsAcceptedAt == request.time
+        // No side received yet: only the upload route sets one.
+        && request.resource.data.idDocument is map
+        && request.resource.data.idDocument.keys().hasOnly(['front', 'back'])
+        && request.resource.data.idDocument.get('front', null) == null
+        && request.resource.data.idDocument.get('back', null) == null
+        && request.resource.data.identityErasedAt == null
+        // The home address is required, and is written in the SAME batch.
+        && existsAfter(/databases/$(database)/documents/adoptionApplications/$(applicationId)/private/home);
 
       allow update: if applicantWithdraws() || adminMovesApplication();
 
@@ -573,6 +642,60 @@ service cloud.firestore {
           && request.resource.data.text.size() <= 5000
           && request.resource.data.updatedBy == request.auth.uid
           && request.resource.data.updatedAt == request.time;
+        allow delete: if false;
+      }
+
+      // ── private/home — the applicant's home address ──────────────────────
+      // A separate DOCUMENT: the admin queue's list never loads an address, and
+      // the address is erased on its own schedule while the application is kept
+      // (the /privacy retention policy). Created ONLY in the batch that creates
+      // the application: `!exists` reads the parent before the batch,
+      // `existsAfter` after it, and the parent's create requires this document.
+      // Never updated by the applicant; an admin may correct it after a
+      // conversation. Never deleted from a browser — erasure is the Admin SDK's
+      // (the identity sweep, or an admin's erase-on-request route).
+      //
+      // The pin is rounded to 4 decimals (about 11 m) in the browser
+      // (roundPin4 in src/lib/applications.ts) and stored as precision
+      // 'exact': a point the person placed on their own home. It is never
+      // copied to pets/*/location/current.
+      match /private/{docId} {
+        // `geo is latlng` is checked BEFORE pinWithinServiceArea(), and the
+        // pairing is checked both ways round: a geo with a null precision is
+        // refused, and so is a null geo with a precision.
+        function validHome(d) {
+          return d.addressText is string
+            && d.addressText.trim().size() >= 5 && d.addressText.size() <= 300
+            && d.reference is string && d.reference.size() <= 300
+            && ((d.geo == null && d.precision == null)
+                || (d.geo is latlng && pinWithinServiceArea(d.geo) && d.precision == 'exact'));
+        }
+
+        allow get: if isAdmin()
+          || (ownApplicationId() && resource.data.applicantUid == request.auth.uid);
+        allow list: if isAdmin();
+
+        allow create: if applicationsEnabled()
+          && docId == 'home'
+          && ownApplicationId()
+          && !exists(/databases/$(database)/documents/adoptionApplications/$(applicationId))
+          && existsAfter(/databases/$(database)/documents/adoptionApplications/$(applicationId))
+          && request.resource.data.keys().hasOnly(['applicantUid', 'addressText', 'reference',
+                                                   'geo', 'precision', 'createdAt'])
+          && request.resource.data.keys().hasAll(['applicantUid', 'addressText', 'reference',
+                                                  'geo', 'precision', 'createdAt'])
+          && request.resource.data.applicantUid == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && validHome(request.resource.data);
+
+        allow update: if isAdmin()
+          && docId == 'home'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['addressText', 'reference', 'geo', 'precision', 'correctedAt', 'correctedBy'])
+          && request.resource.data.correctedAt == request.time
+          && request.resource.data.correctedBy == request.auth.uid
+          && validHome(request.resource.data);
+
         allow delete: if false;
       }
     }

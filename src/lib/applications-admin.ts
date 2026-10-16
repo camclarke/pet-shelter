@@ -53,19 +53,72 @@ import {
   type ApprovalCheck,
 } from './applications';
 import { applyWriteOps, resolveServerTime } from './server-time';
-import type { AdoptionApplication, ApplicationAnswer, ApplicationStatus, Pet } from './types';
+import type {
+  AdoptionApplication,
+  ApplicationAnswer,
+  ApplicationStatus,
+  IdDocumentSide,
+  Pet,
+} from './types';
+
+/** An ID-photo receipt with its timestamp as epoch ms. Never a URL. */
+export interface IdDocumentReceiptView {
+  receivedAt: number | null;
+  bytes: number;
+  generation: string;
+}
 
 /** An application with its timestamps as epoch ms, for the pure layer and the UI. */
 export interface ApplicationRecord
-  extends Omit<AdoptionApplication, 'submittedAt' | 'updatedAt' | 'withdrawnAt' | 'decidedAt'> {
+  extends Omit<
+    AdoptionApplication,
+    | 'submittedAt'
+    | 'updatedAt'
+    | 'withdrawnAt'
+    | 'decidedAt'
+    | 'termsAcceptedAt'
+    | 'idDocument'
+    | 'identityErasedAt'
+  > {
   submittedAt: number;
   updatedAt: number | null;
   withdrawnAt: number | null;
   decidedAt: number | null;
+  termsAcceptedAt: number | null;
+  idDocument: Partial<Record<IdDocumentSide, IdDocumentReceiptView | null>>;
+  identityErasedAt: number | null;
 }
 
 function millis(value: unknown): number | null {
   return value instanceof Timestamp ? value.toMillis() : null;
+}
+
+const ID_DOCUMENT_SIDES: readonly IdDocumentSide[] = ['front', 'back'];
+
+/**
+ * The marker as stored, or an empty object. An application from before
+ * portion 4a has no `idDocument` at all, and reads as "nothing received" — the
+ * same answer the approval rule gives it.
+ */
+function toIdDocument(value: unknown): ApplicationRecord['idDocument'] {
+  const out: ApplicationRecord['idDocument'] = {};
+  if (!value || typeof value !== 'object') return out;
+  const stored = value as Record<string, unknown>;
+  for (const side of ID_DOCUMENT_SIDES) {
+    if (!(side in stored)) continue;
+    const receipt = stored[side];
+    if (receipt && typeof receipt === 'object') {
+      const r = receipt as Record<string, unknown>;
+      out[side] = {
+        receivedAt: millis(r.receivedAt),
+        bytes: typeof r.bytes === 'number' ? r.bytes : 0,
+        generation: typeof r.generation === 'string' ? r.generation : '',
+      };
+    } else {
+      out[side] = null;
+    }
+  }
+  return out;
 }
 
 function toRecord(id: string, data: DocumentData): ApplicationRecord {
@@ -84,6 +137,11 @@ function toRecord(id: string, data: DocumentData): ApplicationRecord {
     withdrawnAt: millis(data.withdrawnAt),
     decidedAt: millis(data.decidedAt),
     decidedBy: typeof data.decidedBy === 'string' ? data.decidedBy : null,
+    contractVersion: typeof data.contractVersion === 'string' ? data.contractVersion : '',
+    contractSha256: typeof data.contractSha256 === 'string' ? data.contractSha256 : '',
+    termsAcceptedAt: millis(data.termsAcceptedAt),
+    idDocument: toIdDocument(data.idDocument),
+    identityErasedAt: millis(data.identityErasedAt),
   };
 }
 
