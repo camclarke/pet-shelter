@@ -377,6 +377,37 @@ const APPLICATION_COPY: ApplicationCopy = {
   blockersTitle: 'No se puede aprobar',
   warningsTitle: 'Antes de aprobar',
   checking: 'Revisando…',
+
+  badgeIdMissing: 'Sin carnet',
+  badgeIdErased: 'Datos borrados',
+  identityTitle: 'Carnet y dirección',
+  idDocumentSideLabel: (side) => (side === 'front' ? 'Carnet, frente' : 'Carnet, reverso'),
+  idDocumentShow: 'Ver carnet',
+  idDocumentHide: 'Ocultar carnet',
+  idDocumentLoading: 'Abriendo el carnet…',
+  idDocumentReceivedOn: (date) => `Llegó el ${date}.`,
+  idDocumentMissing: (open) =>
+    open
+      ? 'La foto del carnet no llegó. Sin ella no se puede aprobar: pídele por WhatsApp que la suba desde «Mis solicitudes».'
+      : 'La foto del carnet no llegó.',
+  idDocumentHandling:
+    'Solo la ve el equipo, y solo aquí. No la descargues, no le saques captura y no la abras desde la consola de Firebase.',
+  idDocumentFailed: (siteHost) =>
+    `No pudimos abrir el carnet. Revisa tu conexión e intenta de nuevo. Solo se abre desde ${siteHost}.`,
+  idDocumentRefused:
+    'Storage rechazó la lectura por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
+  idDocumentAlt: 'Foto del carnet de identidad de quien postula',
+  identityErased: (date) =>
+    `La foto del carnet y la dirección se borraron el ${date}, según la política de privacidad del refugio.`,
+  identityErasedUndated:
+    'La foto del carnet y la dirección se borraron, según la política de privacidad del refugio.',
+  homeTitle: 'Dirección',
+  homeMissing: 'Sin dirección.',
+  homeReference: (reference) => `Referencia: ${reference}`,
+  homePin: (latitude, longitude) => `Punto en el mapa: ${latitude}, ${longitude}`,
+  homeNoPin: 'Sin punto en el mapa.',
+  homeCorrectedOn: (date) => `Corregida por el equipo el ${date}.`,
+  homeLoadFailed: 'No pudimos cargar la dirección. Recarga la página para intentar de nuevo.',
 };
 
 import type { FoodCategory, FoodHazard } from '@/lib/types';

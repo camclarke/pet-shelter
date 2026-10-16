@@ -28,6 +28,7 @@
 'use client';
 
 import {
+  GeoPoint,
   Timestamp,
   collection,
   doc,
@@ -50,8 +51,11 @@ import {
   adminStatusPatch,
   approvalCheck,
   buildApprovalWrites,
+  isIdentityErased,
+  isReceivedMarker,
   type ApprovalCheck,
 } from './applications';
+import { ID_DOCUMENT_SIDES } from './id-document-paths';
 import { applyWriteOps, resolveServerTime } from './server-time';
 import type {
   AdoptionApplication,
@@ -86,6 +90,13 @@ export interface ApplicationRecord
   decidedAt: number | null;
   termsAcceptedAt: number | null;
   idDocument: Partial<Record<IdDocumentSide, IdDocumentReceiptView | null>>;
+  /**
+   * `isIdentityErased(identityErasedAt)` — the same check the upload route
+   * makes. Decide on THIS, never on `identityErasedAt !== null`: that one is
+   * null for an erase stored as anything but a Timestamp.
+   */
+  identityErased: boolean;
+  /** When, for display only; null if it was not stored as a Timestamp. */
   identityErasedAt: number | null;
 }
 
@@ -93,21 +104,25 @@ function millis(value: unknown): number | null {
   return value instanceof Timestamp ? value.toMillis() : null;
 }
 
-const ID_DOCUMENT_SIDES: readonly IdDocumentSide[] = ['front', 'back'];
 
 /**
  * The marker as stored, or an empty object. An application from before
  * portion 4a has no `idDocument` at all, and reads as "nothing received" — the
  * same answer the approval rule gives it.
+ *
+ * A side counts as received only through `isReceivedMarker` — the same check
+ * the upload route and the rules' `is map` make. Before 2026-10-16 this used
+ * "any truthy object", which agreed with the rule only by accident (an array or
+ * a Timestamp would have read as a photo).
  */
 function toIdDocument(value: unknown): ApplicationRecord['idDocument'] {
   const out: ApplicationRecord['idDocument'] = {};
-  if (!value || typeof value !== 'object') return out;
+  if (!isReceivedMarker(value)) return out;
   const stored = value as Record<string, unknown>;
   for (const side of ID_DOCUMENT_SIDES) {
     if (!(side in stored)) continue;
     const receipt = stored[side];
-    if (receipt && typeof receipt === 'object') {
+    if (isReceivedMarker(receipt)) {
       const r = receipt as Record<string, unknown>;
       out[side] = {
         receivedAt: millis(r.receivedAt),
@@ -141,6 +156,7 @@ function toRecord(id: string, data: DocumentData): ApplicationRecord {
     contractSha256: typeof data.contractSha256 === 'string' ? data.contractSha256 : '',
     termsAcceptedAt: millis(data.termsAcceptedAt),
     idDocument: toIdDocument(data.idDocument),
+    identityErased: isIdentityErased(data.identityErasedAt),
     identityErasedAt: millis(data.identityErasedAt),
   };
 }
@@ -167,6 +183,42 @@ export async function listApplicationsForPet(petId: string): Promise<Application
     query(collection(db, 'adoptionApplications'), where('petId', '==', petId)),
   );
   return snap.docs.map((d) => toRecord(d.id, d.data()));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The home address — `private/home`, admins and the applicant only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `private/home` as the review screen shows it: TEXT, plus whether a pin was
+ * placed. Its own read, never part of `listApplications`, so the queue never
+ * loads an address.
+ *
+ * ⚠️ A private person's home. Never logged — errors are re-thrown and the page
+ * logs the Firestore code only.
+ */
+export interface ApplicationHomeView {
+  addressText: string;
+  reference: string;
+  /** Rounded to 4 decimals at the source; null when the address was sent alone. */
+  geo: { latitude: number; longitude: number } | null;
+  createdAt: number | null;
+  correctedAt: number | null;
+}
+
+export async function getApplicationHome(applicationId: string): Promise<ApplicationHomeView | null> {
+  const { db } = getFirebase();
+  const snap = await getDoc(doc(db, 'adoptionApplications', applicationId, 'private', 'home'));
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  const geo = data.geo instanceof GeoPoint ? { latitude: data.geo.latitude, longitude: data.geo.longitude } : null;
+  return {
+    addressText: typeof data.addressText === 'string' ? data.addressText : '',
+    reference: typeof data.reference === 'string' ? data.reference : '',
+    geo,
+    createdAt: millis(data.createdAt),
+    correctedAt: millis(data.correctedAt),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

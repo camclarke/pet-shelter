@@ -133,6 +133,30 @@ service firebase.storage {
       allow read, write: if isAdmin();
     }
 
+    // ── adoption ID documents ──────────────────────────────────────────────
+    // A photo of an applicant's identity card: the most sensitive object this
+    // bucket holds. Path: adoption-ids/{petId}__{uid}/{side}.jpg, built only in
+    // src/lib/id-document-paths.ts.
+    //   - NO browser writes it, ever. POST /api/adoption-applications/{id}/
+    //     id-document/{side} saves it through the Admin SDK, which bypasses
+    //     these rules and does not go through Firebase's upload endpoint — the
+    //     one that auto-mints a download token (see the private-photo block).
+    //     So create, update AND delete are all denied here; erasure is the
+    //     Admin SDK's (the retention sweep, an admin's erase request).
+    //   - Admins read it, through getBlob(), loaded only on tap. NEVER
+    //     getDownloadURL(): that mints a token no rule can revoke. A test walks
+    //     the imports of every file that builds an adoption-ids path.
+    //   - NOT the applicant: they hold the original card, and a stolen session
+    //     must not yield a copy of it (owner decision, 2026-10-16).
+    //   - NOT under users/{uid}/: account deletion wipes that whole prefix,
+    //     while the application this photo supports is kept (/privacy).
+    //   - NOT under pets/*/private: any signed-in user can read that.
+    // scripts/test-storage-application-rules.mjs checks both branches.
+    match /adoption-ids/{applicationId}/{fileName} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -3733,6 +3733,43 @@ textarea {
   opacity: 0.7;
 }
 
+/* The ID photo's state in the queue (portion 4b), on the same pill. "Sin
+   carnet" takes the sun border because approval is blocked until it arrives;
+   "Datos borrados" is quiet — nothing is left to chase. */
+.id-badge--missing {
+  border-color: var(--sun);
+}
+
+.id-badge--erased {
+  opacity: 0.7;
+}
+
+/* The carnet on the review screen, loaded only on tap. The button and the
+   photo stack; the photo is never wider than its column at 360px. */
+.identity-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+  white-space: normal;
+}
+
+.id-photo {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.identity-erased,
+.identity-handling {
+  margin-top: var(--space-2);
+  line-height: 1.5;
+}
+
 .account-return {
   margin-top: var(--space-2);
 }

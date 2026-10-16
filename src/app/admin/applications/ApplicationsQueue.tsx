@@ -22,8 +22,10 @@ import {
   APPLICATION_STATUSES,
   applicantLabel,
   groupApplicationsByPet,
+  idDocumentBadge,
   type ApplicationFilter,
   type ApplicationGroup,
+  type IdDocumentBadge,
 } from '@/lib/applications';
 import { listApplications, type ApplicationRecord } from '@/lib/applications-admin';
 import { getPetsByIds } from '@/lib/areas-admin';
@@ -165,6 +167,7 @@ export function QueueView({
                         <span className={`app-status app-status--${application.status}`}>
                           {t.applicationStatusLabel(application.status)}
                         </span>{' '}
+                        <IdDocumentBadgeView badge={idDocumentBadge(application)} />
                         <span className="t-data">
                           {copy.submittedOn(formatDate(application.submittedAt))}
                           {!application.applicantEmailVerified && ` · ${copy.emailUnverifiedTag}`}
@@ -179,5 +182,20 @@ export function QueueView({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * The ID photo's state, from the MARKER on the application — never the photo,
+ * which the queue does not load. Three states (`idDocumentBadge`): "Sin
+ * carnet", "Datos borrados", or nothing.
+ */
+export function IdDocumentBadgeView({ badge }: { badge: IdDocumentBadge }) {
+  const copy = t.applications;
+  if (badge === null) return null;
+  return (
+    <span className={`app-status id-badge id-badge--${badge}`}>
+      {badge === 'missing' ? copy.badgeIdMissing : copy.badgeIdErased}
+    </span>
   );
 }

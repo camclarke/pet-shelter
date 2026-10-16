@@ -102,10 +102,25 @@ const USER_ROUTES: Record<string, string> = {
   'src/app/api/account/delete/route.ts': 'a person deleting their own account (account-delete.ts)',
 };
 
+/**
+ * A signed-in account uploading BYTES for an application it owns. The body is
+ * read only after `requireUser`, only as a byte stream through one capped
+ * reader, and the owner is decided by the verified uid against the path's
+ * application id — never by the body. Kept apart from USER_ROUTES on purpose:
+ * that class's rule ("never touches the request") stays exactly as strict, and
+ * this one gets its own, narrower, list of what it may do (critic 2026-10-16, #2).
+ */
+const USER_UPLOAD_ROUTES: Record<string, string> = {
+  'src/app/api/adoption-applications/[applicationId]/id-document/[side]/route.ts':
+    'an applicant uploading their own ID photo (id-document-handler.ts)',
+};
+
 /** Routes whose whole handler lives in a pure, injectable module. */
 const DELEGATED_ROUTES: Record<string, string> = {
   'src/app/api/food/cook-batch/route.ts': 'src/lib/cook-batch-handler.ts',
   'src/app/api/account/delete/route.ts': 'src/lib/account-delete.ts',
+  'src/app/api/adoption-applications/[applicationId]/id-document/[side]/route.ts':
+    'src/lib/id-document-handler.ts',
 };
 
 /**
@@ -119,6 +134,29 @@ const REQUEST_USE = /\brequest\.[A-Za-z]/;
 
 /** Not a request read, but still work an unauthenticated caller must not trigger. */
 const WORK_BEFORE_AUTH = ['aiIsConfigured('];
+
+/**
+ * The upload class's own work: the switch, the id check, the Admin SDK read,
+ * the body read, the inspection, the save and the marker. Each must come after
+ * `requireUser(` in the handler, so none can move above it unnoticed.
+ */
+const UPLOAD_WORK_BEFORE_AUTH = [
+  '.applicationsEnabled',
+  'parseApplicationId(',
+  'readApplication(',
+  'readCapped(',
+  'inspectJpeg(',
+  'saveIdDocument(',
+  'readIdDocumentReceipt(',
+  'commitIdMarker(',
+  'deleteIdDocumentSide(',
+];
+
+/**
+ * Ways to read a body that buffer ALL of it before any cap applies, plus
+ * `clone()` — the evasion a deliberate break found on 2026-10-15.
+ */
+const WHOLE_BODY_READERS = ['.json(', '.formData(', '.text(', '.arrayBuffer(', '.blob(', '.clone('];
 
 function walk(dir: string, keep: (name: string) => boolean): string[] {
   const out: string[] = [];
@@ -163,7 +201,7 @@ test('every API route authenticates through requireAdmin before it touches the r
 
     const file = handler ?? route;
     const src = code(file);
-    const guard = route in USER_ROUTES ? 'requireUser(' : 'requireAdmin(';
+    const guard = route in USER_ROUTES || route in USER_UPLOAD_ROUTES ? 'requireUser(' : 'requireAdmin(';
     const auth = src.indexOf(guard);
     assert.ok(
       auth >= 0,
@@ -174,9 +212,10 @@ test('every API route authenticates through requireAdmin before it touches the r
       touched < 0 || touched > auth,
       `${file} touches the request (${src.slice(touched, touched + 24).trim()}…) before ${guard})`
     );
-    for (const work of WORK_BEFORE_AUTH) {
-      const at = src.indexOf(work);
-      assert.ok(at < 0 || at > auth, `${file} calls ${work} before ${guard})`);
+    const work = route in USER_UPLOAD_ROUTES ? [...WORK_BEFORE_AUTH, ...UPLOAD_WORK_BEFORE_AUTH] : WORK_BEFORE_AUTH;
+    for (const call of work) {
+      const at = src.indexOf(call);
+      assert.ok(at < 0 || at > auth, `${file} calls ${call} before ${guard})`);
     }
   }
 });
@@ -187,8 +226,52 @@ test('every exemption names a route that exists, so a stale one cannot hide a ne
     ...Object.keys(UNAUTHENTICATED_ROUTES),
     ...Object.keys(DELEGATED_ROUTES),
     ...Object.keys(USER_ROUTES),
+    ...Object.keys(USER_UPLOAD_ROUTES),
   ]) {
     assert.ok(routes.includes(file), `${file} is listed as an exemption but does not exist`);
+  }
+});
+
+test('an upload route is delegated, and never also an ordinary user route', () => {
+  for (const route of Object.keys(USER_UPLOAD_ROUTES)) {
+    assert.ok(DELEGATED_ROUTES[route], `${route} must hand its request to a pure handler`);
+    assert.ok(!(route in USER_ROUTES), `${route} is in both classes; USER_ROUTES forbids any request use`);
+  }
+});
+
+test('an upload route reads its body ONCE, through the capped reader, after the owner checks', () => {
+  for (const route of Object.keys(USER_UPLOAD_ROUTES)) {
+    const handler = DELEGATED_ROUTES[route]!;
+    for (const file of [route, handler]) {
+      const src = code(file);
+      for (const reader of WHOLE_BODY_READERS) {
+        assert.ok(!src.includes(reader), `${file} calls ${reader} — it buffers the whole body before any cap`);
+      }
+      // `const { body } = request` or `const r = request` would hide a body
+      // read from every check here.
+      assert.ok(!/\}\s*=\s*request\b/.test(src), `${file} destructures the request`);
+      assert.ok(!/=\s*request\s*[;,)]/.test(src), `${file} aliases the request`);
+    }
+
+    const src = code(handler);
+    const bodyUses = src.match(/\brequest\.body\b/g) ?? [];
+    assert.equal(bodyUses.length, 1, `${handler} must touch request.body exactly once, found ${bodyUses.length}`);
+    // The cap is a named constant; options (the deadline) may follow it.
+    assert.match(src, /readCapped\(request\.body,\s*[A-Z_]+\s*[,)]/, `${handler} must pass request.body straight to readCapped(…, CAP)`);
+
+    const at = (needle: string) => {
+      const i = src.indexOf(needle);
+      assert.ok(i >= 0, `${handler} never mentions ${needle}`);
+      return i;
+    };
+    const body = at('request.body');
+    assert.ok(at('requireUser(') < body, 'the body is read before requireUser');
+    assert.ok(at('parseApplicationId(') < body, 'the body is read before the id is checked against the caller');
+    assert.match(src, /\.applicantUid\s*!==\s*caller\.uid/, 'the owner must be the VERIFIED caller');
+    assert.ok(at("headers.get('content-length')") < body, 'Content-Length must be checked before the body is read');
+    assert.ok(at('readApplication(') < body, 'the application must be read (open, owned, not erased) before the body');
+    assert.ok(body < at('inspectJpeg('), 'the bytes are inspected after they are read, and before they are saved');
+    assert.ok(at('inspectJpeg(') < at('saveIdDocument('), 'nothing is saved before the inspection');
   }
 });
 

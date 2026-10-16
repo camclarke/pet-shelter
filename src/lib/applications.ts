@@ -764,24 +764,90 @@ export type ApprovalWarning =
 
 /**
  * What approval needs to know about the ID photo: whether each side has a
- * receipt. The receipt's contents do not matter here, so any non-null value
- * counts — the admin layer converts timestamps, the rules see the raw map.
+ * receipt. The receipt's CONTENTS do not matter here — the admin layer
+ * converts timestamps, the rules see the raw map — only whether it IS one,
+ * by `isReceivedMarker`.
  */
 export type IdDocumentMarker = Partial<Record<IdDocumentSide, unknown>>;
+
+/**
+ * Is this one side's value a RECEIPT — the map the upload route writes?
+ *
+ * ⚠️ THE ONE "RECEIVED" CHECK. It mirrors `idDocumentReceived()` in
+ * `firestore.rules`, which is `idDocument.get('front', null) is map`, and the
+ * upload route, `idDocumentComplete()` and the admin layer all call it, so the
+ * route, the screen and the rule cannot disagree about what counts.
+ *
+ * A plain object — what Firestore hands back for a map, from either SDK — and
+ * nothing else. A missing key, `null`, `false`, `0`, a string, an array, a
+ * `Timestamp` or any other class instance is NOT received. Never compare with
+ * `=== null`: on a document whose marker is `{}` (valid at create, critic #3)
+ * that reads a side as present, and the applicant's first upload is refused as
+ * "already received" — stuck for good.
+ */
+export function isReceivedMarker(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
 
 /**
  * Has every configured side of the ID photo arrived?
  *
  * A missing marker (an application from before portion 4a, or a malformed
  * document) counts as NOT received — the same answer the rules give, where
- * reading a missing `idDocument` errors and so denies.
+ * reading a missing `idDocument` errors and so denies. So does any side whose
+ * value is not a receipt map (`isReceivedMarker`): `false` is not a photo.
  */
 export function idDocumentComplete(
   idDocument: IdDocumentMarker | null | undefined,
   sides: readonly IdDocumentSide[] = CONFIGURED_ID_SIDES,
 ): boolean {
-  if (!idDocument || sides.length === 0) return false;
-  return sides.every((side) => idDocument[side] !== null && idDocument[side] !== undefined);
+  if (!isReceivedMarker(idDocument) || sides.length === 0) return false;
+  const marker = idDocument as IdDocumentMarker;
+  return sides.every((side) => isReceivedMarker(marker[side]));
+}
+
+/**
+ * The queue's badge for the ID photo — three states, critic 2026-10-16 #7:
+ *   - `'erased'`  — `identityErasedAt` is set: the photo and address were
+ *                    erased under the retention policy ("Datos borrados");
+ *   - `'missing'` — still open, and a configured side has not arrived
+ *                    ("Sin carnet"): the approval rule will refuse it;
+ *   - `null`      — received, or closed without one (nothing to chase).
+ * Erased is checked FIRST: a rejection reopened after the erase is open AND
+ * erased, and "Sin carnet" would invite a re-upload the route refuses.
+ */
+export type IdDocumentBadge = 'erased' | 'missing' | null;
+
+/**
+ * Has this application's identity (the ID photo and the home address) been
+ * erased? ⚠️ THE ONE "ERASED" CHECK: `identityErasedAt` is anything but
+ * `null` or missing. Not "is a Timestamp" — a value of any other shape is
+ * still somebody having erased it, and the upload route, the queue badge and
+ * the review screen must all read it the same way (review 4b #7: the route
+ * said erased for any non-null value while the admin layer, which converted
+ * through `instanceof Timestamp`, read a non-Timestamp as NOT erased).
+ * `id-document-handler.ts` and `applications-admin.ts` both call this.
+ */
+export function isIdentityErased(identityErasedAt: unknown): boolean {
+  return identityErasedAt !== null && identityErasedAt !== undefined;
+}
+
+export function idDocumentBadge(
+  application: {
+    status: ApplicationStatus;
+    idDocument: IdDocumentMarker | null | undefined;
+    /** Already decided through `isIdentityErased` — the admin record carries it. */
+    identityErased: boolean;
+  },
+  sides: readonly IdDocumentSide[] = CONFIGURED_ID_SIDES,
+): IdDocumentBadge {
+  if (application.identityErased) return 'erased';
+  if (isOpenApplication(application.status) && !idDocumentComplete(application.idDocument, sides)) {
+    return 'missing';
+  }
+  return null;
 }
 
 export interface ApprovalContext {

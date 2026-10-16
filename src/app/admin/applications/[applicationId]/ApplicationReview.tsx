@@ -19,11 +19,19 @@
  *
  * ⚠️ Answers render here and nowhere else in the admin console, and are never
  * logged. Errors carry the Firestore code only.
+ *
+ * ── The carnet and the address (portion 4b) ─────────────────────────────────
+ * The ID photo is loaded ONLY when an admin taps "Ver carnet", through
+ * `id-document-admin.ts` (`getBlob` under storage.rules — never a download
+ * URL), and its object URL is revoked when it is hidden or the screen goes
+ * away. The address is TEXT, read from `private/home` on its own, so a failed
+ * or refused read shows a sentence and never takes the page down. Once
+ * `identityErasedAt` is set, neither is read at all.
  */
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 
 import { useAuth } from '@/components/AuthProvider';
@@ -34,22 +42,26 @@ import {
   applicantPhone,
   choiceLabel,
   isOpenApplication,
+  isReceivedMarker,
   type ApprovalCheck,
 } from '@/lib/applications';
 import {
   approveApplication,
   getApplication,
+  getApplicationHome,
   getInternalNotes,
   listApplicationsForPet,
   moveApplication,
   previewApproval,
   saveInternalNotes,
+  type ApplicationHomeView,
   type ApplicationRecord,
 } from '@/lib/applications-admin';
 import { getPetById, getUserLabels } from '@/lib/areas-admin';
 import { formatDate } from '@/lib/date-input';
+import { readIdDocumentObjectUrl } from '@/lib/id-document-admin';
 import { t } from '@/i18n';
-import type { ApplicationAnswer, ApplicationStatus, Pet } from '@/lib/types';
+import type { ApplicationAnswer, ApplicationStatus, IdDocumentSide, Pet } from '@/lib/types';
 
 const SECTION_ORDER: ApplicationSection[] = [
   'contact',
@@ -80,6 +92,7 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
   const [busy, setBusy] = useState(false);
   const [confirmWithdrawal, setConfirmWithdrawal] = useState(false);
   const [approval, setApproval] = useState<{ check: ApprovalCheck } | 'checking' | null>(null);
+  const [home, setHome] = useState<HomeState>('loading');
 
   const load = useCallback(async () => {
     setError(null);
@@ -110,6 +123,27 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The address, on its own: a refused or failed read is one sentence in its
+  // block, never the page's error. Not read at all once it has been erased.
+  const loadedId = application && application !== 'missing' ? application.id : null;
+  const erased = application && application !== 'missing' ? application.identityErased : false;
+  useEffect(() => {
+    if (!loadedId || erased) return;
+    let live = true;
+    setHome('loading');
+    getApplicationHome(loadedId)
+      .then((found) => {
+        if (live) setHome(found ?? 'missing');
+      })
+      .catch((caught: unknown) => {
+        console.error('[admin/application] could not load the address', errorCode(caught));
+        if (live) setHome('failed');
+      });
+    return () => {
+      live = false;
+    };
+  }, [loadedId, erased]);
 
   if (application === null && !error) {
     return <p className="admin__sub">{copy.loading}</p>;
@@ -275,6 +309,20 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
         </dl>
       </section>
 
+      {/* ── the carnet and the address ──────────────────────────────────── */}
+      <section className="admin-list">
+        <h2 className="t-label">{copy.identityTitle}</h2>
+        <IdentityView
+          open={isOpenApplication(current.status)}
+          erased={current.identityErased}
+          erasedAt={current.identityErasedAt}
+          sides={SHELTER.adoptionApplications.idDocumentSides}
+          receipts={current.idDocument}
+          home={home}
+          viewer={(side) => <IdDocumentViewer applicationId={current.id} side={side} />}
+        />
+      </section>
+
       {/* ── what they said ──────────────────────────────────────────────── */}
       <section className="admin-list">
         <h2 className="t-label">{copy.answersTitle}</h2>
@@ -396,8 +444,213 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// The carnet viewer — the ONE place the photo is fetched, and only on tap
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ViewerState = 'idle' | 'loading' | 'shown' | 'failed' | 'refused';
+
+const SITE_HOST = new URL(SHELTER.siteUrl).host;
+
+/**
+ * "Ver carnet" → `getBlob` under storage.rules → an object URL in an `<img>`.
+ * The URL is revoked on "Ocultar", on a second load, on unmount, and at once
+ * if the screen went away while the photo was still arriving — so the bytes
+ * do not outlive the moment an admin is looking at them.
+ */
+function IdDocumentViewer({ applicationId, side }: { applicationId: string; side: IdDocumentSide }) {
+  const copy = t.applications;
+  const [state, setState] = useState<ViewerState>('idle');
+  const [url, setUrl] = useState<string | null>(null);
+  const urlRef = useRef<string | null>(null);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    };
+  }, []);
+
+  function hide() {
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = null;
+    setUrl(null);
+    setState('idle');
+  }
+
+  async function show() {
+    setState('loading');
+    try {
+      const objectUrl = await readIdDocumentObjectUrl(applicationId, side);
+      if (!mounted.current) {
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      urlRef.current = objectUrl;
+      setUrl(objectUrl);
+      setState('shown');
+    } catch (caught) {
+      const code = errorCode(caught);
+      console.error('[admin/application] could not open the carnet', code);
+      if (mounted.current) setState(code === 'storage/unauthorized' ? 'refused' : 'failed');
+    }
+  }
+
+  return (
+    <IdDocumentViewerView
+      state={state}
+      url={url}
+      siteHost={SITE_HOST}
+      onShow={() => void show()}
+      onHide={hide}
+      label={copy.idDocumentSideLabel(side)}
+    />
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Presentational pieces — plain data in, no effects, renderable to static HTML
 // ─────────────────────────────────────────────────────────────────────────────
+
+export function IdDocumentViewerView({
+  state,
+  url,
+  siteHost,
+  onShow,
+  onHide,
+  label,
+}: {
+  state: ViewerState;
+  url: string | null;
+  siteHost: string;
+  onShow: () => void;
+  onHide: () => void;
+  label: string;
+}) {
+  const copy = t.applications;
+  return (
+    <div className="identity-viewer">
+      {state === 'shown' && url ? (
+        <>
+          <button type="button" className="btn btn--muted" onClick={onHide}>
+            {copy.idDocumentHide}
+          </button>
+          {/* An object URL, revoked by the caller. Never a download URL. */}
+          <img className="id-photo" src={url} alt={`${copy.idDocumentAlt} · ${label}`} />
+        </>
+      ) : (
+        <button type="button" className="btn btn--muted" onClick={onShow} disabled={state === 'loading'}>
+          {state === 'loading' ? copy.idDocumentLoading : copy.idDocumentShow}
+        </button>
+      )}
+      {state === 'failed' && (
+        <span className="auth__error" role="alert">
+          {copy.idDocumentFailed(siteHost)}
+        </span>
+      )}
+      {state === 'refused' && (
+        <span className="auth__error" role="alert">
+          {copy.idDocumentRefused}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** `private/home` as the screen holds it. */
+export type HomeState = ApplicationHomeView | 'loading' | 'missing' | 'failed';
+
+function HomeText({ home }: { home: HomeState }) {
+  const copy = t.applications;
+  if (home === 'loading') return <span className="answer__empty">{copy.loading}</span>;
+  if (home === 'missing') return <span className="answer__empty">{copy.homeMissing}</span>;
+  if (home === 'failed') return <span className="answer__empty">{copy.homeLoadFailed}</span>;
+  return (
+    <>
+      {home.addressText}
+      {home.reference !== '' && <span className="answer__note">{copy.homeReference(home.reference)}</span>}
+      <span className="answer__note">
+        {home.geo
+          ? copy.homePin(home.geo.latitude.toFixed(4), home.geo.longitude.toFixed(4))
+          : copy.homeNoPin}
+      </span>
+      {home.correctedAt !== null && (
+        <span className="answer__note">{copy.homeCorrectedOn(formatDate(home.correctedAt))}</span>
+      )}
+    </>
+  );
+}
+
+/**
+ * The carnet and the address, as TEXT plus a "Ver carnet" button per side.
+ * `viewer` renders the button; the static render passes a stand-in.
+ */
+export function IdentityView({
+  open,
+  erased,
+  erasedAt,
+  sides,
+  receipts,
+  home,
+  viewer,
+}: {
+  open: boolean;
+  /** `ApplicationRecord.identityErased` — `isIdentityErased`, the route's own check. */
+  erased: boolean;
+  /** For the date only: null when the erase was not stored as a Timestamp. */
+  erasedAt: number | null;
+  sides: readonly IdDocumentSide[];
+  receipts: ApplicationRecord['idDocument'];
+  home: HomeState;
+  viewer: (side: IdDocumentSide) => ReactNode;
+}) {
+  const copy = t.applications;
+
+  if (erased) {
+    return (
+      <p className="identity-erased">
+        {erasedAt !== null ? copy.identityErased(formatDate(erasedAt)) : copy.identityErasedUndated}
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <dl className="answer-list">
+        {sides.map((side) => {
+          const receipt = receipts[side];
+          return (
+            <div key={side} className="answer">
+              <dt>{copy.idDocumentSideLabel(side)}</dt>
+              <dd>
+                {receipt && isReceivedMarker(receipt) ? (
+                  <>
+                    {receipt.receivedAt !== null && (
+                      <span className="answer__note">{copy.idDocumentReceivedOn(formatDate(receipt.receivedAt))}</span>
+                    )}
+                    {viewer(side)}
+                  </>
+                ) : (
+                  <span className="answer__empty">{copy.idDocumentMissing(open)}</span>
+                )}
+              </dd>
+            </div>
+          );
+        })}
+        <div className="answer">
+          <dt>{copy.homeTitle}</dt>
+          <dd>
+            <HomeText home={home} />
+          </dd>
+        </div>
+      </dl>
+      <p className="auth__hint identity-handling">{copy.idDocumentHandling}</p>
+    </>
+  );
+}
 
 function formatAnswer(question: ApplicationQuestion | undefined, value: ApplicationAnswer): string {
   if (typeof value === 'boolean') return t.yesNo(value);
