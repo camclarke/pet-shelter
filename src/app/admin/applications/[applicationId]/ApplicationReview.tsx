@@ -27,6 +27,14 @@
  * away. The address is TEXT, read from `private/home` on its own, so a failed
  * or refused read shows a sentence and never takes the page down. Once
  * `identityErasedAt` is set, neither is read at all.
+ *
+ * ── The personal details and references (portion 4c-1) ────────────────────
+ * The C.I., age, civil status, landline, both references and a renter's
+ * landlord live in the admin-only `private/identity`, read on its own exactly
+ * like the address: when this screen opens, never from the queue, never logged.
+ * They render in their place among the answers, in the paper's order; until the
+ * read settles, one sentence says why they are not there. Once
+ * `identityErasedAt` is set, the document is not read at all.
  */
 
 'use client';
@@ -35,13 +43,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link';
 
 import { useAuth } from '@/components/AuthProvider';
-import { SHELTER, type ApplicationQuestion, type ApplicationSection } from '@/config/shelter';
+import { SHELTER, type ApplicationQuestion } from '@/config/shelter';
 import {
   APPLICATION_STATUS_TRANSITIONS,
   applicantLabel,
   applicantPhone,
   choiceLabel,
   isOpenApplication,
+  isQuestionAsked,
   isReceivedMarker,
   type ApprovalCheck,
 } from '@/lib/applications';
@@ -49,12 +58,14 @@ import {
   approveApplication,
   getApplication,
   getApplicationHome,
+  getApplicationIdentity,
   getInternalNotes,
   listApplicationsForPet,
   moveApplication,
   previewApproval,
   saveInternalNotes,
   type ApplicationHomeView,
+  type ApplicationIdentityView,
   type ApplicationRecord,
 } from '@/lib/applications-admin';
 import { getPetById, getUserLabels } from '@/lib/areas-admin';
@@ -62,15 +73,6 @@ import { formatDate } from '@/lib/date-input';
 import { readIdDocumentObjectUrl } from '@/lib/id-document-admin';
 import { t } from '@/i18n';
 import type { ApplicationAnswer, ApplicationStatus, IdDocumentSide, Pet } from '@/lib/types';
-
-const SECTION_ORDER: ApplicationSection[] = [
-  'contact',
-  'housing',
-  'household',
-  'otherPets',
-  'experience',
-  'why',
-];
 
 function errorCode(caught: unknown): string | undefined {
   return (caught as { code?: string })?.code;
@@ -93,6 +95,7 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
   const [confirmWithdrawal, setConfirmWithdrawal] = useState(false);
   const [approval, setApproval] = useState<{ check: ApprovalCheck } | 'checking' | null>(null);
   const [home, setHome] = useState<HomeState>('loading');
+  const [identity, setIdentity] = useState<IdentityAnswersState>('loading');
 
   const load = useCallback(async () => {
     setError(null);
@@ -139,6 +142,25 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
       .catch((caught: unknown) => {
         console.error('[admin/application] could not load the address', errorCode(caught));
         if (live) setHome('failed');
+      });
+    return () => {
+      live = false;
+    };
+  }, [loadedId, erased]);
+
+  // The personal details and references, the same way: their own read, their
+  // own sentence on failure, and no read at all once erased.
+  useEffect(() => {
+    if (!loadedId || erased) return;
+    let live = true;
+    setIdentity('loading');
+    getApplicationIdentity(loadedId)
+      .then((found) => {
+        if (live) setIdentity(found ?? 'missing');
+      })
+      .catch((caught: unknown) => {
+        console.error('[admin/application] could not load the personal details', errorCode(caught));
+        if (live) setIdentity('failed');
       });
     return () => {
       live = false;
@@ -326,7 +348,11 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
       {/* ── what they said ──────────────────────────────────────────────── */}
       <section className="admin-list">
         <h2 className="t-label">{copy.answersTitle}</h2>
-        <AnswersView questions={questions} answers={current.answers} />
+        <AnswersView
+          questions={questions}
+          answers={current.answers}
+          identity={current.identityErased ? 'erased' : identity}
+        />
       </section>
 
       {/* ── the team's private notes ────────────────────────────────────── */}
@@ -659,30 +685,64 @@ function formatAnswer(question: ApplicationQuestion | undefined, value: Applicat
   return value;
 }
 
+/** `private/identity` as the screen holds it. `'erased'`: not read at all. */
+export type IdentityAnswersState = ApplicationIdentityView | 'loading' | 'missing' | 'failed' | 'erased';
+
 export function AnswersView({
   questions,
   answers,
+  identity,
 }: {
   questions: readonly ApplicationQuestion[];
+  /** `answers` on the application: the `store: 'application'` questions. */
   answers: Record<string, ApplicationAnswer>;
+  /** `private/identity`: the `store: 'identity'` questions, loaded on its own. */
+  identity: IdentityAnswersState;
 }) {
   const copy = t.applications;
+  const identityAnswers = typeof identity === 'object' ? identity.answers : null;
+  // Both stores together, so `askedWhen` hides exactly what the form never
+  // asked — the landlord of an owned home, "amurallado" for a flat.
+  const stored: Record<string, ApplicationAnswer> = { ...answers, ...(identityAnswers ?? {}) };
   const known = new Set(questions.map((q) => q.id));
   // Answers under a key the form no longer asks: shown last, labelled as such,
   // never hidden — an old application must still show what was said.
-  const retired = Object.keys(answers).filter((key) => !known.has(key)).sort();
+  const retired = Object.keys(stored).filter((key) => !known.has(key)).sort();
+
+  const identityNote =
+    identity === 'loading'
+      ? copy.identityAnswersLoading
+      : identity === 'missing'
+        ? copy.identityAnswersMissing
+        : identity === 'failed'
+          ? copy.identityAnswersLoadFailed
+          : identity === 'erased'
+            ? copy.identityAnswersErased
+            : null;
 
   return (
     <>
-      {SECTION_ORDER.map((section) => {
-        const inSection = questions.filter((q) => q.section === section);
+      {identityNote && (
+        <p className="answer__empty" role="status">
+          {identityNote}
+        </p>
+      )}
+      {SHELTER.adoptionApplications.sections.map((section) => {
+        // Identity questions render only once their document is in hand; until
+        // then the sentence above says why they are not there.
+        const inSection = questions.filter(
+          (q) =>
+            q.section === section.id &&
+            (q.store === 'application' || identityAnswers !== null) &&
+            isQuestionAsked(questions, q, stored),
+        );
         if (inSection.length === 0) return null;
         return (
-          <div key={section} className="answer-section">
-            <h3 className="answer-section__title">{t.applicationSectionLabel(section)}</h3>
+          <div key={section.id} className="answer-section">
+            <h3 className="answer-section__title">{section.label}</h3>
             <dl className="answer-list">
               {inSection.map((question) => {
-                const value = answers[question.id];
+                const value = stored[question.id];
                 return (
                   <div key={question.id} className="answer">
                     <dt>{question.label}</dt>
@@ -701,7 +761,7 @@ export function AnswersView({
           {retired.map((key) => (
             <div key={key} className="answer">
               <dt>{copy.retiredQuestion(key)}</dt>
-              <dd>{formatAnswer(undefined, answers[key]!)}</dd>
+              <dd>{formatAnswer(undefined, stored[key]!)}</dd>
             </div>
           ))}
         </dl>

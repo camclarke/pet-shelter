@@ -35,8 +35,11 @@ import {
   applicationIdFor,
   buildApplicationCreate,
   buildHomeCreate,
+  buildIdentityCreate,
+  requireAcceptance,
   requireContract,
   withdrawalPatch,
+  type AcceptanceGiven,
   type ValidHome,
 } from './applications';
 import { resolveServerTime } from './server-time';
@@ -78,29 +81,52 @@ export async function getMyApplication(petId: string, user: User): Promise<MyApp
   return snap.exists() ? toMine(snap.id, snap.data()) : null;
 }
 
+/** What one submission writes, already validated and split by store. */
+export interface ApplicationSubmission {
+  /** The `store: 'application'` answers — into the main document, kept for good. */
+  answers: Record<string, ApplicationAnswer>;
+  /**
+   * The `store: 'identity'` answers — into the admin-only, erasable
+   * `private/identity`. Optional in the TYPE only until the 4c-2 stepper
+   * passes it; a submission without it is refused before the network.
+   */
+  identity?: Record<string, ApplicationAnswer>;
+  /** The address step. Optional in the TYPE only, like `identity`. */
+  home?: ValidHome;
+  /**
+   * The acceptance box, ticked under the contract version the screen showed.
+   * Optional in the TYPE only, like `identity`: today's single-page form has
+   * no box, so its submit is refused before the network.
+   */
+  acceptance?: AcceptanceGiven;
+}
+
 /**
- * Submit an application: ONE `writeBatch` holding the application and its
- * `private/home` address document.
+ * Submit an application: ONE `writeBatch` holding the application, its
+ * `private/home` address document and its `private/identity` personal-details
+ * document.
  *
  * One batch because the rules pair them: the application's create requires
- * `private/home` to exist AFTER the batch, and the home's create requires the
- * application NOT to exist before it and to exist after it. Neither can be
- * written alone, and an address can never be attached to an application that
- * was already sent.
+ * both private documents to exist AFTER the batch, and each private create
+ * requires the application NOT to exist before it and to exist after it. None
+ * can be written alone, and neither an address nor a C.I. can ever be attached
+ * to an application that was already sent.
  *
  * `set` without merge on the deterministic id: if the document is absent
  * this is a create; if the applicant already applied it is an UPDATE, which the
- * rules refuse — and the home's `!exists(parent)` fails with it, so the whole
- * batch is refused. The duplicate guard is the database's, not this function's.
+ * rules refuse — and the private documents' `!exists(parent)` fails with it, so
+ * the whole batch is refused. The duplicate guard is the database's, not this
+ * function's.
  *
  * ── Why it can throw before sending anything ──────────────────────────────
- * - `ContractUnavailableError` while `ADOPTION_CONTRACT` is null, which it is
- *   until the shelter supplies its real text. The rules refuse the create
- *   anyway (`acceptedContracts()` is empty); this says so without a round trip.
- * - When `home` is missing or invalid. It is optional in the signature only
- *   until the step-by-step form passes it (portion 4c): today's form does not,
- *   and is switched off, so its submit is refused here rather than at the
- *   rules.
+ * - `ContractUnavailableError` if `ADOPTION_CONTRACT` were null or malformed.
+ * - When `home` or `identity` is missing or invalid. Both are optional in the
+ *   type only until the step-by-step form passes them (portion 4c-2): today's
+ *   single-page form collects no address, and is switched off, so its submit is
+ *   refused here rather than at the rules.
+ * - `ContractNotAcceptedError` unless `acceptance` says the box was ticked for
+ *   the contract version being recorded. Nothing records an acceptance the
+ *   person did not give.
  *
  * ── Why the token is refreshed first ──────────────────────────────────────
  * The rules copy `email` and `email_verified` from the ID TOKEN, and require
@@ -113,14 +139,17 @@ export async function getMyApplication(petId: string, user: User): Promise<MyApp
 export async function submitApplication(
   petId: string,
   user: User,
-  answers: Record<string, ApplicationAnswer>,
-  home?: ValidHome,
+  submission: ApplicationSubmission,
 ): Promise<string> {
   const { db } = getFirebase();
-  // Both checked before the network: neither can be fixed by retrying.
+  const { answers, identity, home, acceptance } = submission;
+  // All checked before the network: none can be fixed by retrying.
   const contract = requireContract(ADOPTION_CONTRACT);
   if (!home) throw new Error('submitApplication: a home address is required');
+  if (!identity) throw new Error('submitApplication: the personal details are required');
+  requireAcceptance(acceptance, contract);
   const homeWrite = buildHomeCreate({ applicantUid: user.uid, home });
+  const identityWrite = buildIdentityCreate({ applicantUid: user.uid, identity });
 
   const token = await user.getIdTokenResult(true);
   const email = typeof token.claims.email === 'string' ? token.claims.email : user.email;
@@ -134,6 +163,8 @@ export async function submitApplication(
     applicantEmailVerified: token.claims.email_verified === true,
     answers,
     contract,
+    // Checked above; the builder checks it again, so it can never be skipped.
+    acceptance,
   });
 
   const batch = writeBatch(db);
@@ -144,6 +175,7 @@ export async function submitApplication(
     // object is stored as a map, which `geo is latlng` refuses.
     geo: homeWrite.geo ? new GeoPoint(homeWrite.geo.latitude, homeWrite.geo.longitude) : null,
   });
+  batch.set(doc(db, 'adoptionApplications', id, 'private', 'identity'), resolveServerTime(identityWrite));
   await batch.commit();
   return id;
 }

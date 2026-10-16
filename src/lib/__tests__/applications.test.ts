@@ -17,8 +17,17 @@ import { createHash } from 'node:crypto';
 import {
   APPLICATION_STATUS_TRANSITIONS,
   ApprovalBlockedError,
+  CI_MAX_CHARS,
+  CI_MIN_CHARS,
+  ContractNotAcceptedError,
   ContractUnavailableError,
+  IDENTITY_AGE_MAX,
+  IDENTITY_AGE_MIN,
+  IDENTITY_ANSWER_MAX_CHARS,
+  IDENTITY_REQUIRED_KEYS,
   IllegalApplicationTransition,
+  InvalidIdentityError,
+  PRIVATE_DOCUMENT_IDS,
   SERVER_TIME,
   adminStatusPatch,
   applicantCanWithdraw,
@@ -28,14 +37,19 @@ import {
   approvalCheck,
   buildApplicationCreate,
   buildApprovalWrites,
+  buildIdentityCreate,
   canTransitionApplication,
   choiceLabel,
   emptyAnswerDraft,
   groupApplicationsByPet,
   idDocumentComplete,
+  isQuestionAsked,
   isServerTime,
   parseApplicationId,
   phoneDigits,
+  requireAcceptance,
+  splitAnswersByStore,
+  tidyIdNumber,
   validateAnswers,
   withdrawalPatch,
   type ApprovalInput,
@@ -193,12 +207,15 @@ test('an id parses back into its pet and applicant, and a malformed one does not
 
 // ─── answers ────────────────────────────────────────────────────────────────
 
+// A fixture, not the shelter's questions: ids and kinds chosen to exercise every
+// branch of the validator, on the paper's three sections.
 const QUESTIONS: ApplicationQuestion[] = [
-  { id: 'fullName', section: 'contact', label: 'Nombre', kind: 'shortText', required: true, purpose: 'applicantName' },
-  { id: 'whatsapp', section: 'contact', label: 'WhatsApp', kind: 'phone', required: true, purpose: 'applicantPhone' },
+  { id: 'fullName', section: 'personal', store: 'application', label: 'Nombre', kind: 'shortText', required: true, purpose: 'applicantName' },
+  { id: 'whatsapp', section: 'personal', store: 'application', label: 'WhatsApp', kind: 'phone', required: true, purpose: 'applicantPhone' },
   {
     id: 'housingType',
-    section: 'housing',
+    section: 'home',
+    store: 'application',
     label: 'Vivienda',
     kind: 'choice',
     required: true,
@@ -207,10 +224,10 @@ const QUESTIONS: ApplicationQuestion[] = [
       { value: 'apartment', label: 'Departamento' },
     ],
   },
-  { id: 'children', section: 'household', label: 'Niños', kind: 'count', required: true, max: 30 },
-  { id: 'hoursAlone', section: 'experience', label: 'Horas', kind: 'count', required: false, max: 24 },
-  { id: 'agrees', section: 'household', label: 'Acuerdo', kind: 'yesNo', required: true },
-  { id: 'otherPets', section: 'otherPets', label: 'Otros', kind: 'longText', required: false },
+  { id: 'children', section: 'home', store: 'application', label: 'Niños', kind: 'count', required: true, max: 30 },
+  { id: 'hoursAlone', section: 'home', store: 'application', label: 'Horas', kind: 'count', required: false, max: 24 },
+  { id: 'agrees', section: 'home', store: 'application', label: 'Acuerdo', kind: 'yesNo', required: true },
+  { id: 'otherPets', section: 'references', store: 'application', label: 'Otros', kind: 'longText', required: false },
 ];
 
 function filled(over: Record<string, string | boolean | null> = {}) {
@@ -332,6 +349,223 @@ test('a stored choice whose option was removed still renders its raw value', () 
   assert.equal(choiceLabel(undefined, 'boat'), 'boat');
 });
 
+// ─── portion 4c-1: askedWhen, the C.I., a minimum, and the two stores ───────
+
+/** A fixture shaped like the paper form, so the identity branch is exercised. */
+const PAPER: ApplicationQuestion[] = [
+  { id: 'fullName', section: 'personal', store: 'application', label: 'N', kind: 'shortText', required: true, purpose: 'applicantName' },
+  { id: 'ciNumber', section: 'personal', store: 'identity', label: 'C', kind: 'idNumber', required: true },
+  { id: 'age', section: 'personal', store: 'identity', label: 'E', kind: 'count', required: true, min: 18, max: 99 },
+  { id: 'landline', section: 'personal', store: 'identity', label: 'F', kind: 'phone', required: false },
+  { id: 'personalRefName', section: 'references', store: 'identity', label: 'R', kind: 'shortText', required: true },
+  {
+    id: 'housingType',
+    section: 'home',
+    store: 'application',
+    label: 'T',
+    kind: 'choice',
+    required: true,
+    options: [
+      { value: 'house', label: 'CASA' },
+      { value: 'apartment', label: 'DEPARTAMENTO' },
+      { value: 'farm', label: 'FINCA' },
+    ],
+  },
+  {
+    id: 'housingTenure',
+    section: 'home',
+    store: 'application',
+    label: 'P',
+    kind: 'choice',
+    required: true,
+    options: [
+      { value: 'owned', label: 'PROPIO' },
+      { value: 'rented', label: 'ARRENDADO' },
+    ],
+  },
+  {
+    id: 'landlordName',
+    section: 'home',
+    store: 'identity',
+    label: 'D',
+    kind: 'shortText',
+    required: true,
+    askedWhen: { questionId: 'housingTenure', values: ['rented'] },
+  },
+  {
+    id: 'walled',
+    section: 'home',
+    store: 'application',
+    label: 'A',
+    kind: 'yesNo',
+    required: true,
+    askedWhen: { questionId: 'housingType', values: ['house', 'farm'] },
+  },
+];
+
+function paper(over: Record<string, string | boolean | null> = {}) {
+  return {
+    ...emptyAnswerDraft(PAPER),
+    fullName: 'Ana Pérez',
+    ciNumber: '1234567 LP',
+    age: '30',
+    personalRefName: 'Rosa Quispe',
+    housingType: 'apartment',
+    housingTenure: 'owned',
+    ...over,
+  };
+}
+
+test('a question whose askedWhen is not met is neither required nor stored', () => {
+  // A landlord typed while ARRENDADO was chosen, then hidden by switching to
+  // PROPIO, must not be written — it would be a stranger's name kept for no reason.
+  const owned = validateAnswers(PAPER, paper({ landlordName: 'Don Pedro' }));
+  assert.equal(owned.valid, true, JSON.stringify(owned.errors));
+  assert.equal('landlordName' in owned.answers, false);
+  // An apartment is never asked "amurallado", so leaving it empty is fine.
+  assert.equal('walled' in owned.answers, false);
+});
+
+test('a question whose askedWhen IS met is required and stored', () => {
+  const rented = validateAnswers(PAPER, paper({ housingTenure: 'rented' }));
+  assert.equal(rented.errors.landlordName, 'required');
+  assert.equal(
+    validateAnswers(PAPER, paper({ housingTenure: 'rented', landlordName: '  Don   Pedro ' })).answers.landlordName,
+    'Don Pedro',
+  );
+  // CASA and FINCA are asked "amurallado"; a false answer is an answer.
+  assert.equal(validateAnswers(PAPER, paper({ housingType: 'house' })).errors.walled, 'required');
+  assert.equal(validateAnswers(PAPER, paper({ housingType: 'farm', walled: false })).answers.walled, false);
+});
+
+test('isQuestionAsked follows the controlling answer, on a draft and on stored answers alike', () => {
+  const walled = PAPER.find((q) => q.id === 'walled')!;
+  assert.equal(isQuestionAsked(PAPER, walled, { housingType: 'house' }), true);
+  assert.equal(isQuestionAsked(PAPER, walled, { housingType: ' farm ' }), true, 'a draft value is trimmed');
+  assert.equal(isQuestionAsked(PAPER, walled, { housingType: 'apartment' }), false);
+  assert.equal(isQuestionAsked(PAPER, walled, {}), false);
+  assert.equal(isQuestionAsked(PAPER, PAPER[0]!, {}), true, 'no askedWhen: always asked');
+  // A condition on a missing question, or a loop, is refused rather than followed.
+  const orphan = { ...walled, askedWhen: { questionId: 'nope', values: ['x'] } };
+  assert.equal(isQuestionAsked([...PAPER, orphan], orphan, { nope: 'x' }), false);
+  const a = { ...walled, id: 'a', askedWhen: { questionId: 'b', values: [true] } };
+  const b = { ...walled, id: 'b', askedWhen: { questionId: 'a', values: [true] } };
+  assert.equal(isQuestionAsked([a, b], a, { a: true, b: true }), false);
+});
+
+test('a C.I. is accepted as typed, tidied, and never upper-cased or split', () => {
+  for (const [typed, stored] of [
+    ['1234567', '1234567'],
+    ['  1234567   LP ', '1234567 LP'],
+    ['1234567-1B', '1234567-1B'],
+    ['12.345.678', '12.345.678'],
+    ['4567890 cb', '4567890 cb'],
+    ['Ñ 1234', 'Ñ 1234'],
+    ['1234', '1234'],
+    ['12345678901234567890', '12345678901234567890'],
+  ] as const) {
+    assert.equal(tidyIdNumber(typed), stored, typed);
+    assert.equal(validateAnswers(PAPER, paper({ ciNumber: typed })).answers.ciNumber, stored, typed);
+  }
+  // A decomposed Ñ is composed before the charset check.
+  // Built with normalize() rather than typed, so the source holds no invisible
+  // combining mark (N + U+0303 is what some keyboards send for Ñ).
+  const decomposed = 'Ñ 1234'.normalize('NFD');
+  assert.notEqual(decomposed, 'Ñ 1234', 'control: the input really is decomposed');
+  assert.equal(tidyIdNumber(decomposed), 'Ñ 1234');
+});
+
+test('a C.I. that cannot be one is refused, not cut', () => {
+  // Literals: 4 to 20 characters, at least 4 digits, letters (Ñ), digits,
+  // spaces, dots and dashes only.
+  for (const bad of ['123', 'abcd', 'LP 123', '123456789012345678901', '1234567/LP', '1234567#', 'Ana Pérez', '12é45']) {
+    assert.equal(tidyIdNumber(bad), null, bad);
+    assert.equal(validateAnswers(PAPER, paper({ ciNumber: bad })).errors.ciNumber, 'id-number-invalid', bad);
+  }
+  assert.equal(validateAnswers(PAPER, paper({ ciNumber: '   ' })).errors.ciNumber, 'required');
+});
+
+test('an age under the minimum is under-age; 18 and 99 are accepted; 100 is not a count', () => {
+  // Literals: the contract says "mayor de edad" (owner decision D4).
+  assert.equal(validateAnswers(PAPER, paper({ age: '17' })).errors.age, 'under-age');
+  assert.equal(validateAnswers(PAPER, paper({ age: '0' })).errors.age, 'under-age');
+  assert.equal(validateAnswers(PAPER, paper({ age: '18' })).answers.age, 18);
+  assert.equal(validateAnswers(PAPER, paper({ age: '99' })).answers.age, 99);
+  assert.equal(validateAnswers(PAPER, paper({ age: '100' })).errors.age, 'count-invalid');
+  assert.equal(validateAnswers(PAPER, paper({ age: '18.5' })).errors.age, 'count-invalid');
+});
+
+test('splitAnswersByStore puts each answer in its own document and drops unknown keys', () => {
+  const { answers } = validateAnswers(PAPER, paper({ housingTenure: 'rented', landlordName: 'Don Pedro', landline: '4 4251234' }));
+  const split = splitAnswersByStore(PAPER, { ...answers, stray: 'x' });
+  assert.deepEqual(split.application, { fullName: 'Ana Pérez', housingType: 'apartment', housingTenure: 'rented' });
+  assert.deepEqual(split.identity, {
+    ciNumber: '1234567 LP',
+    age: 30,
+    landline: '4 4251234',
+    personalRefName: 'Rosa Quispe',
+    landlordName: 'Don Pedro',
+  });
+});
+
+test('the identity document has exactly applicantUid, answers and createdAt', () => {
+  const write = buildIdentityCreate({
+    applicantUid: 'uidAna',
+    identity: { ciNumber: '1234567 LP', age: 30, personalRefName: 'Rosa Quispe' },
+    questions: PAPER,
+  });
+  assert.deepEqual(Object.keys(write).sort(), ['answers', 'applicantUid', 'createdAt']);
+  assert.equal(write.applicantUid, 'uidAna');
+  assert.ok(isServerTime(write.createdAt), 'createdAt must be the server clock');
+  assert.deepEqual(write.answers, { ciNumber: '1234567 LP', age: 30, personalRefName: 'Rosa Quispe' });
+});
+
+test('the identity builder re-validates instead of trusting its argument', () => {
+  // Each one is something the rules would refuse, or something the form would
+  // never have produced from what a person typed.
+  const base = { ciNumber: '1234567', age: 30 };
+  const forged: Record<string, unknown>[] = [
+    {},
+    { age: 30 },
+    { ciNumber: '1234567' },
+    { ...base, age: 17 },
+    { ...base, age: 100 },
+    { ...base, age: 18.5 },
+    { ...base, age: '30' },
+    { ...base, ciNumber: '123' },
+    { ...base, ciNumber: ' 1234567' },
+    { ...base, ciNumber: 1234567 },
+    { ...base, personalRefName: 'a'.repeat(121) },
+    { ...base, personalRefName: 5 },
+    { ...base, personalRefName: true },
+    { ...base, personalRefName: '' },
+    { ...base, personalRefName: 'Rosa  Quispe' },
+    { ...base, landline: 'mi casa' },
+    { ...base, fullName: 'Ana' },
+    { ...base, stray: 'x' },
+  ];
+  for (const identity of forged) {
+    assert.throws(
+      () => buildIdentityCreate({ applicantUid: 'uidAna', identity: identity as never, questions: PAPER }),
+      InvalidIdentityError,
+      JSON.stringify(identity),
+    );
+  }
+  assert.throws(() => buildIdentityCreate({ applicantUid: '', identity: base, questions: PAPER }));
+  assert.doesNotThrow(() => buildIdentityCreate({ applicantUid: 'uidAna', identity: { ciNumber: '1234', age: 18 }, questions: PAPER }));
+});
+
+test('the identity limits are the ones the rules enforce', () => {
+  // Literals, on purpose: firestore.rules says 120, 4..20, 18..99.
+  assert.equal(IDENTITY_ANSWER_MAX_CHARS, 120);
+  assert.equal(CI_MIN_CHARS, 4);
+  assert.equal(CI_MAX_CHARS, 20);
+  assert.equal(IDENTITY_AGE_MIN, 18);
+  assert.equal(IDENTITY_AGE_MAX, 99);
+  assert.deepEqual([...IDENTITY_REQUIRED_KEYS], ['ciNumber', 'age']);
+  assert.deepEqual([...PRIVATE_DOCUMENT_IDS], ['home', 'identity']);
+});
+
 // A contract acceptance for the tests only. The text is the fixture string
 // application-config.test.ts forbids anywhere outside __tests__.
 const TEST_CONTRACT = {
@@ -339,7 +573,9 @@ const TEST_CONTRACT = {
   sha256: createHash('sha256').update('TEXTO DE PRUEBA').digest('hex'),
 };
 
-function createInput(over: Partial<Parameters<typeof buildApplicationCreate>[0]> = {}) {
+type CreateInput = Parameters<typeof buildApplicationCreate>[0];
+
+function createInput(over: Partial<CreateInput> = {}): CreateInput {
   return {
     petId: 'pet1',
     applicantUid: 'uid1',
@@ -347,6 +583,8 @@ function createInput(over: Partial<Parameters<typeof buildApplicationCreate>[0]>
     applicantEmailVerified: false,
     answers: { fullName: 'Ana' },
     contract: TEST_CONTRACT,
+    // The box ticked, under the version on screen.
+    acceptance: { accepted: true, contractVersion: TEST_CONTRACT.version },
     ...over,
   };
 }
@@ -382,6 +620,39 @@ test('THE CONTRACT TIE: with no contract, nothing can be accepted and no applica
   // rules refuse the create too (empty acceptedContracts()); this is the
   // browser half, which refuses before anything is sent.
   assert.throws(() => buildApplicationCreate(createInput({ contract: null })), ContractUnavailableError);
+});
+
+test('NO ACCEPTANCE, NO APPLICATION: an unticked box, a missing acceptance or another version all throw', () => {
+  // Review 4c-1 #6. termsAcceptedAt and the contract pair are a record that
+  // the person ticked the box for THIS text; nothing may write them otherwise.
+  const refused: unknown[] = [
+    { accepted: false, contractVersion: TEST_CONTRACT.version },
+    { accepted: 'true', contractVersion: TEST_CONTRACT.version },
+    { accepted: 1, contractVersion: TEST_CONTRACT.version },
+    { contractVersion: TEST_CONTRACT.version },
+    { accepted: true, contractVersion: '1999-12-31' },
+    { accepted: true },
+    undefined,
+    null,
+  ];
+  for (const acceptance of refused) {
+    assert.throws(
+      () => buildApplicationCreate(createInput({ acceptance: acceptance as never })),
+      ContractNotAcceptedError,
+      JSON.stringify(acceptance) ?? String(acceptance),
+    );
+  }
+  // The pure check the browser runs before any network call is the same one.
+  assert.throws(() => requireAcceptance({ accepted: false, contractVersion: '2000-01-01' }, TEST_CONTRACT), ContractNotAcceptedError);
+  assert.doesNotThrow(() => requireAcceptance({ accepted: true, contractVersion: '2000-01-01' }, TEST_CONTRACT));
+  // And a ticked box under the version being recorded is accepted.
+  assert.equal(buildApplicationCreate(createInput()).contractVersion, TEST_CONTRACT.version);
+});
+
+test('a missing contract is reported before a missing acceptance', () => {
+  // The order matters for the message the browser gets: no contract at all
+  // is the shelter's problem, not the applicant's.
+  assert.throws(() => buildApplicationCreate(createInput({ contract: null, acceptance: undefined as never })), ContractUnavailableError);
 });
 
 test('a malformed contract version or hash is refused rather than written', () => {

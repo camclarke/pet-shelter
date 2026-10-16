@@ -996,7 +996,12 @@ export interface AdoptionApplication {
    * must not stop a family applying. The admin sees it and decides.
    */
   applicantEmailVerified: boolean;
-  /** Keyed by question id — see `adoptionApplications` in `src/config/shelter.ts`. */
+  /**
+   * Keyed by question id — only the `store: 'application'` questions in
+   * `adoptionApplications` in `src/config/shelter.ts`. The identity and
+   * third-party answers live in `private/identity`, never here: this map can
+   * never be erased.
+   */
   answers: Record<string, ApplicationAnswer>;
   status: ApplicationStatus;
   submittedAt: Timestamp;
@@ -1027,8 +1032,9 @@ export interface AdoptionApplication {
   /** Which ID photo sides have arrived. All null at create. */
   idDocument: ApplicationIdDocument;
   /**
-   * When the ID photo and the home address were erased under the retention
-   * policy. Null until then. Written only through the Admin SDK.
+   * When the ID photo, the home address and the personal details
+   * (`private/identity`) were erased under the retention policy. Null until
+   * then. Written only through the Admin SDK.
    */
   identityErasedAt: Timestamp | null;
 }
@@ -1049,7 +1055,12 @@ export interface ApplicationHome {
   applicantUid: string;
   /** As typed: street, number, zone. 5–300 characters. */
   addressText: string;
-  /** A landmark ("frente a la cancha"). At most 300 characters; may be empty. */
+  /**
+   * The paper's NÚMERO DE CASA Y DETALLES: the house number and whatever helps
+   * the team find it ("puerta verde, frente a la cancha"). At most 300
+   * characters; may be empty. Until the map pin (portion 4d), this text carries
+   * the directions.
+   */
   reference: string;
   /**
    * The pin the person placed on their own home, rounded in the browser to 4
@@ -1066,11 +1077,47 @@ export interface ApplicationHome {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// adoptionApplications/{id}/private/identity — ADMINS ONLY
+//
+// The applicant's personal details from the paper form — C.I. number, age,
+// civil status, landline — and THIRD-PARTY data: two references and, for a
+// renter, the landlord (name and phone). Portion 4c-1, plan §2.
+//
+// A separate DOCUMENT rather than `answers`, because `answers` can never be
+// erased (the application has `allow delete: if false` and its answers are
+// frozen) and every admin queue load downloads it. This one is created in the
+// SAME batch as the application, read only by admins — NOT by the applicant,
+// so a stolen session yields no C.I. and no stranger's phone number (owner
+// decision D2) — never updated by anyone, admins included, so nobody rewrites
+// a person's C.I. (D15), and erased by the retention sweep with the carnet
+// photo and the address (portion 4e).
+//
+// ⚠️ PRIVATE PEOPLE'S DATA, some of it about people who never applied. Never
+// logged, never copied anywhere, never public.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface ApplicationIdentity {
+  applicantUid: string;
+  /**
+   * Keyed by the ids of the `store: 'identity'` questions in
+   * `src/config/shelter.ts`. Every value a string of at most 120 characters,
+   * except `age`, a whole number from 18 to 99. `ciNumber` and `age` are
+   * always present.
+   */
+  answers: Record<string, string | number>;
+  createdAt: Timestamp;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // adoptionApplications/{id}/internal/notes — ADMIN ONLY
 //
 // A separate DOCUMENT, never a field on the application, because rules protect
 // documents and not fields. An applicant who could read the shelter's private
 // assessment of them is a problem the first time someone is turned down.
+//
+// ⚠️ Kept with the application, NOT erased with `private/identity`: a note
+// records that a correction was needed, never a C.I. number or anyone's phone
+// (D15). The retention sweep blanks `text` as a backstop
+// (`INTERNAL_NOTES_DOCUMENT` in `src/lib/applications.ts`).
 // ─────────────────────────────────────────────────────────────────────────────
 export interface ApplicationInternalNotes {
   text: string;

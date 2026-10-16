@@ -17,9 +17,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { SHELTER, type ApplicationSection } from '@/config/shelter';
+import { SHELTER } from '@/config/shelter';
 import {
+  ADOPTION_ACCEPTANCE,
   ADOPTION_CONTRACT,
+  CONTRACT_CI_TOKEN,
+  CONTRACT_NAME_TOKEN,
   contractCanonicalText,
   type AdoptionContract,
 } from '@/config/adoption-contract';
@@ -31,6 +34,7 @@ import {
   RULES_ANSWER_MAX_CHARS,
   RULES_ANSWER_MAX_COUNT,
   buildApplicationCreate,
+  type ApplicationAnswerError,
 } from '../applications';
 import { findVoseo } from '../ai/spanish-register';
 import { es } from '@/i18n/es';
@@ -39,17 +43,23 @@ import type { ApplicationStatus } from '../types';
 const config = SHELTER.adoptionApplications;
 const RULES = readFileSync(join(process.cwd(), 'firestore.rules'), 'utf8');
 
+const applicationIds = () => config.questions.filter((q) => q.store === 'application').map((q) => q.id);
+const identityIds = () => config.questions.filter((q) => q.store === 'identity').map((q) => q.id);
+
 /**
  * A contract for the tests only. Its text is the string a test below forbids
  * anywhere outside __tests__, so it can never be published as the shelter's.
  */
 const FIXTURE_TEXT = {
-  title: 'TEXTO DE PRUEBA',
+  heading: null,
+  opening: `TEXTO DE PRUEBA ${CONTRACT_NAME_TOKEN}, con C.I. ${CONTRACT_CI_TOKEN}:`,
   clauses: ['TEXTO DE PRUEBA, cláusula uno.', 'TEXTO DE PRUEBA, cláusula dos.'],
+  closing: 'TEXTO DE PRUEBA, cierre.',
 };
 const FIXTURE: AdoptionContract = {
   version: '2000-01-01',
   ...FIXTURE_TEXT,
+  emphasizedClauses: [],
   sha256: createHash('sha256').update(contractCanonicalText(FIXTURE_TEXT)).digest('hex'),
 };
 
@@ -139,32 +149,130 @@ test('every count maximum fits inside the bound the rules enforce', () => {
 });
 
 test('the form asks exactly one name and one number to reach the applicant on', () => {
-  assert.equal(config.questions.filter((q) => q.purpose === 'applicantName').length, 1);
-  assert.equal(config.questions.filter((q) => q.purpose === 'applicantPhone').length, 1);
+  const name = config.questions.filter((q) => q.purpose === 'applicantName');
+  const phone = config.questions.filter((q) => q.purpose === 'applicantPhone');
+  assert.equal(name.length, 1);
+  assert.equal(phone.length, 1);
+  // Both identify the record and are what /privacy says the application keeps,
+  // so both stay in `answers` — never in the erasable private/identity.
+  assert.equal(name[0]!.store, 'application');
+  assert.equal(phone[0]!.store, 'application');
+  assert.deepEqual([name[0]!.id, phone[0]!.id], ['fullName', 'whatsapp'], 'the key ids /privacy relies on changed');
 });
 
-test('the draft covers every heading plan §6 names', () => {
-  const sections = new Set(config.questions.map((q) => q.section));
-  for (const heading of ['housing', 'household', 'otherPets', 'experience', 'why'] as ApplicationSection[]) {
-    assert.ok(sections.has(heading), `no question under ${heading}`);
-  }
-});
-
-test('no screening QUESTION asks for a street address or an identity document', () => {
-  // Re-worded in portion 4a, not removed. The application now collects a home
-  // address and an ID photo — but only through their own restricted steps:
-  // the address into `private/home`, the photo through its upload route into
-  // Storage. An answer lives in the main application document, so a question
-  // asking for either would put it where the queue lists it and where the
-  // retention policy cannot erase it separately. Asked in words, because the
-  // ids alone could be renamed around this.
+test("the questions use exactly the paper's three sections, in its order, each with a question", () => {
+  // Literals: the paper prints these headings, numbered 1-3 (the numbers are
+  // dropped online, owner decision D7). Section 4, DATOS DEL PELUDITO
+  // ADOPTADO, is the shelter's to fill at handover and is never asked (D16).
+  assert.deepEqual(config.sections.map((s) => s.id), ['personal', 'references', 'home']);
+  assert.deepEqual(config.sections.map((s) => s.label), ['DATOS PERSONALES', 'REFERENCIAS', 'DOMICILIO']);
+  const order = config.sections.map((s) => s.id);
+  let previous = 0;
   for (const q of config.questions) {
-    const text = `${q.id} ${q.label} ${q.hint ?? ''}`.toLowerCase();
-    assert.ok(
-      !/\b(address|direcci[oó]n|domicilio|carnet|c[eé]dula|passport|pasaporte|documento de identidad)\b/.test(text),
-      q.id,
-    );
+    const at = order.indexOf(q.section);
+    assert.ok(at >= 0, `${q.id} sits in a section the config does not list`);
+    assert.ok(at >= previous, `${q.id} breaks the paper's section order`);
+    previous = at;
+  }
+  for (const id of order) assert.ok(config.questions.some((q) => q.section === id), `no question under ${id}`);
+});
+
+test("the paper's fields, in the paper's order, each in the store the plan gives it", () => {
+  // Literals, so moving a field between stores — which changes who can read it
+  // and whether it can ever be erased — fails here by name.
+  assert.deepEqual(
+    config.questions.map((q) => `${q.store}:${q.id}`),
+    [
+      'application:fullName',
+      'identity:ciNumber',
+      'identity:age',
+      'identity:civilStatus',
+      'application:whatsapp',
+      'identity:landline',
+      'identity:personalRefName',
+      'identity:personalRefPhone',
+      'identity:personalRefRelation',
+      'identity:familyRefName',
+      'identity:familyRefPhone',
+      'identity:familyRefRelation',
+      'application:housingType',
+      'application:housingTenure',
+      'identity:landlordName',
+      'identity:landlordPhone',
+      'application:movingSoon',
+      'application:walled',
+    ],
+  );
+  assert.equal(applicationIds().length, 6);
+  assert.equal(identityIds().length, 12);
+});
+
+test('only CASA (the landline) is optional; the landlord and "amurallado" are asked only when they apply', () => {
+  // Owner decision D3. NÚMERO DE CASA Y DETALLES is the other optional field,
+  // and it is not a question (it lives in private/home).
+  assert.deepEqual(config.questions.filter((q) => !q.required).map((q) => q.id), ['landline']);
+  const asked = Object.fromEntries(
+    config.questions.filter((q) => q.askedWhen).map((q) => [q.id, q.askedWhen]),
+  );
+  assert.deepEqual(asked, {
+    landlordName: { questionId: 'housingTenure', values: ['rented'] },
+    landlordPhone: { questionId: 'housingTenure', values: ['rented'] },
+    walled: { questionId: 'housingType', values: ['house', 'farm'] },
+  });
+});
+
+test('every askedWhen names an EARLIER question, and only values that question can store', () => {
+  // Earlier, so the chain can never loop; real values, so a typo cannot hide a
+  // question for good.
+  config.questions.forEach((q, index) => {
+    if (!q.askedWhen) return;
+    const controlling = config.questions.findIndex((c) => c.id === q.askedWhen!.questionId);
+    assert.ok(controlling >= 0 && controlling < index, `${q.id} depends on a later or missing question`);
+    const c = config.questions[controlling]!;
+    const possible: (string | boolean)[] =
+      c.kind === 'yesNo' ? [true, false] : (c.options ?? []).map((o) => o.value);
+    for (const value of q.askedWhen.values) assert.ok(possible.includes(value), `${q.id}: ${String(value)}`);
+  });
+});
+
+test('the age question refuses under-18s and the C.I. question is the idNumber kind', () => {
+  // Owner decision D4: the contract opens "Yo … mayor de edad".
+  const age = config.questions.find((q) => q.id === 'age');
+  assert.ok(age && age.kind === 'count' && age.store === 'identity');
+  assert.equal(age.min, 18);
+  assert.equal(age.max, 99);
+  const ci = config.questions.find((q) => q.id === 'ciNumber');
+  assert.ok(ci && ci.kind === 'idNumber' && ci.store === 'identity' && ci.required);
+  // The only identity answers that are not strings in the rules: age. So no
+  // other count, no yes/no, no choice and no long text may be stored there.
+  for (const q of config.questions.filter((q) => q.store === 'identity' && q.id !== 'age')) {
+    assert.ok(['shortText', 'phone', 'idNumber'].includes(q.kind), `${q.id} is a ${q.kind} in private/identity`);
+  }
+  assert.ok(config.questions.filter((q) => q.kind === 'idNumber').every((q) => q.store === 'identity'));
+});
+
+test('no APPLICATION-store question asks for an address, an identity document or a third person', () => {
+  // Re-worded in portion 4a and scoped in 4c-1, not removed. The address goes
+  // only into `private/home`, the photo through its upload route into Storage,
+  // and the C.I., the references and the landlord only into `private/identity`.
+  // An `answers` value lives in the main document, which the queue downloads
+  // whole and nothing may ever erase. Asked in words, because the ids alone
+  // could be renamed around this.
+  const forbidden =
+    /\b(address|direcci[oó]n|domicilio|carnet|c[eé]dula|passport|pasaporte|documento de identidad|referencia|due[nñ]o|fijo)\b/;
+  const ci = /\bc\.\s?i\./;
+  const words = (q: (typeof config.questions)[number]) =>
+    `${q.id} ${q.label} ${q.hint ?? ''} ${q.intro ?? ''}`.toLowerCase();
+  for (const q of config.questions.filter((q) => q.store === 'application')) {
+    assert.ok(!forbidden.test(words(q)), q.id);
+    assert.ok(!ci.test(words(q)), q.id);
     assert.ok(!/tu dirección\??$/.test(q.label.toLowerCase()), q.id);
+  }
+  // Control: the same words DO name the identity questions, so the check above
+  // is not vacuous.
+  for (const id of ['ciNumber', 'landline', 'personalRefName', 'familyRefName', 'landlordName']) {
+    const q = config.questions.find((x) => x.id === id)!;
+    assert.ok(forbidden.test(words(q)) || ci.test(words(q)), `${id} no longer trips the guard: the control is broken`);
   }
 });
 
@@ -182,12 +290,12 @@ test('the shelter asks for exactly the front of the identity card', () => {
 
 // ─── drift against firestore.rules ──────────────────────────────────────────
 
-test('the rules accept exactly the configured question ids as answer keys', () => {
+test("the rules accept exactly the configured APPLICATION-store ids as answer keys", () => {
   const ruleKeys = quotedStrings(rulesFunctionBody('applicationAnswerKeys'));
   assert.deepEqual(
     [...ruleKeys].sort(),
-    config.questions.map((q) => q.id).sort(),
-    'firestore.rules applicationAnswerKeys() and shelter.ts questions differ — change both, deploy the rules',
+    applicationIds().sort(),
+    "firestore.rules applicationAnswerKeys() and shelter.ts store:'application' questions differ — change both, deploy the rules",
   );
 });
 
@@ -196,7 +304,34 @@ test('every answer key the rules accept is also bounds-checked by the rules', ()
   // any size and any type under that key.
   const body = rulesFunctionBody('validAnswers');
   const checked = [...body.matchAll(/validAnswer\(answers\.get\('([^']+)', true\)\)/g)].map((m) => m[1]!);
-  assert.deepEqual([...checked].sort(), config.questions.map((q) => q.id).sort());
+  assert.deepEqual([...checked].sort(), applicationIds().sort());
+});
+
+test("the rules accept exactly the configured IDENTITY-store ids in private/identity", () => {
+  const ruleKeys = quotedStrings(rulesFunctionBody('identityAnswerKeys'));
+  assert.deepEqual(
+    [...ruleKeys].sort(),
+    identityIds().sort(),
+    "firestore.rules identityAnswerKeys() and shelter.ts store:'identity' questions differ — change both, deploy the rules",
+  );
+  // And the two lists never share a key: a field is in `answers` or in
+  // private/identity, never both.
+  const application = new Set(quotedStrings(rulesFunctionBody('applicationAnswerKeys')));
+  assert.deepEqual(ruleKeys.filter((key) => application.has(key)), []);
+});
+
+test('every identity key the rules accept is also bounds-checked by validIdentity()', () => {
+  // ciNumber and age have their own checks; every other key must pass through
+  // validIdentityAnswer(), or it would accept any type and any size.
+  const body = rulesFunctionBody('validIdentity').replace(/\s+/g, ' ');
+  const checked = [...body.matchAll(/validIdentityAnswer\(d\.answers\.get\('([^']+)', ''\)\)/g)].map((m) => m[1]!);
+  assert.deepEqual(
+    [...checked, 'ciNumber', 'age'].sort(),
+    identityIds().sort(),
+    'a private/identity key is accepted but never bounds-checked',
+  );
+  assert.ok(body.includes("d.answers.keys().hasOnly(identityAnswerKeys())"));
+  assert.ok(body.includes("d.answers.keys().hasAll(['ciNumber', 'age'])"));
 });
 
 test('the rules bound every answer by the same numbers the module declares', () => {
@@ -241,6 +376,7 @@ test('the rules require exactly the fields the writer creates an application wit
       applicantEmailVerified: true,
       answers: {},
       contract: { version: FIXTURE.version, sha256: FIXTURE.sha256 },
+      acceptance: { accepted: true, contractVersion: FIXTURE.version },
     }),
   );
   assert.deepEqual([...ruleKeys].sort(), [...written].sort());
@@ -298,19 +434,43 @@ for (const fn of ['pinWithinServiceArea', 'withinServiceArea']) {
   });
 }
 
-// ─── the contract — portion 4a, plan §5 ─────────────────────────────────────
+// ─── the contract — portion 4a, plan §5; the real text since 4c-1 ───────────
+
+const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
 
 /** Everything wrong with a contract, in words. Empty when it may be published. */
 function contractProblems(contract: AdoptionContract): string[] {
   const problems: string[] = [];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(contract.version)) problems.push(`version ${contract.version} is not YYYY-MM-DD`);
-  if (contract.title.trim() === '') problems.push('the title is empty');
+  if (contract.heading !== null && contract.heading.trim() === '') problems.push('the heading is empty (use null)');
+  if (occurrences(contract.opening, CONTRACT_NAME_TOKEN) !== 1) problems.push('the opening must hold the name token once');
+  if (occurrences(contract.opening, CONTRACT_CI_TOKEN) !== 1) problems.push('the opening must hold the C.I. token once');
   if (contract.clauses.length === 0 || contract.clauses.some((c) => c.trim() === '')) {
     problems.push('a clause is empty, or there are none');
+  }
+  if (contract.closing.trim() === '') problems.push('the closing is empty');
+  if (contract.emphasizedClauses.some((i) => !Number.isInteger(i) || i < 0 || i >= contract.clauses.length)) {
+    problems.push('an emphasized clause index is out of range');
   }
   const expected = createHash('sha256').update(contractCanonicalText(contract), 'utf8').digest('hex');
   if (contract.sha256 !== expected) problems.push(`sha256 should be ${expected}`);
   return problems;
+}
+
+/** Every string of the contract, in order. */
+function contractStrings(contract: AdoptionContract): string[] {
+  return [...(contract.heading ? [contract.heading] : []), contract.opening, ...contract.clauses, contract.closing];
+}
+
+/** Every string the shelter's paper prints that the config carries — contract excluded. */
+function paperFormStrings(): string[] {
+  return [
+    config.formIntro,
+    config.homeLabels.address,
+    config.homeLabels.details,
+    ...config.sections.map((s) => s.label),
+    ...config.questions.flatMap((q) => [q.label, q.intro ?? '', ...(q.options ?? []).map((o) => o.label)]),
+  ].filter((s) => s !== '');
 }
 
 /** The {version: sha256} pairs acceptedContracts() returns. */
@@ -327,25 +487,115 @@ function rulesContracts(): Record<string, string> {
   return pairs;
 }
 
-test('the canonical contract text is the title and each clause, separated by a blank line', () => {
+test('the canonical contract text is the heading if any, the opening template, each clause and the closing, blank-line joined', () => {
   assert.equal(
-    contractCanonicalText({ title: 'T', clauses: ['a', 'b'] }),
-    'T\n\na\n\nb',
+    contractCanonicalText({ heading: null, opening: 'O', clauses: ['a', 'b'], closing: 'C' }),
+    'O\n\na\n\nb\n\nC',
+  );
+  assert.equal(
+    contractCanonicalText({ heading: 'H', opening: 'O', clauses: ['a'], closing: 'C' }),
+    'H\n\nO\n\na\n\nC',
   );
 });
 
-test('the contract checker catches a wrong hash, a bad version and an empty clause', () => {
-  // The checker is what guards the real contract once it exists, so it is
-  // proven on a fixture now, while ADOPTION_CONTRACT is still null.
+test('the contract checker catches a wrong hash, a bad version, a lost token and an empty clause', () => {
+  // Proven on a fixture as well as on the real contract, so the checker itself
+  // is known to fire.
   assert.deepEqual(contractProblems(FIXTURE), []);
   assert.equal(contractProblems({ ...FIXTURE, clauses: [...FIXTURE.clauses, 'una más'] }).length, 1, 'an edited clause kept its old hash');
   assert.equal(contractProblems({ ...FIXTURE, version: '16-10-2026' }).length, 1);
   assert.equal(contractProblems({ ...FIXTURE, clauses: ['  '] }).length, 2);
+  assert.ok(contractProblems({ ...FIXTURE, opening: FIXTURE.opening.replace(CONTRACT_CI_TOKEN, '') }).length >= 1);
+  assert.ok(contractProblems({ ...FIXTURE, emphasizedClauses: [5] }).length >= 1);
 });
 
-test('the configured contract, if any, is internally consistent', () => {
-  if (ADOPTION_CONTRACT === null) return; // null until the shelter supplies it
+test('the configured contract exists and is internally consistent', () => {
+  // The shelter supplied its real text; the owner confirmed it on 2026-10-16,
+  // Bolivia time (portion 4c-1).
+  assert.ok(ADOPTION_CONTRACT, 'ADOPTION_CONTRACT is null again');
   assert.deepEqual(contractProblems(ADOPTION_CONTRACT), []);
+});
+
+test('the contract is the paper: the COMPROMISOS heading, nine commitments, the 48-hour one in bold', () => {
+  // Literals (owner decisions D8 and D10). The heading is printed on page 2
+  // (the transcription was corrected on 2026-10-17), so it is the paper's
+  // word, hashed. The emphasis is
+  // presentation: it is NOT hashed, so only this pin catches a change to it.
+  assert.ok(ADOPTION_CONTRACT);
+  assert.equal(ADOPTION_CONTRACT.heading, 'COMPROMISOS');
+  assert.equal(ADOPTION_CONTRACT.clauses.length, 9);
+  assert.deepEqual([...ADOPTION_CONTRACT.emphasizedClauses], [2]);
+  assert.ok(ADOPTION_CONTRACT.clauses[2]!.includes('48 horas'), 'the bold clause is no longer the 48-hour one');
+  for (const clause of ADOPTION_CONTRACT.clauses) assert.ok(clause.startsWith('Me comprometo'), clause);
+});
+
+test('the printed heading is inside the hashed text, as its first block', () => {
+  // Printed text, so it is part of what the hash proves was shown: dropping or
+  // changing the heading must change the hash.
+  assert.ok(ADOPTION_CONTRACT);
+  const canonical = contractCanonicalText(ADOPTION_CONTRACT);
+  assert.ok(canonical.startsWith('COMPROMISOS\n\nYo {nombre} mayor de edad'), 'the heading is not the first hashed block');
+  const without = contractCanonicalText({ ...ADOPTION_CONTRACT, heading: null });
+  assert.notEqual(
+    createHash('sha256').update(without, 'utf8').digest('hex'),
+    ADOPTION_CONTRACT.sha256,
+    'the hash does not depend on the heading',
+  );
+});
+
+test('the opening holds each blank exactly once, and no clause or the closing holds either', () => {
+  assert.ok(ADOPTION_CONTRACT);
+  assert.equal(occurrences(ADOPTION_CONTRACT.opening, CONTRACT_NAME_TOKEN), 1);
+  assert.equal(occurrences(ADOPTION_CONTRACT.opening, CONTRACT_CI_TOKEN), 1);
+  assert.ok(
+    ADOPTION_CONTRACT.opening.indexOf(CONTRACT_NAME_TOKEN) < ADOPTION_CONTRACT.opening.indexOf(CONTRACT_CI_TOKEN),
+    'the name comes before the C.I., as on paper',
+  );
+  for (const text of [...ADOPTION_CONTRACT.clauses, ADOPTION_CONTRACT.closing]) {
+    assert.equal(occurrences(text, CONTRACT_NAME_TOKEN), 0, text);
+    assert.equal(occurrences(text, CONTRACT_CI_TOKEN), 0, text);
+  }
+});
+
+test('every contract and paper-form string is NFC, one line, single-spaced and trimmed', () => {
+  // A decomposed accent renders the same and hashes differently — the
+  // shelter's text would silently stop matching the rules.
+  assert.ok(ADOPTION_CONTRACT);
+  const hints = config.questions.flatMap((q) => (q.hint ? [q.hint] : []));
+  for (const text of [...contractStrings(ADOPTION_CONTRACT), ...paperFormStrings(), ...hints, ADOPTION_ACCEPTANCE.label]) {
+    assert.equal(text, text.normalize('NFC'), `not NFC: ${text}`);
+    assert.ok(!text.includes('\n') && !text.includes('\r'), `a line break: ${text}`);
+    assert.ok(!/ {2}/.test(text), `a double space: ${text}`);
+    assert.equal(text, text.trim(), `leading or trailing whitespace: ${text}`);
+  }
+});
+
+test('no online text carries the paper signature line', () => {
+  // Owner decision D11: signed in ink at handover, never online. Upper-case,
+  // as the paper prints "FIRMA ADOPTANTE … FIRMA RESCATISTA"; the acceptance
+  // legitimately says the contract "se firma en papel".
+  assert.ok(ADOPTION_CONTRACT);
+  for (const text of [...contractStrings(ADOPTION_CONTRACT), ...paperFormStrings(), ADOPTION_ACCEPTANCE.label]) {
+    assert.ok(!/FIRMA|ADOPTANTE|RESCATISTA/.test(text), text);
+    assert.ok(!text.includes('…'), `a dotted blank survived: ${text}`);
+  }
+});
+
+test("the shelter's original spelling is kept, exactly", () => {
+  // Owner decision (plan 4c, "the original spelling is kept exactly"): the
+  // lawyer-approved paper is reproduced as
+  // printed. These are NOT typos to fix — a "correction" changes the approved
+  // text and the hash. Literal tripwires on the forms most likely to be fixed.
+  assert.ok(ADOPTION_CONTRACT);
+  const contract = contractStrings(ADOPTION_CONTRACT).join(' ');
+  for (const word of ['no lo sacare a la calle', 'ENCARGADO DE ADOPCION TIENEN', 'CORRESPONDIENTES SANSIONES']) {
+    assert.ok(contract.includes(word), `the contract no longer says «${word}»`);
+  }
+  assert.ok(config.formIntro.includes('los requisitos aqui contenidos'), 'the form intro no longer says «aqui»');
+  assert.ok(
+    config.questions.some((q) => q.label === '¿QUE TIPO DE INMUEBLE POSEE?'),
+    'the housing question no longer reads «¿QUE TIPO…» as printed',
+  );
 });
 
 test('the rules accept exactly the configured contract, and nothing while there is none', () => {
@@ -378,6 +628,7 @@ test('the application create rule checks the contract and the home document', ()
   assert.ok(create.includes('request.resource.data.termsAcceptedAt == request.time'));
   assert.ok(create.includes('request.resource.data.identityErasedAt == null'));
   assert.ok(create.includes('/private/home)'), 'the create no longer requires private/home in the same batch');
+  assert.ok(create.includes('/private/identity)'), 'the create no longer requires private/identity in the same batch');
 });
 
 test('the form cannot be switched on while there is no contract', () => {
@@ -397,6 +648,7 @@ test('with the configured contract, nothing can be accepted while it is null', (
       applicantEmailVerified: true,
       answers: {},
       contract: ADOPTION_CONTRACT,
+      acceptance: { accepted: true, contractVersion: ADOPTION_CONTRACT?.version ?? '' },
     });
   if (ADOPTION_CONTRACT === null) assert.throws(make, ContractUnavailableError);
   else assert.doesNotThrow(make);
@@ -464,12 +716,34 @@ function allApplicationCopy(): string[] {
     es.approvalWarning('email-unverified', { otherOpenCount: 0 }),
     es.approvalWarning('pet-not-on-wall', { otherOpenCount: 0 }),
     es.approvalWarning('location-will-be-visible', { otherOpenCount: 0 }),
-    ...config.questions.flatMap((q) => [q.label, q.hint ?? '', ...(q.options ?? []).map((o) => o.label)]),
+    ...ANSWER_ERRORS.map((error) => es.applicationAnswerError(error)),
+    // Ours: every hint, and the acceptance draft.
+    ...config.questions.map((q) => q.hint ?? ''),
+    ADOPTION_ACCEPTANCE.label,
+    // The paper's (usted forms — "posee", "coloque", "Planea" — never voseo).
+    ...paperFormStrings(),
   );
   return out.filter((s) => s !== '');
 }
 
-test('no application copy and no draft question speaks voseo', () => {
+const ANSWER_ERRORS: ApplicationAnswerError[] = [
+  'required',
+  'too-long',
+  'phone-invalid',
+  'id-number-invalid',
+  'count-invalid',
+  'under-age',
+  'choice-invalid',
+];
+
+test('the under-age and C.I. errors say what to do, and under-age offers WhatsApp', () => {
+  assert.match(es.applicationAnswerError('under-age'), /mayor de edad/);
+  assert.match(es.applicationAnswerError('under-age'), /WhatsApp/);
+  assert.match(es.applicationAnswerError('id-number-invalid'), /carnet/);
+  for (const error of ANSWER_ERRORS) assert.ok(es.applicationAnswerError(error).trim() !== '', error);
+});
+
+test('no application copy and no question speaks voseo', () => {
   for (const text of allApplicationCopy()) {
     assert.deepEqual(findVoseo(text), [], text);
   }

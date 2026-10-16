@@ -45,7 +45,7 @@
  * turning someone down is a conversation, not a side effect.
  */
 
-import { SHELTER, type ApplicationQuestion } from '@/config/shelter';
+import { SHELTER, type ApplicationAnswerStore, type ApplicationQuestion } from '@/config/shelter';
 import type { AdoptionContract } from '@/config/adoption-contract';
 import { canTransition } from './arrival';
 import type {
@@ -53,6 +53,7 @@ import type {
   AdoptionApplication,
   ApplicationAnswer,
   ApplicationHome,
+  ApplicationIdentity,
   ApplicationStatus,
   CustodyEvent,
   IdDocumentSide,
@@ -61,6 +62,9 @@ import type {
 
 /** The sides this shelter asks for. Overridable per call so the tests can vary it. */
 const CONFIGURED_ID_SIDES: readonly IdDocumentSide[] = SHELTER.adoptionApplications.idDocumentSides;
+
+/** The questions this shelter asks. Overridable per call so the tests can vary them. */
+const CONFIGURED_QUESTIONS: readonly ApplicationQuestion[] = SHELTER.adoptionApplications.questions;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Statuses and the transition table
@@ -204,9 +208,24 @@ export function parseApplicationId(id: string): { petId: string; applicantUid: s
 export const RULES_ANSWER_MAX_CHARS = 1500;
 export const RULES_ANSWER_MAX_COUNT = 99;
 
+/**
+ * A Bolivian C.I. as the form accepts it — SHAPE, never semantics (plan §3.3).
+ * 4 to 20 characters after tidying; only letters (Ñ included), digits, spaces,
+ * `.` and `-`; at least 4 digits. Stored as typed (tidied), never upper-cased
+ * and never split into number, complement and extension.
+ *
+ * ⚠️ `CI_MIN_CHARS` and `CI_MAX_CHARS` are MIRRORED in `validIdentity()` in
+ * `firestore.rules`, which checks only the length — a test fails if they
+ * drift. The charset and the digit count are the form's stricter check.
+ */
+export const CI_MIN_CHARS = 4;
+export const CI_MAX_CHARS = 20;
+export const CI_MIN_DIGITS = 4;
+
 export const ANSWER_MAX_CHARS = {
   shortText: 120,
   phone: 30,
+  idNumber: CI_MAX_CHARS,
   longText: 1500,
 } as const;
 
@@ -227,7 +246,15 @@ export type ApplicationAnswerError =
   | 'required'
   | 'too-long'
   | 'phone-invalid'
+  /** Not a C.I. as `tidyIdNumber` reads one. */
+  | 'id-number-invalid'
   | 'count-invalid'
+  /**
+   * A count below its question's `min`. Only the age question has one: the
+   * contract says "mayor de edad", so an applicant under 18 is refused here
+   * and by the rules (owner decision D4).
+   */
+  | 'under-age'
   | 'choice-invalid';
 
 export function emptyAnswerDraft(questions: readonly ApplicationQuestion[]): AnswerDraft {
@@ -253,6 +280,45 @@ export function phoneDigits(text: string): string | null {
   return digits.length >= 7 && digits.length <= 15 ? digits : null;
 }
 
+/**
+ * A C.I. number, tidied, or null when it cannot be one. NFC, trimmed, runs of
+ * spaces collapsed — and nothing else: no upper-casing, no splitting.
+ */
+export function tidyIdNumber(text: string): string | null {
+  const tidy = text.normalize('NFC').trim().replace(/\s+/g, ' ');
+  if (tidy.length < CI_MIN_CHARS || tidy.length > CI_MAX_CHARS) return null;
+  if (!/^[0-9A-Za-zÑñ .-]+$/.test(tidy)) return null;
+  if ((tidy.match(/[0-9]/g) ?? []).length < CI_MIN_DIGITS) return null;
+  return tidy;
+}
+
+/**
+ * Is this question asked, given the answers so far? A question with no
+ * `askedWhen` always is. One with an `askedWhen` is asked only when its
+ * controlling question is itself asked AND answered with one of `values`.
+ *
+ * Works on a form draft (strings, booleans, null) and on stored answers alike,
+ * so the admin screen hides exactly what the form never asked.
+ */
+export function isQuestionAsked(
+  questions: readonly ApplicationQuestion[],
+  question: ApplicationQuestion,
+  answers: Readonly<Record<string, unknown>>,
+  seen: ReadonlySet<string> = new Set(),
+): boolean {
+  const condition = question.askedWhen;
+  if (!condition) return true;
+  // A cycle is a configuration error; a test requires every askedWhen to name
+  // an EARLIER question. Refuse rather than recurse forever.
+  if (seen.has(question.id)) return false;
+  const controlling = questions.find((q) => q.id === condition.questionId);
+  if (!controlling) return false;
+  if (!isQuestionAsked(questions, controlling, answers, new Set([...seen, question.id]))) return false;
+  const raw = answers[condition.questionId];
+  const value = typeof raw === 'string' ? raw.trim() : raw;
+  return condition.values.some((v) => v === value);
+}
+
 export interface AnswerValidation {
   /** What would be stored: only question ids, only answered questions, never null. */
   answers: Record<string, ApplicationAnswer>;
@@ -268,8 +334,14 @@ export interface AnswerValidation {
  * the rules refuse them anyway, and a stale key from an older version of the
  * question list must not make the whole submission fail.
  *
+ * A question whose `askedWhen` is not met is DROPPED and never required: a
+ * landlord typed and then hidden by switching to PROPIO is not stored.
+ *
  * An unanswered optional question is ABSENT from the result, never null — the
  * rules treat an explicit null as a malformed answer.
+ *
+ * The result holds BOTH stores; `splitAnswersByStore` separates them before
+ * anything is written.
  */
 export function validateAnswers(
   questions: readonly ApplicationQuestion[],
@@ -279,6 +351,7 @@ export function validateAnswers(
   const errors: Record<string, ApplicationAnswerError> = {};
 
   for (const question of questions) {
+    if (!isQuestionAsked(questions, question, draft)) continue;
     const raw = draft[question.id];
 
     if (question.kind === 'yesNo') {
@@ -316,14 +389,22 @@ export function validateAnswers(
         }
         break;
       }
+      case 'idNumber': {
+        const tidy = tidyIdNumber(text);
+        if (tidy === null) errors[question.id] = 'id-number-invalid';
+        else answers[question.id] = tidy;
+        break;
+      }
       case 'count': {
         const max = Math.min(question.max ?? DEFAULT_COUNT_MAX, RULES_ANSWER_MAX_COUNT);
+        const min = Math.max(question.min ?? 0, 0);
         if (!/^\d{1,2}$/.test(text)) {
           errors[question.id] = 'count-invalid';
           break;
         }
         const value = Number(text);
         if (value > max) errors[question.id] = 'count-invalid';
+        else if (value < min) errors[question.id] = 'under-age';
         else answers[question.id] = value;
         break;
       }
@@ -446,12 +527,61 @@ export function requireContract(contract: ContractAcceptance | null): ContractAc
 }
 
 /**
+ * What the person did on screen: ticked the acceptance box, under the contract
+ * version that was DISPLAYED to them. The caller passes it explicitly — an
+ * application never records acceptance on its own.
+ */
+export interface AcceptanceGiven {
+  /** True only when the box was ticked. Anything else refuses the write. */
+  accepted: boolean;
+  /** The `version` of the contract text the screen showed. */
+  contractVersion: string;
+}
+
+/**
+ * The person did not accept, or accepted a different contract version than
+ * the one being recorded (a tab left open across a contract revision). Thrown
+ * before anything is sent.
+ */
+export class ContractNotAcceptedError extends Error {
+  constructor(reason: string) {
+    super(`contract not accepted: ${reason}`);
+    this.name = 'ContractNotAcceptedError';
+  }
+}
+
+/**
+ * Throws `ContractNotAcceptedError` unless the box was ticked (`accepted` is
+ * exactly `true`) for exactly this contract's version. Pure, so the browser
+ * can refuse before any network call; `buildApplicationCreate` calls it too.
+ */
+export function requireAcceptance(
+  acceptance: AcceptanceGiven | null | undefined,
+  contract: ContractAcceptance,
+): asserts acceptance is AcceptanceGiven {
+  if (acceptance?.accepted !== true) {
+    throw new ContractNotAcceptedError('the acceptance box was not ticked');
+  }
+  if (acceptance.contractVersion !== contract.version) {
+    throw new ContractNotAcceptedError(
+      `the screen showed version ${acceptance.contractVersion}, not ${contract.version}`,
+    );
+  }
+}
+
+/**
  * A new application, as written.
  *
  * `contract` is REQUIRED and has no default on purpose: the caller must pass
  * `ADOPTION_CONTRACT` explicitly, and while that is null this throws
  * `ContractUnavailableError` — the browser half of the third lock. The rules
- * half is the empty `acceptedContracts()`.
+ * half is `acceptedContracts()`.
+ *
+ * `acceptance` is REQUIRED too (review 4c-1 #6): `termsAcceptedAt` and the
+ * contract pair are written only when the caller says the box was ticked
+ * (`accepted: true`) for the SAME version it is recording. Otherwise this
+ * throws `ContractNotAcceptedError`, so no code path can record an acceptance
+ * nobody gave.
  */
 export function buildApplicationCreate(input: {
   petId: string;
@@ -460,10 +590,12 @@ export function buildApplicationCreate(input: {
   applicantEmailVerified: boolean;
   answers: Record<string, ApplicationAnswer>;
   contract: ContractAcceptance | null;
+  acceptance: AcceptanceGiven;
   /** Defaults to `SHELTER.adoptionApplications.idDocumentSides`. */
   idDocumentSides?: readonly IdDocumentSide[];
 }): ApplicationCreateWrite {
   const contract = requireContract(input.contract);
+  requireAcceptance(input.acceptance, contract);
   const sides = input.idDocumentSides ?? CONFIGURED_ID_SIDES;
   if (sides.length === 0) throw new Error('buildApplicationCreate: no identity document side is configured');
   const idDocument: Partial<Record<IdDocumentSide, null>> = {};
@@ -668,6 +800,156 @@ export function buildHomeCreate(input: {
     reference: check.home.reference,
     geo: check.home.geo,
     precision: check.home.precision,
+    createdAt: SERVER_TIME,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Personal details and third parties — `adoptionApplications/{id}/private/identity`
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every document under `adoptionApplications/{id}/private/`. MIRRORED in the
+ * rules' `private` create (`docId in [...]`); a test fails if they drift.
+ *
+ * ⚠️ The retention sweep (portion 4e) and the admin erase route MUST import
+ * this list rather than naming documents themselves, so neither can forget
+ * `identity`. A switch-on guard checks the sweep does.
+ */
+export const PRIVATE_DOCUMENT_IDS = ['home', 'identity'] as const;
+export type PrivateDocumentId = (typeof PRIVATE_DOCUMENT_IDS)[number];
+
+/**
+ * `adoptionApplications/{id}/internal/notes` — the shelter's notes on an
+ * applicant. Unlike the private documents it is KEPT with the application, so
+ * the rule for writing it is that notes record that a correction was needed,
+ * never a C.I. number or anyone's phone (D15). The retention sweep (portion
+ * 4e) must BLANK its `text` when it erases the personal details, as a backstop
+ * for a note that broke that rule. MIRRORED in the rules' `match /internal/
+ * {docId}` (`docId == 'notes'`); a test fails if they drift, and a switch-on
+ * guard checks the sweep imports this.
+ */
+export const INTERNAL_NOTES_DOCUMENT = {
+  subcollection: 'internal',
+  id: 'notes',
+  /** The field the sweep sets to '' — the only one that holds free text. */
+  blankField: 'text',
+} as const;
+
+/**
+ * The bounds `firestore.rules` enforces on `private/identity`. MIRRORED in
+ * `validIdentityAnswer()` and `validIdentity()` there, which are the enforcing
+ * copy; a test fails if the two drift.
+ *   - every answer is a string of at most `IDENTITY_ANSWER_MAX_CHARS`,
+ *   - except `age`, a whole number from `IDENTITY_AGE_MIN` to `IDENTITY_AGE_MAX`,
+ *   - and `ciNumber`, `CI_MIN_CHARS` to `CI_MAX_CHARS` characters.
+ * `ciNumber` and `age` are the two the rules REQUIRE, because the contract
+ * names them: "mayor de edad, con C.I. …".
+ */
+export const IDENTITY_ANSWER_MAX_CHARS = 120;
+export const IDENTITY_AGE_MIN = 18;
+export const IDENTITY_AGE_MAX = 99;
+export const IDENTITY_REQUIRED_KEYS = ['ciNumber', 'age'] as const;
+
+/**
+ * Separate validated answers by where they are written: `application` into the
+ * main document's `answers`, `identity` into `private/identity`. A key that
+ * belongs to no configured question is dropped, as in `validateAnswers`.
+ */
+export function splitAnswersByStore(
+  questions: readonly ApplicationQuestion[],
+  answers: Readonly<Record<string, ApplicationAnswer>>,
+): Record<ApplicationAnswerStore, Record<string, ApplicationAnswer>> {
+  const split: Record<ApplicationAnswerStore, Record<string, ApplicationAnswer>> = {
+    application: {},
+    identity: {},
+  };
+  const storeOf = new Map(questions.map((q) => [q.id, q.store]));
+  for (const [key, value] of Object.entries(answers)) {
+    const store = storeOf.get(key);
+    if (store) split[store][key] = value;
+  }
+  return split;
+}
+
+/** `private/identity`, as written. Typed so `ApplicationIdentity` and the writer cannot drift. */
+export type IdentityCreateWrite = Omit<ApplicationIdentity, 'createdAt'> & { createdAt: ServerTime };
+
+export class InvalidIdentityError extends Error {
+  readonly problems: string[];
+  constructor(problems: string[]) {
+    super(`invalid identity: ${problems.join(', ')}`);
+    this.name = 'InvalidIdentityError';
+    this.problems = problems;
+  }
+}
+
+/**
+ * Everything wrong with an identity answer set, as the rules AND the form
+ * would see it — empty when it can be written. Each value is re-checked
+ * against its own question's kind, so a caller that skipped `validateAnswers`
+ * cannot send a value the person never typed in that shape.
+ */
+export function identityProblems(
+  identity: Readonly<Record<string, ApplicationAnswer>>,
+  questions: readonly ApplicationQuestion[] = CONFIGURED_QUESTIONS,
+): string[] {
+  const problems: string[] = [];
+  const byId = new Map(questions.filter((q) => q.store === 'identity').map((q) => [q.id, q]));
+
+  for (const key of IDENTITY_REQUIRED_KEYS) {
+    if (!(key in identity)) problems.push(`${key}: missing`);
+  }
+
+  for (const [key, value] of Object.entries(identity)) {
+    const question = byId.get(key);
+    if (!question) {
+      problems.push(`${key}: not an identity question`);
+      continue;
+    }
+    if (key === 'age') {
+      const ok =
+        typeof value === 'number' &&
+        Number.isInteger(value) &&
+        value >= IDENTITY_AGE_MIN &&
+        value <= IDENTITY_AGE_MAX;
+      if (!ok) problems.push(`age: not a whole number from ${IDENTITY_AGE_MIN} to ${IDENTITY_AGE_MAX}`);
+      continue;
+    }
+    if (typeof value !== 'string' || value.length > IDENTITY_ANSWER_MAX_CHARS || value.trim() === '') {
+      problems.push(`${key}: not a non-empty string of at most ${IDENTITY_ANSWER_MAX_CHARS} characters`);
+      continue;
+    }
+    if (question.kind === 'idNumber' && tidyIdNumber(value) !== value) problems.push(`${key}: not a C.I.`);
+    if (question.kind === 'phone' && (value.length > ANSWER_MAX_CHARS.phone || phoneDigits(value) === null)) {
+      problems.push(`${key}: not a phone number`);
+    }
+    if (question.kind === 'shortText' && value !== value.trim().replace(/\s+/g, ' ')) {
+      problems.push(`${key}: not tidied`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * The personal-details document, for the SAME batch as the application.
+ *
+ * Re-validates rather than trusting its argument, and throws instead of
+ * returning a partial document — the `buildHomeCreate` pattern. Writes exactly
+ * `applicantUid`, `answers` and `createdAt`: the three keys the rules require.
+ */
+export function buildIdentityCreate(input: {
+  applicantUid: string;
+  identity: Readonly<Record<string, ApplicationAnswer>>;
+  questions?: readonly ApplicationQuestion[];
+}): IdentityCreateWrite {
+  if (!input.applicantUid) throw new Error('buildIdentityCreate: the applicant is required');
+  const problems = identityProblems(input.identity, input.questions);
+  if (problems.length > 0) throw new InvalidIdentityError(problems);
+  return {
+    applicantUid: input.applicantUid,
+    // Safe after identityProblems: every value is a string, except age, a number.
+    answers: { ...(input.identity as Record<string, string | number>) },
     createdAt: SERVER_TIME,
   };
 }
