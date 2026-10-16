@@ -20,8 +20,20 @@
  *   - switch ON, acceptedContracts() holding the test pair      (the default)
  *   - switch OFF, test pair                                      (`OFF`)
  *   - switch ON, acceptedContracts() forced EMPTY                (`NO_CONTRACT`)
- * The file itself ships with the switch off and an empty contract map, so
- * against it EVERY create DENY would pass for the wrong reason.
+ * The file itself ships with the switch off, so against it EVERY create DENY
+ * would pass for the wrong reason.
+ *
+ * ── Portion 4c-1 ──────────────────────────────────────────────────────────
+ * `private/identity` (the C.I., age, civil status, landline, two references
+ * and a renter's landlord): created in the same batch as the application and
+ * `private/home`, READ BY ADMINS ONLY, never updated, never deleted. The answer
+ * keys are now the paper form's. And the contract map holds the REAL pair, so
+ * two more variants run:
+ *   - switch ON, acceptedContracts() exactly as the file ships     (`SHIPPED_CONTRACT`)
+ *   - the file EXACTLY as it ships: switch off, real pair           (`SHIPPED_FILE`)
+ * The second is the proof that releasing these rules while the switch is off
+ * changes no create outcome: a complete three-document batch carrying the
+ * real contract is refused, and the existing reads answer as before.
  *
  * ── Encoding (MEASURED 2026-10-16 on this API) ─────────────────────────────
  * A JSON map with exactly `latitude` and `longitude` numbers arrives in the
@@ -88,6 +100,7 @@ const ADMIN = 'uidAdmin';
 const APP = `${PET}__${ANA}`;
 const APP_PATH = `/adoptionApplications/${APP}`;
 const HOME_PATH = `${APP_PATH}/private/home`;
+const IDENTITY_PATH = `${APP_PATH}/private/identity`;
 
 // The contract pair the evaluated COPY accepts. Not a contract: a label hashed
 // so the value has the shape of one. The real map ships empty.
@@ -96,6 +109,26 @@ const TEST_CONTRACT = {
   sha256: createHash('sha256').update('rules-test fixture, not a contract').digest('hex'),
 };
 const OTHER_SHA = createHash('sha256').update('some other text').digest('hex');
+
+/**
+ * The pair the evaluated FILE ships in acceptedContracts() — the real contract
+ * since portion 4c-1. Read out of the rules source, because this script cannot
+ * import TypeScript; application-config.test.ts pins that the file's pair is
+ * the one in src/config/adoption-contract.ts. Exactly one pair, or nothing the
+ * shipped cases prove would mean anything.
+ */
+const SHIPPED_CONTRACT = (() => {
+  const fn = /function acceptedContracts\(\) \{\s*return \{([^{}]*)\};\s*\}/.exec(source);
+  const pairs = fn ? [...fn[1].matchAll(/'([^']+)'\s*:\s*'([^']+)'/g)] : [];
+  if (pairs.length !== 1) {
+    console.error(`expected exactly one contract pair in acceptedContracts() of ${rulesPath}, found ${pairs.length}`);
+    process.exit(2);
+  }
+  return { version: pairs[0][1], sha256: pairs[0][2] };
+})();
+
+/** Whether the evaluated file ships with applicationsEnabled() returning false. */
+const SHIPPED_SWITCH_OFF = /function applicationsEnabled\(\) \{\s*return false;\s*\}/.test(source);
 
 /** What the upload route records through the Admin SDK once the front arrives. */
 const RECEIVED = { receivedAt: EARLIER, bytes: 120000, generation: '1760000000000000' };
@@ -117,13 +150,30 @@ function request(who, method, path, data) {
   return r;
 }
 
+// The six `store: 'application'` keys of the paper form (portion 4c-1).
 const ANSWERS = {
   fullName: 'Ana Pérez',
   whatsapp: '+591 7000 0000',
   housingType: 'house',
-  adults: 2,
-  everyoneAgrees: true,
-  whyThisAnimal: 'Porque sí.',
+  housingTenure: 'rented',
+  movingSoon: false,
+  walled: true,
+};
+
+// The twelve `store: 'identity'` keys — invented people, never real ones.
+const IDENTITY_ANSWERS = {
+  ciNumber: '1234567 LP',
+  age: 30,
+  civilStatus: 'soltera',
+  landline: '4 4251234',
+  personalRefName: 'Rosa Quispe',
+  personalRefPhone: '70000001',
+  personalRefRelation: 'amiga',
+  familyRefName: 'Luis Pérez',
+  familyRefPhone: '70000002',
+  familyRefRelation: 'hermano',
+  landlordName: 'Pedro Rojas',
+  landlordPhone: '70000003',
 };
 
 function created(over = {}) {
@@ -178,19 +228,28 @@ function mockPet(status, petId = PET) {
 
 /**
  * Everything an application create reads: the pet, and whether the batch also
- * writes private/home. Every create case gets ALL of these, so a DENY can only
- * come from the one thing the case gets wrong — never from a missing mock.
+ * writes private/home and private/identity. Every create case gets ALL of
+ * these, so a DENY can only come from the one thing the case gets wrong — never
+ * from a missing mock.
  */
-function mockCreate(petStatus = 'available', { homeAfter = true, appId = APP, petId = PET } = {}) {
-  // The home mock is built from the application id the CASE writes to, never
-  // from the default one: a case whose id differs must not be denied by a
-  // missing mock instead of by the rule it names. Same for the pet.
+function mockCreate(
+  petStatus = 'available',
+  { homeAfter = true, identityAfter = true, appId = APP, petId = PET } = {},
+) {
+  // The private mocks are built from the application id the CASE writes to,
+  // never from the default one: a case whose id differs must not be denied by
+  // a missing mock instead of by the rule it names. Same for the pet.
   return [
     ...mockPet(petStatus, petId),
     {
       function: 'existsAfter',
       args: [{ exactValue: `${DB}/adoptionApplications/${appId}/private/home` }],
       result: { value: homeAfter },
+    },
+    {
+      function: 'existsAfter',
+      args: [{ exactValue: `${DB}/adoptionApplications/${appId}/private/identity` }],
+      result: { value: identityAfter },
     },
   ];
 }
@@ -232,6 +291,38 @@ function homeCreate(who, data, mocks = mockHomeCreate(), path = HOME_PATH) {
 
 function homeUpdate(who, before, after) {
   return { request: request(who, 'update', HOME_PATH, after), resource: { data: before } };
+}
+
+/** private/identity as the batch writes it. `answers` merges over the complete fixture. */
+function identity(answers = IDENTITY_ANSWERS, over = {}) {
+  return { applicantUid: ANA, answers, createdAt: NOW, ...over };
+}
+
+function identityWithout(...keys) {
+  const d = identity();
+  for (const key of keys) delete d[key];
+  return d;
+}
+
+/** The identity fixture's answers, with some replaced or (value `undefined`) removed. */
+function identityAnswers(over = {}) {
+  const answers = { ...IDENTITY_ANSWERS, ...over };
+  for (const [key, value] of Object.entries(over)) if (value === undefined) delete answers[key];
+  return answers;
+}
+
+function storedIdentity(over = {}) {
+  return identity(IDENTITY_ANSWERS, { createdAt: EARLIER, ...over });
+}
+
+// The parent before and after the batch is exactly what a home create reads,
+// so the identity create uses the same mock.
+function identityCreate(who, data, mocks = mockHomeCreate(), path = IDENTITY_PATH) {
+  return { request: request(who, 'create', path, data), functionMocks: mocks };
+}
+
+function identityUpdate(who, before, after) {
+  return { request: request(who, 'update', IDENTITY_PATH, after), resource: { data: before } };
 }
 
 const CORRECTED = { correctedAt: NOW, correctedBy: ADMIN };
@@ -297,6 +388,13 @@ function update(who, before, after, mocks) {
 // agrees with shelter.ts and adoption-contract.ts is the drift tests' job.
 const OFF = { switch: 'off' };
 const NO_CONTRACT = { contracts: 'empty' };
+// Portion 4c-1. `shipped` means "leave that function exactly as the file has it".
+const SHIPPED_CONTRACT_ON = { contracts: 'shipped' };
+const SHIPPED_FILE = { switch: 'shipped', contracts: 'shipped' };
+
+/** The real contract pair, on a complete application. */
+const withShippedContract = (over = {}) =>
+  created({ contractVersion: SHIPPED_CONTRACT.version, contractSha256: SHIPPED_CONTRACT.sha256, ...over });
 
 const cases = [
   // ── the public switch: create is refused while applicationsEnabled() is false ─
@@ -319,6 +417,68 @@ const cases = [
   ['ALLOW', 'switch off: admin still reviews an application', update(
     WHO.admin, stored(), stored({ status: 'reviewing', updatedAt: NOW }),
   ), OFF],
+  ['DENY', 'switch off: the personal details cannot be written either', identityCreate(WHO.ana, identity()), OFF],
+  ['ALLOW', 'switch off: an admin still reads the personal details', {
+    request: request(WHO.admin, 'get', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }, OFF],
+
+  // ── portion 4c-1: the REAL contract, as the file ships it ────────────────
+  // Switch forced ON, acceptedContracts() untouched: the complete batch with
+  // the real pair is what 4f will allow.
+  ['ALLOW', 'shipped contract: the application carrying the REAL contract pair', {
+    request: request(WHO.ana, 'create', APP_PATH, withShippedContract()),
+    functionMocks: mockCreate('available'),
+  }, SHIPPED_CONTRACT_ON],
+  ['ALLOW', 'shipped contract: its private/home in the same batch', homeCreate(WHO.ana, home()), SHIPPED_CONTRACT_ON],
+  ['ALLOW', 'shipped contract: its private/identity in the same batch', identityCreate(WHO.ana, identity()), SHIPPED_CONTRACT_ON],
+  ['DENY', 'shipped contract: the test fixture pair is not in the shipped map', {
+    request: request(WHO.ana, 'create', APP_PATH, created()),
+    functionMocks: mockCreate('available'),
+  }, SHIPPED_CONTRACT_ON],
+  ['DENY', 'shipped contract: the real hash under another version', {
+    request: request(WHO.ana, 'create', APP_PATH, withShippedContract({ contractVersion: '2026-10-15' })),
+    functionMocks: mockCreate('available'),
+  }, SHIPPED_CONTRACT_ON],
+  ['DENY', 'shipped contract: the real version with another hash', {
+    request: request(WHO.ana, 'create', APP_PATH, withShippedContract({ contractSha256: OTHER_SHA })),
+    functionMocks: mockCreate('available'),
+  }, SHIPPED_CONTRACT_ON],
+
+  // ── portion 4c-1: the file EXACTLY as it ships (switch off, real pair) ───
+  // The inertness proof for releasing these rules before 4f: the complete
+  // three-document batch with the real contract is refused, by the switch.
+  ['DENY', 'SHIPPED FILE: the application, complete, with the real contract', {
+    request: request(WHO.ana, 'create', APP_PATH, withShippedContract()),
+    functionMocks: mockCreate('available'),
+  }, SHIPPED_FILE],
+  ['DENY', 'SHIPPED FILE: its private/home', homeCreate(WHO.ana, home()), SHIPPED_FILE],
+  ['DENY', 'SHIPPED FILE: its private/identity', identityCreate(WHO.ana, identity()), SHIPPED_FILE],
+  ['ALLOW', 'SHIPPED FILE: the applicant still reads own application', {
+    request: request(WHO.ana, 'get', APP_PATH),
+    resource: { data: stored() },
+  }, SHIPPED_FILE],
+  ['ALLOW', 'SHIPPED FILE: the applicant still reads own home address', {
+    request: request(WHO.ana, 'get', HOME_PATH),
+    resource: { data: storedHome() },
+  }, SHIPPED_FILE],
+  ['DENY', 'SHIPPED FILE: the applicant cannot read own personal details', {
+    request: request(WHO.ana, 'get', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }, SHIPPED_FILE],
+  ['ALLOW', 'SHIPPED FILE: an admin reads the personal details', {
+    request: request(WHO.admin, 'get', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }, SHIPPED_FILE],
+  ['ALLOW', 'SHIPPED FILE: the applicant still withdraws an open application', update(
+    WHO.ana, stored(), stored({ status: 'withdrawn', withdrawnAt: NOW, updatedAt: NOW }),
+  ), SHIPPED_FILE],
+  ['ALLOW', 'SHIPPED FILE: an admin still approves, in one batch, ID received', update(
+    WHO.admin,
+    storedWithId({ status: 'interview' }),
+    storedWithId({ status: 'approved', updatedAt: NOW, decidedAt: NOW, decidedBy: ADMIN }),
+    mockAfter(),
+  ), SHIPPED_FILE],
 
   // ── the third lock: the contract (portion 4a) ────────────────────────────
   ['DENY', 'contract lock: with acceptedContracts() EMPTY, a complete create is refused', {
@@ -386,6 +546,149 @@ const cases = [
   ['DENY', 'create: an application WITHOUT private/home in the same batch', {
     request: request(WHO.ana, 'create', APP_PATH, created()),
     functionMocks: mockCreate('available', { homeAfter: false }),
+  }],
+  ['DENY', 'create: an application WITHOUT private/identity in the same batch', {
+    request: request(WHO.ana, 'create', APP_PATH, created()),
+    functionMocks: mockCreate('available', { identityAfter: false }),
+  }],
+  ['DENY', 'create: the C.I. inside answers instead of private/identity', {
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, ciNumber: '1234567' } })),
+    functionMocks: mockCreate('available'),
+  }],
+  ['DENY', "create: a reference's phone inside answers", {
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, personalRefPhone: '70000001' } })),
+    functionMocks: mockCreate('available'),
+  }],
+  ['DENY', 'create: an answer under a REMOVED draft key (whyThisAnimal)', {
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, whyThisAnimal: 'Porque sí.' } })),
+    functionMocks: mockCreate('available'),
+  }],
+  ['DENY', 'create: an answer under a REMOVED draft key (adults)', {
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, adults: 2 } })),
+    functionMocks: mockCreate('available'),
+  }],
+
+  // ── private/identity: create (portion 4c-1) ─────────────────────────────
+  ['ALLOW', 'identity: created in the same batch, all twelve answers', identityCreate(WHO.ana, identity())],
+  ['ALLOW', 'identity: only the two required answers (no optional ones)', identityCreate(
+    WHO.ana, identity({ ciNumber: '1234567', age: 30 }),
+  )],
+  ['ALLOW', 'identity: a C.I. of exactly 4 characters', identityCreate(WHO.ana, identity(identityAnswers({ ciNumber: '1234' })))],
+  ['ALLOW', 'identity: a C.I. of exactly 20 characters', identityCreate(
+    WHO.ana, identity(identityAnswers({ ciNumber: '1'.repeat(20) })),
+  )],
+  ['ALLOW', 'identity: age exactly 18', identityCreate(WHO.ana, identity(identityAnswers({ age: 18 })))],
+  ['ALLOW', 'identity: age exactly 99', identityCreate(WHO.ana, identity(identityAnswers({ age: 99 })))],
+  ['ALLOW', 'identity: an answer of exactly 120 characters', identityCreate(
+    WHO.ana, identity(identityAnswers({ familyRefName: 'n'.repeat(120) })),
+  )],
+  ['ALLOW', 'identity: an empty optional answer (the rules allow it; the form never sends one)', identityCreate(
+    WHO.ana, identity(identityAnswers({ landline: '' })),
+  )],
+  ['DENY', 'identity: attached to an application that ALREADY exists', identityCreate(
+    WHO.ana, identity(), mockHomeCreate({ parentBefore: true }),
+  )],
+  ['DENY', 'identity: without the application in the same batch', identityCreate(
+    WHO.ana, identity(), mockHomeCreate({ parentAfter: false }),
+  )],
+  ['DENY', "identity: under ANOTHER user's application id", identityCreate(WHO.beto, identity(IDENTITY_ANSWERS, { applicantUid: BETO }))],
+  ['DENY', 'identity: own id, but applicantUid names someone else', identityCreate(
+    WHO.ana, identity(IDENTITY_ANSWERS, { applicantUid: BETO }),
+  )],
+  ['DENY', 'identity: anonymous', identityCreate(null, identity())],
+  ['DENY', 'identity: a third private document (private/extra)', identityCreate(
+    WHO.ana, identity(), mockHomeCreate(), `${APP_PATH}/private/extra`,
+  )],
+  ['DENY', 'identity: an extra top-level key', identityCreate(WHO.ana, identity(IDENTITY_ANSWERS, { note: 'x' }))],
+  ['DENY', 'identity: createdAt missing', identityCreate(WHO.ana, identityWithout('createdAt'))],
+  ['DENY', 'identity: answers missing', identityCreate(WHO.ana, identityWithout('answers'))],
+  ['DENY', 'identity: backdated createdAt', identityCreate(WHO.ana, identity(IDENTITY_ANSWERS, { createdAt: EARLIER }))],
+  ['DENY', 'identity: answers is not a map', identityCreate(WHO.ana, identity('1234567, 30'))],
+  ['DENY', 'identity: an extra answer key (an application key, fullName)', identityCreate(
+    WHO.ana, identity(identityAnswers({ fullName: 'Ana Pérez' })),
+  )],
+  ['DENY', 'identity: an extra answer key (a removed draft key, whyThisAnimal)', identityCreate(
+    WHO.ana, identity(identityAnswers({ whyThisAnimal: 'Porque sí.' })),
+  )],
+  ['DENY', 'identity: ciNumber missing', identityCreate(WHO.ana, identity(identityAnswers({ ciNumber: undefined })))],
+  ['DENY', 'identity: age missing', identityCreate(WHO.ana, identity(identityAnswers({ age: undefined })))],
+  ['DENY', 'identity: a C.I. of 3 characters', identityCreate(WHO.ana, identity(identityAnswers({ ciNumber: '123' })))],
+  ['DENY', 'identity: a C.I. of 21 characters', identityCreate(
+    WHO.ana, identity(identityAnswers({ ciNumber: '1'.repeat(21) })),
+  )],
+  ['DENY', 'identity: a C.I. sent as a number', identityCreate(WHO.ana, identity(identityAnswers({ ciNumber: 1234567 })))],
+  ['DENY', 'identity: age 17 (under age)', identityCreate(WHO.ana, identity(identityAnswers({ age: 17 })))],
+  ['DENY', 'identity: age 100', identityCreate(WHO.ana, identity(identityAnswers({ age: 100 })))],
+  ['DENY', 'identity: age sent as the string "18"', identityCreate(WHO.ana, identity(identityAnswers({ age: '18' })))],
+  ['DENY', 'identity: age 18.5', identityCreate(WHO.ana, identity(identityAnswers({ age: 18.5 })))],
+  ['DENY', 'identity: an answer of 121 characters', identityCreate(
+    WHO.ana, identity(identityAnswers({ familyRefName: 'n'.repeat(121) })),
+  )],
+  ['DENY', 'identity: a number under a string key (personalRefPhone)', identityCreate(
+    WHO.ana, identity(identityAnswers({ personalRefPhone: 70000001 })),
+  )],
+  ['DENY', 'identity: a nested map under a string key (landlordName)', identityCreate(
+    WHO.ana, identity(identityAnswers({ landlordName: { first: 'Pedro' } })),
+  )],
+  // ── nobody creates on someone's behalf, admins included (review 4c-1 #2) ─
+  // An appended `|| isAdmin()` on either create rule would allow these; the
+  // reviewer's mutants M1 and M2 survived the suite until they were added.
+  ['DENY', 'admin: creates private/identity WITHOUT the application in the batch', identityCreate(
+    WHO.admin, identity(), mockHomeCreate({ parentAfter: false }),
+  )],
+  ['DENY', 'admin: creates private/identity on an application that ALREADY exists', identityCreate(
+    WHO.admin, identity(), mockHomeCreate({ parentBefore: true }),
+  )],
+  ['DENY', 'admin: creates private/home', homeCreate(WHO.admin, home())],
+  ['DENY', 'admin: creates an application', {
+    request: request(WHO.admin, 'create', APP_PATH, created()),
+    functionMocks: mockCreate('available'),
+  }],
+  ['DENY', 'switch off: an admin cannot create an application either', {
+    request: request(WHO.admin, 'create', APP_PATH, created()),
+    functionMocks: mockCreate('available'),
+  }, OFF],
+  ['DENY', 'switch off: an admin cannot create private/identity either', identityCreate(WHO.admin, identity()), OFF],
+  ['DENY', 'identity: a home-shaped document written as private/identity', identityCreate(WHO.ana, home())],
+  ['DENY', 'home: an identity-shaped document written as private/home', homeCreate(WHO.ana, identity())],
+
+  // ── private/identity: read — ADMINS ONLY (D2) ────────────────────────────
+  ['DENY', 'identity: the APPLICANT reads their own personal details', {
+    request: request(WHO.ana, 'get', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }],
+  ['DENY', 'identity: ANOTHER USER reads it', {
+    request: request(WHO.beto, 'get', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }],
+  ['DENY', 'identity: anonymous reads it', {
+    request: request(null, 'get', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }],
+  ['ALLOW', 'identity: an admin reads it', {
+    request: request(WHO.admin, 'get', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }],
+
+  // ── private/identity: never updated (D15), never deleted from a browser ──
+  ['DENY', 'identity: the applicant edits their own C.I.', identityUpdate(
+    WHO.ana, storedIdentity(), storedIdentity({ answers: identityAnswers({ ciNumber: '7654321' }) }),
+  )],
+  ['DENY', 'identity: an ADMIN edits the C.I.', identityUpdate(
+    WHO.admin, storedIdentity(), storedIdentity({ answers: identityAnswers({ ciNumber: '7654321' }) }),
+  )],
+  ['DENY', 'identity: an admin edits it, attributed like a home correction', identityUpdate(
+    WHO.admin,
+    storedIdentity(),
+    storedIdentity({ answers: identityAnswers({ ciNumber: '7654321' }), correctedAt: NOW, correctedBy: ADMIN }),
+  )],
+  ['DENY', 'identity: the applicant deletes it', {
+    request: request(WHO.ana, 'delete', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
+  }],
+  ['DENY', 'identity: an admin deletes it from a browser', {
+    request: request(WHO.admin, 'delete', IDENTITY_PATH),
+    resource: { data: storedIdentity() },
   }],
 
   // ── private/home: create ─────────────────────────────────────────────────
@@ -645,34 +948,42 @@ const cases = [
     request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, zone: 'Sarco' } })),
     functionMocks: mockCreate('available'),
   }],
+  // The rules cannot see a question's kind, so these bound ANY answer key:
+  // a string of at most 1500, a whole number 0..99, or a boolean.
   ['ALLOW', 'create: an answer exactly at the 1500-character bound', {
-    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, previousPets: 'a'.repeat(1500) } })),
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, fullName: 'a'.repeat(1500) } })),
     functionMocks: mockCreate('available'),
   }],
   ['DENY', 'create: an answer over the 1500-character bound', {
-    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, previousPets: 'a'.repeat(1501) } })),
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, fullName: 'a'.repeat(1501) } })),
     functionMocks: mockCreate('available'),
   }],
   ['DENY', 'create: a nested map as an answer', {
-    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, otherPets: { street: 'x' } } })),
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, movingSoon: { street: 'x' } } })),
     functionMocks: mockCreate('available'),
   }],
   ['DENY', 'create: an explicit null answer', {
-    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, otherPets: null } })),
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, movingSoon: null } })),
     functionMocks: mockCreate('available'),
   }],
-  ['DENY', 'create: a count above 99', {
-    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, children: 100 } })),
+  ['DENY', 'create: a number above 99', {
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, movingSoon: 100 } })),
     functionMocks: mockCreate('available'),
   }],
-  ['DENY', 'create: a negative count', {
-    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, children: -1 } })),
+  ['DENY', 'create: a negative number', {
+    request: request(WHO.ana, 'create', APP_PATH, created({ answers: { ...ANSWERS, movingSoon: -1 } })),
+    functionMocks: mockCreate('available'),
+  }],
+  ['ALLOW', 'create: the optional "amurallado" left out (an apartment is never asked it)', {
+    request: request(WHO.ana, 'create', APP_PATH, created({
+      answers: { fullName: 'Ana Pérez', whatsapp: '+591 7000 0000', housingType: 'apartment', housingTenure: 'owned', movingSoon: true },
+    })),
     functionMocks: mockCreate('available'),
   }],
   ['DENY', 'duplicate: a second submission over an existing application is an UPDATE and is refused', update(
     WHO.ana,
     stored({ status: 'reviewing' }),
-    created({ answers: { ...ANSWERS, whyThisAnimal: 'otra vez' } }),
+    created({ answers: { ...ANSWERS, fullName: 'otra vez' } }),
   )],
 
   // ── read ──────────────────────────────────────────────────────────────────
@@ -773,7 +1084,7 @@ const cases = [
     WHO.ana, stored(), stored({ status: 'withdrawn', withdrawnAt: NOW, updatedAt: NOW, decidedBy: ANA }),
   )],
   ['DENY', 'withdraw: applicant rewrites answers while withdrawing', update(
-    WHO.ana, stored(), stored({ status: 'withdrawn', withdrawnAt: NOW, updatedAt: NOW, answers: { ...ANSWERS, whyThisAnimal: 'otra' } }),
+    WHO.ana, stored(), stored({ status: 'withdrawn', withdrawnAt: NOW, updatedAt: NOW, answers: { ...ANSWERS, fullName: 'otra' } }),
   )],
   ['DENY', 'withdraw: ANOTHER USER withdraws my application', update(
     WHO.beto, stored(), stored({ status: 'withdrawn', withdrawnAt: NOW, updatedAt: NOW }),
@@ -823,7 +1134,7 @@ const cases = [
     WHO.admin, stored({ status: 'withdrawn', withdrawnAt: EARLIER }), stored({ status: 'reviewing', updatedAt: NOW, withdrawnAt: null }),
   )],
   ['DENY', 'admin: rewrites the applicant\'s answers', update(
-    WHO.admin, stored({ status: 'reviewing' }), stored({ status: 'interview', updatedAt: NOW, answers: { ...ANSWERS, children: 0 } }),
+    WHO.admin, stored({ status: 'reviewing' }), stored({ status: 'interview', updatedAt: NOW, answers: { ...ANSWERS, fullName: 'Otra persona' } }),
   )],
   ['DENY', 'admin: a same-status write', update(
     WHO.admin, stored({ status: 'reviewing' }), stored({ status: 'reviewing', updatedAt: NOW }),
@@ -982,19 +1293,38 @@ if (selected.length === 0) {
   process.exit(2);
 }
 
-// Lint: a create on /adoptionApplications/{id} must mock the home document of
-// THAT id, or the case is denied by a missing mock and not by its own rule.
+// Lint: a create on /adoptionApplications/{id} must mock BOTH private documents
+// of THAT id, or the case is denied by a missing mock and not by its own rule.
+// A create on /adoptionApplications/{id}/private/{doc} must mock the parent
+// before and after the batch, for the same reason.
 for (const [, name, body] of cases) {
-  const m = /^\/adoptionApplications\/([^/]+)$/.exec(body.request?.path?.replace(DB, '') ?? '');
-  if (!m || body.request.method !== 'create') continue;
-  const want = `${DB}/adoptionApplications/${m[1]}/private/home`;
-  const ok = (body.functionMocks ?? []).some(
-    (f) => f.function === 'existsAfter' && f.args?.[0]?.exactValue === want,
-  );
-  if (!ok) {
-    console.error(`case "${name}" writes ${m[1]} but mocks no existsAfter for its own private/home`);
-    process.exit(2);
+  const path = body.request?.path?.replace(DB, '') ?? '';
+  if (body.request?.method !== 'create') continue;
+  const mocked = (fn, exactValue) =>
+    (body.functionMocks ?? []).some((f) => f.function === fn && f.args?.[0]?.exactValue === exactValue);
+  const parent = /^\/adoptionApplications\/([^/]+)$/.exec(path);
+  if (parent) {
+    for (const doc of ['home', 'identity']) {
+      if (!mocked('existsAfter', `${DB}/adoptionApplications/${parent[1]}/private/${doc}`)) {
+        console.error(`case "${name}" writes ${parent[1]} but mocks no existsAfter for its own private/${doc}`);
+        process.exit(2);
+      }
+    }
   }
+  const child = /^\/adoptionApplications\/([^/]+)\/private\/[^/]+$/.exec(path);
+  if (child) {
+    const want = `${DB}/adoptionApplications/${child[1]}`;
+    if (!mocked('exists', want) || !mocked('existsAfter', want)) {
+      console.error(`case "${name}" writes under ${child[1]}/private but mocks no exists/existsAfter for that parent`);
+      process.exit(2);
+    }
+  }
+}
+
+// The SHIPPED_FILE cases prove "inert while off" only if the file IS off.
+if (!SHIPPED_SWITCH_OFF && selected.some(([, , , options]) => options?.switch === 'shipped')) {
+  console.error(`${rulesPath} ships with applicationsEnabled() not returning false — the SHIPPED FILE cases would prove nothing`);
+  process.exit(2);
 }
 
 const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
@@ -1035,10 +1365,12 @@ const CONTRACT_MAPS = {
   empty: '{}',
 };
 
+// `shipped` leaves that function exactly as the file has it.
 const variantKey = (options) => `${options?.switch ?? 'on'}/${options?.contracts ?? 'test'}`;
 const variantSource = (key) => {
   const [sw, contracts] = key.split('/');
-  return withContracts(withSwitch(source, sw === 'on'), CONTRACT_MAPS[contracts]);
+  const switched = sw === 'shipped' ? source : withSwitch(source, sw === 'on');
+  return contracts === 'shipped' ? switched : withContracts(switched, CONTRACT_MAPS[contracts]);
 };
 
 const work = [];

@@ -21,6 +21,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { payloadLoggingProblems, stripComments } from './no-payload-logging';
+
 function source(...segments: string[]): string {
   return readFileSync(join(process.cwd(), 'src', ...segments), 'utf8');
 }
@@ -99,29 +101,55 @@ test('re-admission revokes ownership in the SAME batch, through the tested decis
   );
 });
 
-test('no new application code logs an answer or a draft', () => {
-  // A private person's household. Errors are logged by Firestore code only.
+test('no application code logs anything but an error code (an ALLOWLIST)', () => {
+  // A private person's household, C.I. and address, and two strangers' phones.
+  // Review 4c-1 #3: this used to be a DENYLIST of words after the message
+  // string ("answers", "draft"…), so logging `identity`, `submission` or `home`
+  // passed. Now only an error code or name may follow the message — see
+  // no-payload-logging.ts — and `code` may only ever hold one.
   const files = [
-    source('lib', 'applications-client.ts'),
-    source('lib', 'applications-admin.ts'),
-    source('app', 'adopt', '[slug]', 'apply', 'ApplicationForm.tsx'),
-    source('app', 'account', 'MyApplications.tsx'),
-    source('app', 'admin', 'applications', 'ApplicationsQueue.tsx'),
-    source('app', 'admin', 'applications', '[applicationId]', 'ApplicationReview.tsx'),
+    ['lib', 'applications.ts'],
+    ['lib', 'applications-client.ts'],
+    ['lib', 'applications-admin.ts'],
+    ['app', 'adopt', '[slug]', 'apply', 'ApplicationForm.tsx'],
+    ['app', 'adopt', '[slug]', 'apply', 'ApplicationFields.tsx'],
+    ['app', 'account', 'MyApplications.tsx'],
+    ['app', 'admin', 'applications', 'ApplicationsQueue.tsx'],
+    ['app', 'admin', 'applications', '[applicationId]', 'ApplicationReview.tsx'],
   ];
-  for (const file of files) {
-    // Calls only. `includes('console.')` also matched the prose "the admin
-    // console." in a header comment — a probe error, found on its first run.
-    for (const line of file.split('\n').filter((l) => /console\.(error|warn|log|info|debug)\(/.test(l))) {
-      // Only the ARGUMENTS after the message string are payload. The message
-      // itself may say "could not save notes"; the first version of this test
-      // failed on exactly that, which is a false positive, not a leak.
-      const messageEnd = line.indexOf("',");
-      assert.ok(messageEnd > 0, `a console call without a leading message string: ${line.trim()}`);
-      const logged = line.slice(messageEnd + 2);
-      assert.ok(!/answers|draft|notes|validation|payload|data\b/.test(logged), `logs a payload: ${line.trim()}`);
-      // A raw error object is not logged either — only its Firestore code.
-      assert.ok(!/^\s*caught\s*\)/.test(logged), `logs a raw error: ${line.trim()}`);
-    }
+  let calls = 0;
+  for (const segments of files) {
+    const text = source(...segments);
+    calls += (stripComments(text).match(/console\.\w+\s*\(/g) ?? []).length;
+    assert.deepEqual(payloadLoggingProblems(segments.join('/'), text), []);
+  }
+  // Control: the walk really sees the calls these files make.
+  assert.ok(calls >= 10, `only ${calls} console calls found — the scan is not reading the files`);
+});
+
+test('the logging allowlist refuses a payload and accepts an error code (control)', () => {
+  // So the test above cannot pass by checking nothing.
+  for (const bad of [
+    "console.error('[x] failed', identity);",
+    "console.error('[x] failed', submission.identity);",
+    "console.error('[x] failed', home);",
+    "console.warn('[x] failed', code, identity);",
+    "console.error('[x] failed', caught);",
+    'console.error(identity);',
+    "const code = identity.ciNumber;\nconsole.error('[x] failed', code);",
+    "const code: string = identity.ciNumber;\nconsole.error('[x] failed', code);",
+    "let code = errorCode(caught);\ncode = home.addressText;\nconsole.error('[x] failed', code);",
+  ]) {
+    assert.ok(payloadLoggingProblems('fixture', bad).length > 0, `not refused: ${bad}`);
+  }
+  for (const ok of [
+    "console.error('[x] failed', code);",
+    "console.error('[x] failed', errorCode(caught));",
+    "console.error('[x] failed', (caught as { code?: string })?.code);",
+    "console.error('[x] failed');",
+    "const code = errorCode(caught);\nconsole.error('[x] failed', code);",
+    "// console.error('[x] failed', identity); — a comment, not a call",
+  ]) {
+    assert.deepEqual(payloadLoggingProblems('fixture', ok), [], ok);
   }
 });

@@ -26,6 +26,7 @@ import { useAuth } from '@/components/AuthProvider';
 import type { ApplicationQuestion } from '@/config/shelter';
 import {
   emptyAnswerDraft,
+  splitAnswersByStore,
   validateAnswers,
   type AnswerDraft,
   type AnswerDraftValue,
@@ -108,7 +109,11 @@ export function ApplicationForm({ petId, petName, slug, shelterName, questions }
     setBusy(true);
     try {
       const { submitApplication } = await import('@/lib/applications-client');
-      await submitApplication(petId, user, validation.answers);
+      // The C.I., the references and the landlord go to private/identity, never
+      // into `answers`. This single-page form collects no address, so the
+      // client refuses before sending anything — the 4c-2 stepper replaces it.
+      const split = splitAnswersByStore(questions, validation.answers);
+      await submitApplication(petId, user, { answers: split.application, identity: split.identity });
       setPhase({ kind: 'sent' });
       window.scrollTo({ top: 0 });
     } catch (caught) {

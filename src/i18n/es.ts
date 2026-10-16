@@ -40,7 +40,6 @@ import type {
   ApprovalBlocker,
   ApprovalWarning,
 } from '@/lib/applications';
-import type { ApplicationSection } from '@/config/shelter';
 import type { ApplicationCopy, EventsCopy } from './messages';
 import { EVENT_LIMITS, type EventError, type EventWarning } from '@/lib/events';
 import { WALL_YEAR_MAX, WALL_YEAR_MIN } from '@/lib/zoned-time';
@@ -227,20 +226,16 @@ const APPLICANT_STATUS_EXPLANATION: Record<ApplicationStatus, string> = {
   withdrawn: 'Esta solicitud se retiró.',
 };
 
-const APPLICATION_SECTION: Record<ApplicationSection, string> = {
-  contact: 'Contacto',
-  housing: 'Vivienda',
-  household: 'Quiénes viven en la casa',
-  otherPets: 'Otros animales',
-  experience: 'Experiencia',
-  why: 'Por qué este animalito',
-};
+// The section headings are the paper form's own words since portion 4c-1, so
+// they live in SHELTER.adoptionApplications.sections, not here.
 
 const APPLICATION_ANSWER_ERROR: Record<ApplicationAnswerError, string> = {
   required: 'Esta pregunta es obligatoria.',
   'too-long': 'La respuesta es muy larga. Resúmela un poco.',
   'phone-invalid': 'Escribe un número de teléfono, con o sin el +591.',
+  'id-number-invalid': 'Escribe tu número de carnet tal como aparece, con su complemento si tiene.',
   'count-invalid': 'Escribe un número entero, sin decimales.',
+  'under-age': 'Para adoptar tienes que ser mayor de edad. Si tienes dudas, escríbenos por WhatsApp.',
   'choice-invalid': 'Elige una de las opciones.',
 };
 
@@ -346,7 +341,8 @@ const APPLICATION_COPY: ApplicationCopy = {
   notAnswered: 'Sin responder',
   retiredQuestion: (id) => `Pregunta que ya no está en el formulario (${id})`,
   notesTitle: 'Notas internas',
-  notesHint: 'Solo las ve el equipo del refugio. Quien postuló nunca las ve.',
+  notesHint:
+    'Solo las ve el equipo del refugio; quien postuló nunca las ve. Las notas se guardan con la solicitud: si un dato personal está mal, anota solo que hay que corregirlo. Nunca escribas aquí un número de carnet ni el teléfono de nadie.',
   saveNotes: 'Guardar notas',
   notesSaved: 'Notas guardadas.',
   notesFailed: 'No pudimos guardar las notas. Revisa tu conexión e intenta de nuevo.',
@@ -380,7 +376,7 @@ const APPLICATION_COPY: ApplicationCopy = {
 
   badgeIdMissing: 'Sin carnet',
   badgeIdErased: 'Datos borrados',
-  identityTitle: 'Carnet y dirección',
+  identityTitle: 'Carnet, dirección y datos personales',
   idDocumentSideLabel: (side) => (side === 'front' ? 'Carnet, frente' : 'Carnet, reverso'),
   idDocumentShow: 'Ver carnet',
   idDocumentHide: 'Ocultar carnet',
@@ -398,16 +394,23 @@ const APPLICATION_COPY: ApplicationCopy = {
     'Storage rechazó la lectura por permisos. Si te acaban de dar acceso, cierra sesión y vuelve a entrar.',
   idDocumentAlt: 'Foto del carnet de identidad de quien postula',
   identityErased: (date) =>
-    `La foto del carnet y la dirección se borraron el ${date}, según la política de privacidad del refugio.`,
+    `La foto del carnet, la dirección y los datos personales se borraron el ${date}, según la política de privacidad del refugio.`,
   identityErasedUndated:
-    'La foto del carnet y la dirección se borraron, según la política de privacidad del refugio.',
+    'La foto del carnet, la dirección y los datos personales se borraron, según la política de privacidad del refugio.',
   homeTitle: 'Dirección',
   homeMissing: 'Sin dirección.',
-  homeReference: (reference) => `Referencia: ${reference}`,
+  homeReference: (reference) => `Número de casa y detalles: ${reference}`,
   homePin: (latitude, longitude) => `Punto en el mapa: ${latitude}, ${longitude}`,
   homeNoPin: 'Sin punto en el mapa.',
   homeCorrectedOn: (date) => `Corregida por el equipo el ${date}.`,
   homeLoadFailed: 'No pudimos cargar la dirección. Recarga la página para intentar de nuevo.',
+
+  identityAnswersLoading: 'Cargando los datos personales y las referencias…',
+  identityAnswersMissing: 'Sin datos personales.',
+  identityAnswersLoadFailed:
+    'No pudimos cargar los datos personales y las referencias. Recarga la página para intentar de nuevo.',
+  identityAnswersErased:
+    'Los datos personales y las referencias se borraron, según la política de privacidad del refugio.',
 };
 
 import type { FoodCategory, FoodHazard } from '@/lib/types';
@@ -1918,8 +1921,6 @@ export const es: Messages = {
         return 'Marcar como nueva';
     }
   },
-
-  applicationSectionLabel: (section) => APPLICATION_SECTION[section],
 
   applicationAnswerError: (error) => APPLICATION_ANSWER_ERROR[error],
 

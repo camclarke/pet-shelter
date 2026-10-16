@@ -48,6 +48,7 @@ import type { User } from 'firebase/auth';
 
 import { getFirebase } from './firebase-client';
 import {
+  INTERNAL_NOTES_DOCUMENT,
   adminStatusPatch,
   approvalCheck,
   buildApprovalWrites,
@@ -222,8 +223,49 @@ export async function getApplicationHome(applicationId: string): Promise<Applica
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Internal notes — a separate, admin-only document
+// Personal details and references — `private/identity`, admins only
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `private/identity` as the review screen shows it: the C.I., age, civil
+ * status, landline, the two references and a renter's landlord. Its own read,
+ * like `getApplicationHome` — never part of `listApplications`, so the queue
+ * never downloads a C.I. or a stranger's phone number.
+ *
+ * ⚠️ Private people's data, some of it about people who never applied. Never
+ * logged — errors are re-thrown and the page logs the Firestore code only.
+ */
+export interface ApplicationIdentityView {
+  /** Only string and number values survive the read; anything else is dropped. */
+  answers: Record<string, string | number>;
+  createdAt: number | null;
+}
+
+export async function getApplicationIdentity(applicationId: string): Promise<ApplicationIdentityView | null> {
+  const { db } = getFirebase();
+  const snap = await getDoc(doc(db, 'adoptionApplications', applicationId, 'private', 'identity'));
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  const answers: Record<string, string | number> = {};
+  const stored = data.answers;
+  if (stored !== null && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
+      if (typeof value === 'string' || typeof value === 'number') answers[key] = value;
+    }
+  }
+  return { answers, createdAt: millis(data.createdAt) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal notes — a separate, admin-only document
+//
+// ⚠️ KEPT with the application, not erased with the personal details: a note
+// records that something needs correcting, never a C.I. number or anyone's
+// phone (D15). The path is INTERNAL_NOTES_DOCUMENT, the same constant the
+// retention sweep blanks.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NOTES_PATH = [INTERNAL_NOTES_DOCUMENT.subcollection, INTERNAL_NOTES_DOCUMENT.id] as const;
 
 export interface InternalNotesView {
   text: string;
@@ -233,7 +275,7 @@ export interface InternalNotesView {
 
 export async function getInternalNotes(applicationId: string): Promise<InternalNotesView | null> {
   const { db } = getFirebase();
-  const snap = await getDoc(doc(db, 'adoptionApplications', applicationId, 'internal', 'notes'));
+  const snap = await getDoc(doc(db, 'adoptionApplications', applicationId, ...NOTES_PATH));
   if (!snap.exists()) return null;
   const data = snap.data();
   return {
@@ -246,7 +288,7 @@ export async function getInternalNotes(applicationId: string): Promise<InternalN
 /** Replace the notes. The rules allow exactly these three keys. */
 export async function saveInternalNotes(applicationId: string, text: string, user: User): Promise<void> {
   const { db } = getFirebase();
-  await setDoc(doc(db, 'adoptionApplications', applicationId, 'internal', 'notes'), {
+  await setDoc(doc(db, 'adoptionApplications', applicationId, ...NOTES_PATH), {
     text: text.slice(0, 5000),
     updatedAt: serverTimestamp(),
     updatedBy: user.uid,

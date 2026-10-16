@@ -43,7 +43,8 @@
  * Three auth accounts (ana, beto, admin — the admin claim on the last), a pet
  * "Appprobe 4a" with status `shelter` and its identity and custody, an
  * `adoptions/{petId}`, and two applications (ana's and beto's), each with its
- * `private/home` and ana's with `internal/notes`. Every id and email carries
+ * `private/home` and `private/identity` (portion 4c-1), and ana's with
+ * `internal/notes`. Every id and email carries
  * `appprobe-4a-<run>`. Nothing is written to Storage. Everything is deleted in a
  * `finally`, subcollections included (Firestore does not cascade), and READ
  * BACK to zero.
@@ -72,6 +73,7 @@ import {
   buildApplicationCreate,
   buildApprovalWrites,
   buildHomeCreate,
+  buildIdentityCreate,
   isServerTime,
   validateHome,
   withdrawalPatch,
@@ -110,13 +112,17 @@ const PEOPLE = {
   admin: `${RUN_ID}-admin@example.com`,
 };
 
-// The deployed acceptedContracts() is empty, so no pair can be accepted. This
-// one only gives the builder the SHAPE of a contract; it is not a contract.
+// Not a contract: this pair is in no acceptedContracts(), so it only gives the
+// builder the SHAPE of one. Since portion 4c-1 the rules list the real pair;
+// a 4f run that should see a create ALLOWED must switch to ADOPTION_CONTRACT.
 const PROBE_CONTRACT = {
   version: '2000-01-01',
   sha256: createHash('sha256').update('probe-application-rules, not a contract').digest('hex'),
 };
 const PROBE_HOME = { addressText: 'Calle Appprobe 1, zona Probe', reference: '', pin: { latitude: -17.3935, longitude: -66.1571 } };
+// The paper form's keys (portion 4c-1), split by store as the browser splits them.
+const PROBE_ANSWERS = { fullName: 'Appprobe', whatsapp: '70000000', housingType: 'house', housingTenure: 'owned', movingSoon: false, walled: true };
+const PROBE_IDENTITY = { ciNumber: '1234567 LP', age: 30, personalRefName: 'Appprobe Ref', personalRefPhone: '70000001' };
 
 console.log(`run: ${RUN_ID}  project: ${project}  sections: ${[...SECTIONS].join(', ')}`);
 if (!RUN) {
@@ -125,8 +131,8 @@ if (!RUN) {
   console.log(`  pets/${PET_ID}  status shelter (never on the wall), + identity, custody`);
   console.log(`  adoptions/${PET_ID}`);
   if (SECTIONS.has('applications')) {
-    console.log(`  adoptionApplications/${PET_ID}__<ana uid>  + private/home + internal/notes`);
-    console.log(`  adoptionApplications/${PET_ID}__<beto uid> + private/home`);
+    console.log(`  adoptionApplications/${PET_ID}__<ana uid>  + private/home + private/identity + internal/notes`);
+    console.log(`  adoptionApplications/${PET_ID}__<beto uid> + private/home + private/identity`);
   }
   console.log('\nNothing in Storage. Add --run to execute. Everything is deleted and read back afterwards.');
   process.exit(0);
@@ -353,24 +359,29 @@ try {
     const betoApp = applicationIdFor(PET_ID, uids.beto);
     const appPath = (id) => `adoptionApplications/${id}`;
     const homePath = (id) => `adoptionApplications/${id}/private/home`;
+    const identityPath = (id) => `adoptionApplications/${id}/private/identity`;
     const validHome = validateHome(PROBE_HOME).home;
     if (!validHome) throw new Error('the probe home does not validate');
 
-    /** The submit batch the browser sends: the application and its home, together. */
+    /** The submit batch the browser sends: the application, its home and its identity, together. */
     const submitBatch = (who) => {
       const app = buildApplicationCreate({
         petId: PET_ID,
         applicantUid: uids[who],
         applicantEmail: PEOPLE[who],
         applicantEmailVerified: true,
-        answers: { fullName: 'Appprobe', whatsapp: '70000000', adults: 1, everyoneAgrees: true },
+        answers: PROBE_ANSWERS,
         contract: PROBE_CONTRACT,
+        // What the box records: ticked, under the version shown.
+        acceptance: { accepted: true, contractVersion: PROBE_CONTRACT.version },
       });
       const home = buildHomeCreate({ applicantUid: uids[who], home: validHome });
+      const identity = buildIdentityCreate({ applicantUid: uids[who], identity: PROBE_IDENTITY });
       const id = applicationIdFor(PET_ID, uids[who]);
       return [
         restWrite(appPath(id), app),
         restWrite(homePath(id), { ...home, geo: home.geo ? new Geo(home.geo.latitude, home.geo.longitude) : null }),
+        restWrite(identityPath(id), identity),
       ];
     };
 
@@ -389,7 +400,7 @@ try {
         applicantUid: uids[who],
         applicantEmail: PEOPLE[who],
         applicantEmailVerified: true,
-        answers: { fullName: 'Appprobe' },
+        answers: PROBE_ANSWERS,
         status: 'submitted',
         submittedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -408,6 +419,11 @@ try {
         reference: validHome.reference,
         geo: new GeoPoint(validHome.geo.latitude, validHome.geo.longitude),
         precision: 'exact',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      await adminDb.doc(identityPath(id)).set({
+        applicantUid: uids[who],
+        answers: PROBE_IDENTITY,
         createdAt: FieldValue.serverTimestamp(),
       });
     }

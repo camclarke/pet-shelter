@@ -372,7 +372,8 @@ service cloud.firestore {
     //     status `submitted`, their token's email, answers inside the bounds
     //     below, every decision field null, a contract version and hash listed
     //     in acceptedContracts(), no ID photo marked as received, and — in the
-    //     SAME batch — its `private/home` address document;
+    //     SAME batch — its `private/home` address document AND its
+    //     `private/identity` personal-details document;
     //   - an applicant GETS any id ending in their own uid — including one that
     //     does not exist yet, which is how the form learns whether they already
     //     applied — and LISTS only with a query constrained to their own uid;
@@ -396,19 +397,20 @@ service cloud.firestore {
     // as `media` above.
     match /adoptionApplications/{applicationId} {
 
-      // The question ids in src/config/shelter.ts, `adoptionApplications`.
-      // THIS is the enforcing copy: an answer under any other key is refused.
-      // Replacing the draft questions means changing this list AND deploying
-      // the rules. A test fails if the two lists drift.
+      // The ids whose `store` is 'application' in src/config/shelter.ts,
+      // `adoptionApplications` — the fields of the shelter's paper form that
+      // may live in `answers`, which nothing may ever erase. THIS is the
+      // enforcing copy: an answer under any other key is refused. Changing a
+      // question id means changing this list AND deploying the rules. A test
+      // fails if the two lists drift.
       //
       // `zone` was removed in portion 4a: the home address now has its own
-      // restricted document (private/home below), so asking for the zone in
-      // an answer would duplicate it into the main document.
+      // restricted document (private/home below). The draft questions were
+      // replaced in portion 4c-1 by the paper form's own fields; its identity
+      // and third-party fields are in identityAnswerKeys() instead.
       function applicationAnswerKeys() {
         return ['fullName', 'whatsapp', 'housingType', 'housingTenure',
-                'landlordAllows', 'outdoorSpace', 'adults', 'children',
-                'everyoneAgrees', 'otherPets', 'previousPets', 'hoursAlone',
-                'whyThisAnimal'];
+                'movingSoon', 'walled'];
       }
 
       // The last five keys arrived in portion 4a. They are FROZEN for every
@@ -426,13 +428,15 @@ service cloud.firestore {
       }
 
       // ADOPTION_CONTRACT in src/config/adoption-contract.ts: version → the
-      // sha256 of the exact text shown. THIS is the enforcing copy. EMPTY until
-      // the shelter supplies its real contract, so every create is refused
-      // until then — a third lock beside applicationsEnabled(). A contract
-      // revision is a config change AND a rules deploy; a test fails if the two
-      // drift.
+      // sha256 of the exact text shown. THIS is the enforcing copy. It was
+      // EMPTY until the shelter supplied its real contract (portion 4c-1); it
+      // holds that one pair now, which changes nothing while
+      // applicationsEnabled() is false. A contract revision is a config change
+      // AND a rules deploy; a test fails if the two drift.
       function acceptedContracts() {
-        return {};
+        return {
+          '2026-10-16': '0874ed097f5fe7ad17ead270413a360ea00009910bec18d3b68bf20656a3dcfa'
+        };
       }
 
       // The marker the ID-photo upload route writes through the Admin SDK. The
@@ -476,15 +480,24 @@ service cloud.firestore {
           && validAnswer(answers.get('whatsapp', true))
           && validAnswer(answers.get('housingType', true))
           && validAnswer(answers.get('housingTenure', true))
-          && validAnswer(answers.get('landlordAllows', true))
-          && validAnswer(answers.get('outdoorSpace', true))
-          && validAnswer(answers.get('adults', true))
-          && validAnswer(answers.get('children', true))
-          && validAnswer(answers.get('everyoneAgrees', true))
-          && validAnswer(answers.get('otherPets', true))
-          && validAnswer(answers.get('previousPets', true))
-          && validAnswer(answers.get('hoursAlone', true))
-          && validAnswer(answers.get('whyThisAnimal', true));
+          && validAnswer(answers.get('movingSoon', true))
+          && validAnswer(answers.get('walled', true));
+      }
+
+      // The ids whose `store` is 'identity' in src/config/shelter.ts — written
+      // ONLY to private/identity, which the retention sweep erases with the
+      // carnet and the address. Never in `answers`, which nothing may erase.
+      // THIS is the enforcing copy; a test fails if it drifts from the config.
+      function identityAnswerKeys() {
+        return ['ciNumber', 'age', 'civilStatus', 'landline',
+                'personalRefName', 'personalRefPhone', 'personalRefRelation',
+                'familyRefName', 'familyRefPhone', 'familyRefRelation',
+                'landlordName', 'landlordPhone'];
+      }
+
+      // Mirrors IDENTITY_ANSWER_MAX_CHARS in src/lib/applications.ts.
+      function validIdentityAnswer(v) {
+        return v is string && v.size() <= 120;
       }
 
       // adoptionApplications.enabled in src/config/shelter.ts. THIS is the
@@ -619,8 +632,10 @@ service cloud.firestore {
         && request.resource.data.idDocument.get('front', null) == null
         && request.resource.data.idDocument.get('back', null) == null
         && request.resource.data.identityErasedAt == null
-        // The home address is required, and is written in the SAME batch.
-        && existsAfter(/databases/$(database)/documents/adoptionApplications/$(applicationId)/private/home);
+        // The home address and the personal details are required, and both
+        // are written in the SAME batch.
+        && existsAfter(/databases/$(database)/documents/adoptionApplications/$(applicationId)/private/home)
+        && existsAfter(/databases/$(database)/documents/adoptionApplications/$(applicationId)/private/identity);
 
       allow update: if applicantWithdraws() || adminMovesApplication();
 
@@ -633,6 +648,13 @@ service cloud.firestore {
       // turned down. Admin-only in both directions, and no collection-group
       // rule reaches it. Split so the payload checks never run on a delete,
       // which is refused outright.
+      //
+      // ⚠️ Kept WITH the application, so it is not erased with the personal
+      // details. Notes record that something happened — "el C.I. no coincide,
+      // hay que corregirlo" — and never hold a C.I. number or anyone's phone.
+      // The retention sweep (portion 4e) BLANKS the text anyway, as a backstop:
+      // INTERNAL_NOTES_DOCUMENT in src/lib/applications.ts names this document
+      // for it.
       match /internal/{docId} {
         allow read: if isAdmin();
         allow create, update: if isAdmin()
@@ -645,15 +667,25 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      // ── private/home — the applicant's home address ──────────────────────
-      // A separate DOCUMENT: the admin queue's list never loads an address, and
-      // the address is erased on its own schedule while the application is kept
-      // (the /privacy retention policy). Created ONLY in the batch that creates
-      // the application: `!exists` reads the parent before the batch,
-      // `existsAfter` after it, and the parent's create requires this document.
-      // Never updated by the applicant; an admin may correct it after a
-      // conversation. Never deleted from a browser — erasure is the Admin SDK's
-      // (the identity sweep, or an admin's erase-on-request route).
+      // ── private/home and private/identity ────────────────────────────────
+      // Two separate DOCUMENTS beside the application: the admin queue's list
+      // never loads either, and both are erased on their own schedule while
+      // the application is kept (the /privacy retention policy).
+      //   - `home`: the applicant's home address, for the home visit.
+      //   - `identity`: the C.I. number, age, civil status and landline, and
+      //     THIRD-PARTY data — two references and a renter's landlord (names
+      //     and phones). Admin-only even for reading (owner decision D2): a
+      //     stolen session must not yield a C.I. and two strangers' numbers.
+      //     Never updated by anyone, admins included (D15): nobody rewrites a
+      //     person's C.I. When something is wrong, internal/notes records THAT
+      //     a correction was needed — never the C.I. number or anyone's phone,
+      //     because notes are kept with the application, not erased with this.
+      // Both are created ONLY in the batch that creates the application:
+      // `!exists` reads the parent before the batch, `existsAfter` after it,
+      // and the parent's create requires both documents. Never deleted from a
+      // browser — erasure is the Admin SDK's (the identity sweep, or an
+      // admin's erase-on-request route), which must take its list of
+      // documents from PRIVATE_DOCUMENT_IDS in src/lib/applications.ts.
       //
       // The pin is rounded to 4 decimals (about 11 m) in the browser
       // (roundPin4 in src/lib/applications.ts) and stored as precision
@@ -671,23 +703,56 @@ service cloud.firestore {
                 || (d.geo is latlng && pinWithinServiceArea(d.geo) && d.precision == 'exact'));
         }
 
+        // CI_MIN_CHARS / CI_MAX_CHARS and IDENTITY_AGE_MIN / IDENTITY_AGE_MAX in
+        // src/lib/applications.ts. The rules check the C.I.'s length only;
+        // the form checks its characters too. An absent optional answer
+        // arrives as the default '' from get(key, ''), which passes.
+        function validIdentity(d) {
+          return d.answers is map
+            && d.answers.keys().hasOnly(identityAnswerKeys())
+            // The two the contract text names: "mayor de edad, con C.I. …".
+            && d.answers.keys().hasAll(['ciNumber', 'age'])
+            && d.answers.ciNumber is string
+            && d.answers.ciNumber.size() >= 4 && d.answers.ciNumber.size() <= 20
+            && d.answers.age is int && d.answers.age >= 18 && d.answers.age <= 99
+            && validIdentityAnswer(d.answers.get('civilStatus', ''))
+            && validIdentityAnswer(d.answers.get('landline', ''))
+            && validIdentityAnswer(d.answers.get('personalRefName', ''))
+            && validIdentityAnswer(d.answers.get('personalRefPhone', ''))
+            && validIdentityAnswer(d.answers.get('personalRefRelation', ''))
+            && validIdentityAnswer(d.answers.get('familyRefName', ''))
+            && validIdentityAnswer(d.answers.get('familyRefPhone', ''))
+            && validIdentityAnswer(d.answers.get('familyRefRelation', ''))
+            && validIdentityAnswer(d.answers.get('landlordName', ''))
+            && validIdentityAnswer(d.answers.get('landlordPhone', ''));
+        }
+
+        // Was: any docId for the applicant. Now home only: private/identity is
+        // admin-only (owner decision D2).
         allow get: if isAdmin()
-          || (ownApplicationId() && resource.data.applicantUid == request.auth.uid);
+          || (docId == 'home' && ownApplicationId()
+              && resource.data.applicantUid == request.auth.uid);
         allow list: if isAdmin();
 
         allow create: if applicationsEnabled()
-          && docId == 'home'
+          && docId in ['home', 'identity']
           && ownApplicationId()
           && !exists(/databases/$(database)/documents/adoptionApplications/$(applicationId))
           && existsAfter(/databases/$(database)/documents/adoptionApplications/$(applicationId))
-          && request.resource.data.keys().hasOnly(['applicantUid', 'addressText', 'reference',
-                                                   'geo', 'precision', 'createdAt'])
-          && request.resource.data.keys().hasAll(['applicantUid', 'addressText', 'reference',
-                                                  'geo', 'precision', 'createdAt'])
           && request.resource.data.applicantUid == request.auth.uid
           && request.resource.data.createdAt == request.time
-          && validHome(request.resource.data);
+          && (docId == 'home'
+                ? (request.resource.data.keys().hasOnly(['applicantUid', 'addressText', 'reference',
+                                                         'geo', 'precision', 'createdAt'])
+                   && request.resource.data.keys().hasAll(['applicantUid', 'addressText', 'reference',
+                                                           'geo', 'precision', 'createdAt'])
+                   && validHome(request.resource.data))
+                : (request.resource.data.keys().hasOnly(['applicantUid', 'answers', 'createdAt'])
+                   && request.resource.data.keys().hasAll(['applicantUid', 'answers', 'createdAt'])
+                   && validIdentity(request.resource.data)));
 
+        // `docId == 'home'`: admin corrections of the ADDRESS only. Identity
+        // is never updated by anyone (D15).
         allow update: if isAdmin()
           && docId == 'home'
           && request.resource.data.diff(resource.data).affectedKeys()

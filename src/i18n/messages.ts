@@ -245,7 +245,6 @@ import type {
   ApprovalBlocker,
   ApprovalWarning,
 } from '@/lib/applications';
-import type { ApplicationSection } from '@/config/shelter';
 
 /**
  * The fixed wording of the online adoption application — plan §6. Plain strings
@@ -379,6 +378,15 @@ export interface ApplicationCopy {
   readonly homeNoPin: string;
   homeCorrectedOn(date: string): string;
   readonly homeLoadFailed: string;
+
+  // ── private/identity, on the review screen (portion 4c-1) ────────────────
+  /** While the admin-only personal-details document is being read. */
+  readonly identityAnswersLoading: string;
+  /** `private/identity` does not exist — never an error, never a payload. */
+  readonly identityAnswersMissing: string;
+  readonly identityAnswersLoadFailed: string;
+  /** Erased under the retention policy, so it is not read at all. */
+  readonly identityAnswersErased: string;
 }
 
 import type { FoodCategory, FoodHazard } from '@/lib/types';
@@ -968,9 +976,6 @@ export interface Messages {
 
   /** The admin button that moves an application from one status to another. */
   applicationActionLabel(from: ApplicationStatus, to: ApplicationStatus): string;
-
-  /** The plan §6 headings the form is grouped under. */
-  applicationSectionLabel(section: ApplicationSection): string;
 
   /** Why one answer cannot be sent. Addressed to the applicant, as an instruction. */
   applicationAnswerError(error: ApplicationAnswerError): string;

@@ -103,52 +103,92 @@ export interface ShelterConfig {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Online adoption application — plan §6, build-order step 14
+// Online adoption application — plan §6, build-order step 14, portion 4c
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The headings plan §6 names, in the order the form shows them. */
-export type ApplicationSection =
-  | 'contact'
-  | 'housing'
-  | 'household'
-  | 'otherPets'
-  | 'experience'
-  | 'why';
+/**
+ * The paper form's own sections, in its order (portion 4c-1). Their LABELS are
+ * shelter content, so they live in `ApplicationConfig.sections`, not in i18n.
+ * The paper's fourth section, DATOS DEL PELUDITO ADOPTADO, is not here: the
+ * shelter fills it in at handover and the applicant is never asked it (D16).
+ */
+export type ApplicationSection = 'personal' | 'references' | 'home';
 
 /**
  * How a question is asked and stored.
  *
  * - `shortText` / `longText` / `phone` store a string
+ * - `idNumber` stores an identity-card number as typed (tidied), never split
+ *   or upper-cased — a Bolivian C.I. can carry a complement and letters
  * - `choice` stores the option's English `value`, never its Spanish label
  * - `yesNo` stores a boolean
- * - `count` stores a whole number from 0 to the question's `max`
+ * - `count` stores a whole number from the question's `min` (default 0) to its `max`
  */
 export type ApplicationQuestionKind =
   | 'shortText'
   | 'longText'
   | 'phone'
+  | 'idNumber'
   | 'choice'
   | 'yesNo'
   | 'count';
 
+/**
+ * Which document an answer is written to.
+ *
+ * - `'application'` → `answers` on the main application document. The
+ *   applicant and admins read it, EVERY admin queue load downloads it, and
+ *   nothing may ever erase it (`allow delete: if false`, `answers` frozen).
+ *   Only what the shelter needs to recognise and call the person, plus the
+ *   housing answers.
+ * - `'identity'` → `private/identity`, an admin-only document created in the
+ *   same batch and erased by the retention sweep with the carnet photo and the
+ *   address. Identity numbers, personal details, and ALL third-party data (the
+ *   references' and the landlord's names and phones), which belong to people
+ *   who never agreed to anything.
+ */
+export type ApplicationAnswerStore = 'application' | 'identity';
+
 export interface ApplicationQuestion {
   /**
    * The key the answer is stored under. English, stable, and MIRRORED in
-   * `firestore.rules` (`applicationAnswerKeys()`), which is the enforcing copy:
-   * the rules refuse any key not on that list. Change both together — a test
-   * fails if they drift.
+   * `firestore.rules` — `applicationAnswerKeys()` for `store: 'application'`,
+   * `identityAnswerKeys()` for `store: 'identity'` — which is the enforcing
+   * copy: the rules refuse any key not on the list. Change both together — a
+   * test fails if they drift.
    */
   id: string;
   section: ApplicationSection;
-  /** Spanish, neutral tuteo. Shelter content, so it lives here rather than in i18n. */
+  /** Required, no default: where an answer lands decides who reads it and whether it can be erased. */
+  store: ApplicationAnswerStore;
+  /**
+   * Spanish. For the paper's own fields, VERBATIM from the shelter's form —
+   * its capitals, its usted and its missing accents ("¿QUE TIPO…") included
+   * (owner decision D6). Shelter content, so it lives here rather than in i18n.
+   */
   label: string;
+  /** Ours, in neutral tuteo, shown under the verbatim label. Never an edit to the shelter's words. */
   hint?: string;
+  /**
+   * A sentence the PAPER prints above this question, verbatim — the landlord's
+   * "Si es arrendatario, coloque…". Shown once, before the question.
+   */
+  intro?: string;
   kind: ApplicationQuestionKind;
   required: boolean;
   /** `choice` only. `value` is stored; `label` is shown. */
   options?: readonly { value: string; label: string }[];
+  /** `count` only. The smallest accepted number; 0 when absent. */
+  min?: number;
   /** `count` only. At most 99, the bound the rules enforce. */
   max?: number;
+  /**
+   * Asked only when an EARLIER question's answer is one of `values` — the
+   * landlord only for a rented home, "amurallado" only for a house or a farm.
+   * A question not asked is never required and its answer is never stored,
+   * even if it was typed before the controlling answer changed.
+   */
+  askedWhen?: { questionId: string; values: readonly (string | boolean)[] };
   /**
    * Marks the question whose answer names the applicant, or gives the number
    * to reach them on. The admin queue shows these first, and the name becomes
@@ -168,18 +208,29 @@ export interface ApplicationConfig {
    * an application being written straight through the SDK. Change both, then
    * deploy the rules — a test fails if they disagree.
    *
-   * ⚠️ FALSE until the shelter's REAL screening questions replace the draft
-   * below. Wawitas asks its own questions over WhatsApp today and nobody has
-   * written them down for us yet (plan §11 #3). Publishing invented questions
-   * as though the shelter asked them would be a lie told to every applicant.
+   * ⚠️ FALSE. The questions are now the shelter's own paper form (portion
+   * 4c-1), but switching on still waits on things tests enforce: the
+   * acceptance wording approved by the owner and the lawyer
+   * (`ADOPTION_ACCEPTANCE.isDraft`), the retention sweep (4e), and the
+   * /privacy rewrite (4f). Each has a guard that fails the moment this is
+   * true without it.
    */
   enabled: boolean;
   /**
-   * True while `questions` is the placeholder set. A test refuses
-   * `enabled: true` while this is still true, so flipping the switch without
-   * replacing the questions fails CI rather than reaching wawitas.org.
+   * True while `questions` is a placeholder set nobody at the shelter wrote. A
+   * test refuses `enabled: true` while this is still true. False since 4c-1:
+   * the questions are the fields of Wawitas' paper adoption form.
    */
   questionsAreDraft: boolean;
+  /** The paper's sections, in its order, with their printed labels (verbatim). */
+  sections: readonly { id: ApplicationSection; label: string }[];
+  /** The paper's introductory paragraph, verbatim. Shown above the personal data. */
+  formIntro: string;
+  /**
+   * The paper's labels for the two fields that live in `private/home`, not in
+   * `questions` (a test forbids a QUESTION that asks for an address). Verbatim.
+   */
+  homeLabels: { address: string; details: string };
   questions: readonly ApplicationQuestion[];
   /**
    * Which sides of the applicant's identity card are photographed. Every side
@@ -226,151 +277,235 @@ export const SHELTER: ShelterConfig = {
   },
 
   adoptionApplications: {
-    // ⚠️ OFF. Flip only after replacing the DRAFT questions below with the ones
-    // Wawitas actually asks, setting `questionsAreDraft` to false, and changing
-    // `applicationsEnabled()` in firestore.rules to match — then deploy the rules.
+    // ⚠️ OFF. See `enabled` above: the switch-on guards in
+    // application-identity.test.ts fail the moment this is true before the
+    // acceptance wording is approved, the sweep exists and /privacy is
+    // rewritten. Flipping it also means changing `applicationsEnabled()` in
+    // firestore.rules to match, then deploying the rules.
     enabled: false,
-    questionsAreDraft: true,
+    questionsAreDraft: false,
 
-    // ═══ DRAFT — NOT WAWITAS' QUESTIONS ═══════════════════════════════════════
-    // A placeholder covering the headings in plan §6 (housing, household, other
-    // pets, experience, why this animal), written 2026-09-12 without the
-    // shelter. Replace every entry with the shelter's own list. If an `id`
-    // changes, update `applicationAnswerKeys()` in firestore.rules and deploy
-    // the rules — the rules reject any key they do not list.
+    // ═══ WAWITAS' PAPER ADOPTION FORM (portion 4c-1) ═══════════════════════
+    // Every LABEL below is printed on the shelter's paper form, VERBATIM —
+    // capitals, usted and missing accents ("¿QUE TIPO DE INMUEBLE POSEE?")
+    // included — from the transcription the owner confirmed word for word on
+    // 2026-10-16 (corrected against the photograph on 2026-10-17: the landline
+    // label is just "CASA"). The one label that is not printed: the tenure row has no
+    // question text on paper, only "PROPIO · ARRENDADO" (owner decision D5).
+    // Every HINT is ours, in neutral tuteo, shown under the shelter's label
+    // (D6). If an `id` changes, update applicationAnswerKeys() or
+    // identityAnswerKeys() in firestore.rules and deploy the rules.
     //
-    // ⚠️ A RECORDED DECISION, REVERSED in portion 4a (owner, 2026-10-16). This
-    // comment used to say the form asks for a ZONE, never an address, and that
-    // nothing asks for an ID. The application now collects a home address and
-    // a photo of the front of the identity card — but NOT as questions here.
-    // Answers live in the main application document; the address goes only
-    // into its own restricted `private/home` document, and the ID photo only
-    // through its upload route into Storage. So the old rule still holds for
-    // this list: no question may ask for a street address or an identity
-    // document (a test reads every label). `zone` was removed because the
-    // address replaces it.
+    // ⚠️ A RECORDED DECISION, REVERSED in portion 4a (owner, 2026-10-16), and
+    // narrowed in 4c-1. The form once asked for a ZONE, never an address, and
+    // nothing asked for an ID. Now:
+    //   - the address is not a question: it goes only into `private/home`
+    //     (labels in `homeLabels` below), and the carnet photo only through its
+    //     upload route into Storage;
+    //   - the C.I. number, the age, the civil status, the landline, both
+    //     references and the landlord ARE questions, but with
+    //     `store: 'identity'` — written only to the admin-only, erasable
+    //     `private/identity`, never into `answers`.
+    // So the old rule holds for every `store: 'application'` question: none may
+    // ask for an address, an identity document or a third person (a test reads
+    // every label).
+    //
+    // Not asked at all: the paper's "Formulario No" and "FECHA" (the document
+    // id and `submittedAt` play that role), CROQUIS UBICACIÓN (the map pin is
+    // portion 4d; never a dead field until then), and the whole of section 4,
+    // DATOS DEL PELUDITO ADOPTADO, which the shelter fills in at handover (D16).
+    sections: [
+      { id: 'personal', label: 'DATOS PERSONALES' },
+      { id: 'references', label: 'REFERENCIAS' },
+      { id: 'home', label: 'DOMICILIO' },
+    ],
+    formIntro:
+      'Se recomienda a las personas interesadas en adoptar, la importancia de diligenciar este documento para realizar la adopción. Los peludos colocados en adopción son animales abandonados, callejeros, no son regalados y tampoco comprados, los requisitos aqui contenidos deben observarse de manera responsable, de acuerdo con lo dispuesto en la ley 700/2015. Esperamos ubicar a cada peludito en un hogar y a cargo de un adoptante responsable.',
+    homeLabels: {
+      address: 'DIRECCIÓN EXACTA DONDE ESTARÁ EL PELUDITO',
+      details: 'NÚMERO DE CASA Y DETALLES',
+    },
     questions: [
+      // ── 1. DATOS PERSONALES ─────────────────────────────────────────────
       {
         id: 'fullName',
-        section: 'contact',
-        label: 'Tu nombre completo',
+        section: 'personal',
+        store: 'application',
+        label: 'NOMBRE COMPLETO',
         kind: 'shortText',
         required: true,
         purpose: 'applicantName',
       },
       {
+        id: 'ciNumber',
+        section: 'personal',
+        store: 'identity',
+        label: 'C.I.',
+        hint: 'Tu número de carnet, con su complemento si tiene.',
+        kind: 'idNumber',
+        required: true,
+      },
+      {
+        // The contract opens "Yo … mayor de edad": the form and the rules
+        // both refuse an age under 18 (owner decision D4).
+        id: 'age',
+        section: 'personal',
+        store: 'identity',
+        label: 'EDAD',
+        kind: 'count',
+        required: true,
+        min: 18,
+        max: 99,
+      },
+      {
+        // Free text: the paper prints no options, so none are invented.
+        id: 'civilStatus',
+        section: 'personal',
+        store: 'identity',
+        label: 'ESTADO CIVIL',
+        kind: 'shortText',
+        required: true,
+      },
+      {
+        // The key stays `whatsapp`: /privacy says the application keeps "tu
+        // WhatsApp", and privacy-page.test.ts pins this key.
         id: 'whatsapp',
-        section: 'contact',
-        label: 'Tu número de WhatsApp',
-        hint: 'Es por donde el equipo te va a escribir.',
+        section: 'personal',
+        store: 'application',
+        label: 'CELULAR',
+        hint: 'El equipo te escribe por WhatsApp a este número.',
         kind: 'phone',
         required: true,
         purpose: 'applicantPhone',
       },
       {
-        id: 'housingType',
-        section: 'housing',
-        label: '¿Dónde vives?',
-        kind: 'choice',
-        required: true,
-        options: [
-          { value: 'house', label: 'Casa' },
-          { value: 'apartment', label: 'Departamento' },
-          { value: 'room', label: 'Cuarto' },
-          { value: 'other', label: 'Otro' },
-        ],
-      },
-      {
-        id: 'housingTenure',
-        section: 'housing',
-        label: 'La vivienda es…',
-        kind: 'choice',
-        required: true,
-        options: [
-          { value: 'owned', label: 'Propia' },
-          { value: 'rented', label: 'Alquilada' },
-          { value: 'anticretico', label: 'En anticrético' },
-          { value: 'family', label: 'De mi familia' },
-          { value: 'other', label: 'Otra situación' },
-        ],
-      },
-      {
-        id: 'landlordAllows',
-        section: 'housing',
-        label: 'Si la vivienda no es tuya, ¿el dueño permite animales?',
-        kind: 'choice',
+        id: 'landline',
+        section: 'personal',
+        store: 'identity',
+        // Printed as just "CASA", beside a ☎ icon; what it asks for is in our hint.
+        label: 'CASA',
+        hint: 'Teléfono fijo. Déjalo vacío si no tienes.',
+        kind: 'phone',
         required: false,
-        options: [
-          { value: 'yes', label: 'Sí' },
-          { value: 'no', label: 'No' },
-          { value: 'unsure', label: 'No lo sé' },
-        ],
+      },
+
+      // ── 2. REFERENCIAS — third parties, so identity only ─────────────────
+      {
+        id: 'personalRefName',
+        section: 'references',
+        store: 'identity',
+        label: 'REFERENCIA PERSONAL',
+        hint: 'Avísale que el refugio podría llamarla.',
+        kind: 'shortText',
+        required: true,
       },
       {
-        id: 'outdoorSpace',
-        section: 'housing',
-        label: '¿Tiene patio o espacio al aire libre?',
+        id: 'personalRefPhone',
+        section: 'references',
+        store: 'identity',
+        label: 'TELÉFONO',
+        kind: 'phone',
+        required: true,
+      },
+      {
+        id: 'personalRefRelation',
+        section: 'references',
+        store: 'identity',
+        label: 'RELACIÓN',
+        kind: 'shortText',
+        required: true,
+      },
+      {
+        id: 'familyRefName',
+        section: 'references',
+        store: 'identity',
+        label: 'REFERENCIA FAMILIAR',
+        kind: 'shortText',
+        required: true,
+      },
+      {
+        id: 'familyRefPhone',
+        section: 'references',
+        store: 'identity',
+        label: 'TELÉFONO',
+        kind: 'phone',
+        required: true,
+      },
+      {
+        id: 'familyRefRelation',
+        section: 'references',
+        store: 'identity',
+        label: 'RELACIÓN',
+        kind: 'shortText',
+        required: true,
+      },
+
+      // ── 3. DOMICILIO ────────────────────────────────────────────────────
+      {
+        // Values changed from the draft (0 documents existed). The draft's
+        // "cuarto" and "otro" are gone, as on paper.
+        id: 'housingType',
+        section: 'home',
+        store: 'application',
+        label: '¿QUE TIPO DE INMUEBLE POSEE?',
         kind: 'choice',
         required: true,
         options: [
-          { value: 'enclosed', label: 'Sí, cerrado' },
-          { value: 'open', label: 'Sí, pero sin cerrar' },
-          { value: 'none', label: 'No' },
+          { value: 'house', label: 'CASA' },
+          { value: 'apartment', label: 'DEPARTAMENTO' },
+          { value: 'farm', label: 'FINCA' },
         ],
       },
       {
-        id: 'adults',
-        section: 'household',
-        label: '¿Cuántas personas adultas viven en la casa?',
-        kind: 'count',
+        // ⚠️ The ONE label not printed on paper: the row is only "PROPIO ·
+        // ARRENDADO" (owner decision D5). "Anticrético" and "de mi familia"
+        // are gone, as on paper.
+        id: 'housingTenure',
+        section: 'home',
+        store: 'application',
+        label: '¿EL INMUEBLE ES PROPIO O ARRENDADO?',
+        kind: 'choice',
         required: true,
-        max: 30,
+        options: [
+          { value: 'owned', label: 'PROPIO' },
+          { value: 'rented', label: 'ARRENDADO' },
+        ],
       },
       {
-        id: 'children',
-        section: 'household',
-        label: '¿Cuántos niños o niñas?',
-        hint: 'Pon 0 si no hay.',
-        kind: 'count',
+        id: 'landlordName',
+        section: 'home',
+        store: 'identity',
+        intro: 'Si es arrendatario, coloque nombre y teléfono del dueño de casa:',
+        label: 'Nombre de dueño del inmueble',
+        kind: 'shortText',
         required: true,
-        max: 30,
+        askedWhen: { questionId: 'housingTenure', values: ['rented'] },
       },
       {
-        id: 'everyoneAgrees',
-        section: 'household',
-        label: '¿Todos en la casa están de acuerdo con adoptar?',
+        id: 'landlordPhone',
+        section: 'home',
+        store: 'identity',
+        label: 'Teléfono',
+        kind: 'phone',
+        required: true,
+        askedWhen: { questionId: 'housingTenure', values: ['rented'] },
+      },
+      {
+        id: 'movingSoon',
+        section: 'home',
+        store: 'application',
+        label: '¿Planea mudarse pronto?',
         kind: 'yesNo',
         required: true,
       },
       {
-        id: 'otherPets',
-        section: 'otherPets',
-        label: '¿Tienes otros animales?',
-        hint: 'Cuéntanos cuáles, qué edad tienen y si están esterilizados. Déjalo vacío si no tienes.',
-        kind: 'longText',
-        required: false,
-      },
-      {
-        id: 'previousPets',
-        section: 'experience',
-        label: '¿Tuviste perros o gatos antes? ¿Qué pasó con ellos?',
-        kind: 'longText',
+        id: 'walled',
+        section: 'home',
+        store: 'application',
+        label: 'Si es finca o casa, ¿se encuentra amurallado?',
+        kind: 'yesNo',
         required: true,
-      },
-      {
-        id: 'hoursAlone',
-        section: 'experience',
-        label: '¿Cuántas horas al día pasaría solo?',
-        kind: 'count',
-        required: true,
-        max: 24,
-      },
-      {
-        id: 'whyThisAnimal',
-        section: 'why',
-        label: '¿Por qué quieres adoptar a este animalito?',
-        kind: 'longText',
-        required: true,
+        askedWhen: { questionId: 'housingType', values: ['house', 'farm'] },
       },
     ],
 

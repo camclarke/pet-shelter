@@ -14,23 +14,25 @@
  *   the number type grows spinner arrows and, in es-BO locales, can read "2,5"
  *   as empty. The validator refuses decimals either way.
  * - Every input stays at 16px (from `.auth__field`), or iOS Safari zooms on focus.
+ * - A C.I. is `inputMode="text"`, never numeric: it can carry a complement
+ *   and letters ("1234567-1B", "LP").
+ *
+ * ── The paper's words ─────────────────────────────────────────────────────
+ * Section headings and question labels are the shelter's paper form, verbatim
+ * (they come from config); hints are ours. A question whose `askedWhen` is not
+ * met is not rendered at all — the landlord only for ARRENDADO, "amurallado"
+ * only for CASA or FINCA — and `validateAnswers` drops it, so what is hidden
+ * is never sent.
  */
 
 'use client';
 
-import type { ApplicationQuestion, ApplicationSection } from '@/config/shelter';
-import type { AnswerDraft, AnswerDraftValue, ApplicationAnswerError } from '@/lib/applications';
-import { ANSWER_MAX_CHARS } from '@/lib/applications';
-import { t } from '@/i18n';
+import { Fragment } from 'react';
 
-const SECTION_ORDER: ApplicationSection[] = [
-  'contact',
-  'housing',
-  'household',
-  'otherPets',
-  'experience',
-  'why',
-];
+import { SHELTER, type ApplicationQuestion, type ApplicationSection } from '@/config/shelter';
+import type { AnswerDraft, AnswerDraftValue, ApplicationAnswerError } from '@/lib/applications';
+import { ANSWER_MAX_CHARS, isQuestionAsked } from '@/lib/applications';
+import { t } from '@/i18n';
 
 export function questionDomId(id: string): string {
   return `apply-q-${id}`;
@@ -42,19 +44,33 @@ export interface ApplicationFieldsProps {
   errors: Record<string, ApplicationAnswerError>;
   disabled: boolean;
   onChange: (id: string, value: AnswerDraftValue) => void;
+  /** Render only this section — what a step of the 4c-2 stepper shows. All sections when absent. */
+  onlySection?: ApplicationSection;
 }
 
-export function ApplicationFields({ questions, draft, errors, disabled, onChange }: ApplicationFieldsProps) {
+export function ApplicationFields({
+  questions,
+  draft,
+  errors,
+  disabled,
+  onChange,
+  onlySection,
+}: ApplicationFieldsProps) {
   const copy = t.applications;
+  const sections = SHELTER.adoptionApplications.sections.filter(
+    (section) => onlySection === undefined || section.id === onlySection,
+  );
 
   return (
     <>
-      {SECTION_ORDER.map((section) => {
-        const inSection = questions.filter((q) => q.section === section);
+      {sections.map((section) => {
+        const inSection = questions.filter(
+          (q) => q.section === section.id && isQuestionAsked(questions, q, draft),
+        );
         if (inSection.length === 0) return null;
         return (
-          <fieldset key={section} className="admin-form__fieldset apply-section">
-            <legend className="t-label">{t.applicationSectionLabel(section)}</legend>
+          <fieldset key={section.id} className="admin-form__fieldset apply-section">
+            <legend className="t-label">{section.label}</legend>
             {inSection.map((question) => {
               const id = questionDomId(question.id);
               const error = errors[question.id];
@@ -84,6 +100,11 @@ export function ApplicationFields({ questions, draft, errors, disabled, onChange
                 </small>
               ) : null;
 
+              // The paper's own sentence above a group ("Si es arrendatario,
+              // coloque…"), verbatim. Outside the <label>: a <p> may not sit
+              // inside one.
+              const intro = question.intro ? <p className="auth__prose apply-field__intro">{question.intro}</p> : null;
+
               if (question.kind === 'choice' || question.kind === 'yesNo') {
                 const options =
                   question.kind === 'yesNo'
@@ -94,39 +115,41 @@ export function ApplicationFields({ questions, draft, errors, disabled, onChange
                     : (question.options ?? []);
                 const current = question.kind === 'yesNo' ? (value === null ? '' : String(value)) : String(value ?? '');
                 return (
-                  <div
-                    key={question.id}
-                    className={`apply-field${error ? ' apply-field--invalid' : ''}`}
-                    role="radiogroup"
-                    id={id}
-                    aria-labelledby={`${id}-label`}
-                    aria-describedby={describedBy}
-                    aria-invalid={error ? true : undefined}
-                  >
-                    <span id={`${id}-label`}>{label}</span>
-                    {hint}
-                    <div className="apply-options">
-                      {options.map((option) => (
-                        <label key={option.value} className="apply-option">
-                          <input
-                            type="radio"
-                            name={id}
-                            value={option.value}
-                            checked={current === option.value}
-                            disabled={disabled}
-                            onChange={() =>
-                              onChange(
-                                question.id,
-                                question.kind === 'yesNo' ? option.value === 'true' : option.value,
-                              )
-                            }
-                          />
-                          <span>{option.label}</span>
-                        </label>
-                      ))}
+                  <Fragment key={question.id}>
+                    {intro}
+                    <div
+                      className={`apply-field${error ? ' apply-field--invalid' : ''}`}
+                      role="radiogroup"
+                      id={id}
+                      aria-labelledby={`${id}-label`}
+                      aria-describedby={describedBy}
+                      aria-invalid={error ? true : undefined}
+                    >
+                      <span id={`${id}-label`}>{label}</span>
+                      {hint}
+                      <div className="apply-options">
+                        {options.map((option) => (
+                          <label key={option.value} className="apply-option">
+                            <input
+                              type="radio"
+                              name={id}
+                              value={option.value}
+                              checked={current === option.value}
+                              disabled={disabled}
+                              onChange={() =>
+                                onChange(
+                                  question.id,
+                                  question.kind === 'yesNo' ? option.value === 'true' : option.value,
+                                )
+                              }
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {errorLine}
                     </div>
-                    {errorLine}
-                  </div>
+                  </Fragment>
                 );
               }
 
@@ -140,44 +163,56 @@ export function ApplicationFields({ questions, draft, errors, disabled, onChange
               } as const;
 
               return (
-                <label
-                  key={question.id}
-                  className={`auth__field apply-field${error ? ' apply-field--invalid' : ''}`}
-                  htmlFor={id}
-                >
-                  {label}
-                  {hint}
-                  {question.kind === 'longText' ? (
-                    <textarea
-                      {...common}
-                      rows={4}
-                      maxLength={ANSWER_MAX_CHARS.longText}
-                      onChange={(event) => onChange(question.id, event.target.value)}
-                    />
-                  ) : (
-                    <input
-                      {...common}
-                      type={question.kind === 'phone' ? 'tel' : 'text'}
-                      inputMode={question.kind === 'count' ? 'numeric' : question.kind === 'phone' ? 'tel' : undefined}
-                      autoComplete={
-                        question.purpose === 'applicantName'
-                          ? 'name'
-                          : question.purpose === 'applicantPhone'
-                            ? 'tel'
-                            : 'off'
-                      }
-                      maxLength={
-                        question.kind === 'count'
-                          ? 2
-                          : question.kind === 'phone'
-                            ? ANSWER_MAX_CHARS.phone
-                            : ANSWER_MAX_CHARS.shortText
-                      }
-                      onChange={(event) => onChange(question.id, event.target.value)}
-                    />
-                  )}
-                  {errorLine}
-                </label>
+                <Fragment key={question.id}>
+                  {intro}
+                  <label
+                    className={`auth__field apply-field${error ? ' apply-field--invalid' : ''}`}
+                    htmlFor={id}
+                  >
+                    {label}
+                    {hint}
+                    {question.kind === 'longText' ? (
+                      <textarea
+                        {...common}
+                        rows={4}
+                        maxLength={ANSWER_MAX_CHARS.longText}
+                        onChange={(event) => onChange(question.id, event.target.value)}
+                      />
+                    ) : (
+                      <input
+                        {...common}
+                        type={question.kind === 'phone' ? 'tel' : 'text'}
+                        inputMode={
+                          question.kind === 'count'
+                            ? 'numeric'
+                            : question.kind === 'phone'
+                              ? 'tel'
+                              : question.kind === 'idNumber'
+                                ? 'text'
+                                : undefined
+                        }
+                        autoComplete={
+                          question.purpose === 'applicantName'
+                            ? 'name'
+                            : question.purpose === 'applicantPhone'
+                              ? 'tel'
+                              : 'off'
+                        }
+                        maxLength={
+                          question.kind === 'count'
+                            ? 2
+                            : question.kind === 'phone'
+                              ? ANSWER_MAX_CHARS.phone
+                              : question.kind === 'idNumber'
+                                ? ANSWER_MAX_CHARS.idNumber
+                                : ANSWER_MAX_CHARS.shortText
+                        }
+                        onChange={(event) => onChange(question.id, event.target.value)}
+                      />
+                    )}
+                    {errorLine}
+                  </label>
+                </Fragment>
               );
             })}
           </fieldset>
