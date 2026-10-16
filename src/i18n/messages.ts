@@ -238,7 +238,7 @@ export interface LabelScanCopy {
   readonly useLot: string;
   readonly lotOfferHint: string;
 }
-import type { ApplicationStatus } from '@/lib/types';
+import type { ApplicationStatus, IdDocumentSide } from '@/lib/types';
 import type {
   ApplicationAnswerError,
   ApplicationHomeError,
@@ -346,6 +346,39 @@ export interface ApplicationCopy {
   readonly blockersTitle: string;
   readonly warningsTitle: string;
   readonly checking: string;
+
+  // ── the ID photo and the address, on the review screen (portion 4b) ──────
+  /** The queue badge for an open application whose ID photo has not arrived. */
+  readonly badgeIdMissing: string;
+  /** The queue badge once the photo and the address were erased under retention. */
+  readonly badgeIdErased: string;
+  readonly identityTitle: string;
+  idDocumentSideLabel(side: IdDocumentSide): string;
+  /** The button that loads the photo. Nothing is loaded until it is tapped. */
+  readonly idDocumentShow: string;
+  readonly idDocumentHide: string;
+  readonly idDocumentLoading: string;
+  idDocumentReceivedOn(date: string): string;
+  /** `open`: whether approval is still ahead, so the line says what it blocks. */
+  idDocumentMissing(open: boolean): string;
+  /** Who sees it, and what never to do with it. */
+  readonly idDocumentHandling: string;
+  idDocumentFailed(siteHost: string): string;
+  readonly idDocumentRefused: string;
+  readonly idDocumentAlt: string;
+  /** Both the photo and the address were erased under the retention policy. */
+  identityErased(date: string): string;
+  /** The same, when the erase carries no readable date. */
+  readonly identityErasedUndated: string;
+  readonly homeTitle: string;
+  /** `private/home` does not exist — never an error, never a payload. */
+  readonly homeMissing: string;
+  homeReference(reference: string): string;
+  /** The pin as text, already rounded to 4 decimals at the source. */
+  homePin(latitude: string, longitude: string): string;
+  readonly homeNoPin: string;
+  homeCorrectedOn(date: string): string;
+  readonly homeLoadFailed: string;
 }
 
 import type { FoodCategory, FoodHazard } from '@/lib/types';
