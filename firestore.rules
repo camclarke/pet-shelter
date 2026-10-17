@@ -513,14 +513,13 @@ service cloud.firestore {
       }
 
       // adoptionApplications.enabled in src/config/shelter.ts. THIS is the
-      // enforcing copy: while it returns false no applicant can create an
-      // application by any route — not through the page, which 404s, and not
-      // through the SDK called directly from a browser console. Reading,
-      // withdrawing and the admin queue are unaffected. Switching the form on
-      // means changing this line AND deploying the rules; a test fails if it
-      // disagrees with the config.
+      // enforcing copy: switched ON 2026-10-17 with the owner's approval. This
+      // is also the kill switch: returning false here and releasing the rules
+      // stops every applicant create by any route, including the SDK called
+      // directly from a browser console. Reading, withdrawing and the admin
+      // queue are unaffected. A test fails if it disagrees with the config.
       function applicationsEnabled() {
-        return false;
+        return true;
       }
 
       // The id names the signed-in user as its applicant. A uid containing the

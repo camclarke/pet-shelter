@@ -662,19 +662,17 @@ test('MyApplication decides «missing» and «erased» through the shared predic
 
 // ─── /adopt/contract ────────────────────────────────────────────────────────
 
-test('/adopt/contract 404s while the form is off, keeps revalidate = 300, is noindex and not in the sitemap', async () => {
+test('/adopt/contract is gated on the switch, keeps revalidate = 300, is noindex and not in the sitemap', async () => {
   const src = code(CONTRACT_PAGE);
   assert.match(src, /^export const revalidate = 300;$/m);
   assert.match(src, /if \(!SHELTER\.adoptionApplications\.enabled \|\| ADOPTION_CONTRACT === null\) notFound\(\);/);
   assert.match(src, /robots: \{ index: false, follow: false \}/);
   assert.ok(!STATIC_SITEMAP_ROUTES.some((route) => route.includes('contract')));
-  // Rendered for real: switched off, it throws Next's 404.
-  assert.equal(config.enabled, false);
+  // Rendered for real: switched on (2026-10-17) with a contract, it renders
+  // instead of throwing Next's 404. The gate above is what turns it back off.
+  assert.equal(config.enabled, true);
   const { default: ContractPage } = await import('@/app/adopt/contract/page');
-  assert.throws(
-    () => ContractPage(),
-    (err: unknown) => /404/.test(String((err as { digest?: unknown })?.digest ?? '')),
-  );
+  assert.doesNotThrow(() => ContractPage());
 });
 
 test('the apply page 404s without a contract, and hands the stepper only PUBLIC pet facts', () => {

@@ -95,11 +95,6 @@ test('the public form cannot be switched on while the questions are still the dr
   );
 });
 
-test('it ships switched OFF', () => {
-  // Remove this test in the same commit that flips the switch, deliberately.
-  assert.equal(config.enabled, false);
-});
-
 test('the rules enforce the same switch the config declares', () => {
   // The config flag only hides the page. The rules copy is what refuses an
   // application written straight through the SDK — found by the step-14
