@@ -89,6 +89,58 @@ test('SWITCH-ON GUARD: the form is not switched on before /privacy explains the 
   );
 });
 
+// ─── The online application section (2026-10-17) ─────────────────────────────
+// Each test pins one claim the page makes about the application to the file
+// that makes it true, so a change there fails here until the page follows.
+
+test('the page names OpenStreetMap while the map loads its tiles', async () => {
+  const { SHELTER } = await import('@/config/shelter');
+  const page = read('src/app/privacy/page.tsx');
+  const usesLeaflet = /"leaflet"\s*:/.test(read('package.json'));
+  const usesOsmTiles = /openstreetmap\.org/.test(SHELTER.map.tileUrl);
+  assert.ok(
+    !(usesLeaflet || usesOsmTiles || SHELTER.adoptionApplications.enabled) || /OpenStreetMap/.test(page),
+    'the address map loads OpenStreetMap tiles: /privacy must say so',
+  );
+});
+
+test('the page lists the consent record the acceptance route stores (time, IP, browser, account, contract)', () => {
+  const page = read('src/app/privacy/page.tsx');
+  const start = page.indexOf('Tu aceptación del compromiso de adopción');
+  assert.ok(start >= 0, 'the consent-record section is gone');
+  const sectionText = page.slice(start, page.indexOf('</section>', start));
+  for (const phrase of [/fecha y la hora/, /dirección IP/, /navegador/, /tu cuenta/, /versión del compromiso/]) {
+    assert.match(sectionText, phrase);
+  }
+  const handler = read('src/lib/acceptance-handler.ts');
+  const receipt = handler.slice(handler.indexOf('export interface AcceptanceReceipt'), handler.indexOf('export interface AcceptanceDeps'));
+  for (const field of ['applicantUid', 'applicantEmail', 'contractVersion', 'contractSha256', 'ip', 'userAgent']) {
+    assert.match(receipt, new RegExp(`\\b${field}:`), `AcceptanceReceipt no longer stores ${field}: update /privacy`);
+  }
+});
+
+test('the backup tail the page states is the one terraform declares', () => {
+  const page = read('src/app/privacy/page.tsx');
+  assert.match(page, /una copia diaria durante 14 días y una semanal durante 14 semanas/);
+  const tf = read('terraform/firestore.tf');
+  assert.match(tf, /retention = "1209600s"/, 'the daily Firestore backup is no longer 14 days: update /privacy');
+  assert.match(tf, /retention = "8467200s"/, 'the weekly Firestore backup is no longer 14 weeks: update /privacy');
+});
+
+test('the page says the pin is rounded to about 11 m, and PIN_DECIMALS is still 4', async () => {
+  const { PIN_DECIMALS } = await import('../applications');
+  assert.match(read('src/app/privacy/page.tsx'), /redondeado a unos 11 metros/);
+  assert.equal(PIN_DECIMALS, 4, 'the pin rounding changed: update /privacy');
+});
+
+test('the page says no application data reaches Gemini, so nothing under src/lib/ai names applications', () => {
+  assert.match(read('src/app/privacy/page.tsx'), /Ningún dato de las postulaciones de adopción se envía a\s+Gemini/);
+  const offenders = sourceFiles('src/lib/ai').filter((file) =>
+    /adoptionApplications|adoption-ids|private\/home|id-document|applications-(?:admin|client)/.test(read(file)),
+  );
+  assert.deepEqual(offenders, [], 'an AI module now touches adoption applications: update /privacy');
+});
+
 test('the page lists what an application stores, and the rules still ask for it', () => {
   assert.match(read('src/app/privacy/page.tsx'), /Guarda tu nombre, tu WhatsApp, tu correo/);
   const keys = applicationRules().match(/applicationAnswerKeys\(\) \{\s*return \[([^\]]*)\]/);
