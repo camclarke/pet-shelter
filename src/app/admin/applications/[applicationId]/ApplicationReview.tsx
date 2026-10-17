@@ -58,6 +58,7 @@ import {
 } from '@/lib/applications';
 import {
   approveApplication,
+  eraseApplicationIdentity,
   getApplication,
   getApplicationHome,
   getApplicationIdentity,
@@ -72,6 +73,8 @@ import {
 } from '@/lib/applications-admin';
 import { getPetById, getUserLabels } from '@/lib/areas-admin';
 import { formatDate } from '@/lib/date-input';
+import { reasonFitsStatus } from '@/lib/identity-erase-handler';
+import { ERASE_REASONS, type EraseReason } from '@/lib/identity-erase-protocol';
 import { readIdDocumentObjectUrl } from '@/lib/id-document-admin';
 import { t } from '@/i18n';
 import type { ApplicationAnswer, ApplicationStatus, IdDocumentSide, Pet } from '@/lib/types';
@@ -357,6 +360,23 @@ export function ApplicationReview({ applicationId }: { applicationId: string }) 
         />
       </section>
 
+      {/* ── erase the carnet and the address (2026-10-17) ─────────────────── */}
+      {!current.identityErased && user && (
+        <section className="admin-list">
+          <h2 className="t-label">{copy.eraseTitle}</h2>
+          <ErasePanel
+            status={current.status}
+            applicant={label}
+            petName={petName}
+            onErase={async (reason) => {
+              const failure = await eraseApplicationIdentity(user, current.id, reason);
+              if (failure === null) await load();
+              return failure;
+            }}
+          />
+        </section>
+      )}
+
       {/* ── the team's private notes ────────────────────────────────────── */}
       <section className="admin-list">
         <h2 className="t-label">{copy.notesTitle}</h2>
@@ -617,6 +637,87 @@ function HomeMap({ latitude, longitude }: { latitude: number; longitude: number 
             onFailed={() => setFailed(true)}
           />
         ))}
+    </div>
+  );
+}
+
+/**
+ * The admin's erase action. Offers only the reasons the route accepts for this
+ * status (`reasonFitsStatus`), and asks once more, naming the person and the
+ * animal, before anything is sent. Nothing here erases on its own: the owner's
+ * decision (2026-10-17) is that only a person does.
+ */
+export function ErasePanel({
+  status,
+  applicant,
+  petName,
+  onErase,
+}: {
+  status: ApplicationStatus;
+  applicant: string;
+  petName: string;
+  onErase: (reason: EraseReason) => Promise<string | null>;
+}) {
+  const copy = t.applications;
+  const reasons = ERASE_REASONS.filter((reason) => reasonFitsStatus(reason, status));
+  const [reason, setReason] = useState<EraseReason | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  if (reasons.length === 0) return <p className="admin__sub">{copy.eraseOpenHint}</p>;
+  const chosen = reason && reasons.includes(reason) ? reason : reasons[0]!;
+
+  async function erase() {
+    setBusy(true);
+    setMessage(null);
+    const failure = await onErase(chosen);
+    setBusy(false);
+    setConfirming(false);
+    setMessage(failure === null ? { ok: true, text: copy.eraseDone } : { ok: false, text: copy.eraseFailed(failure) });
+  }
+
+  return (
+    <div className="admin-form erase-panel">
+      <p className="auth__hint">{copy.eraseLead}</p>
+      <label className="auth__field">
+        <span className="apply-field__label">{copy.eraseReasonLabel}</span>
+        <select value={chosen} disabled={busy || confirming} onChange={(e) => setReason(e.target.value as EraseReason)}>
+          {reasons.map((r) => (
+            <option key={r} value={r}>
+              {copy.eraseReason(r)}
+            </option>
+          ))}
+        </select>
+      </label>
+      {chosen === 'died' && <p className="auth__hint erase-panel__warning">{copy.eraseDiedWarning}</p>}
+      {confirming ? (
+        // The same confirm card as DeleteRecordButton: a coral border legible in
+        // both themes, full-strength text, and no autofocus or form, so Enter
+        // erases nothing.
+        <div className="register-warning" role="alert">
+          <p>{copy.eraseConfirm(applicant, petName)}</p>
+          <div className="admin-list__actions">
+            <button type="button" className="btn btn--muted" disabled={busy} onClick={() => void erase()}>
+              {copy.eraseButton}
+            </button>
+            <button type="button" className="btn btn--muted" disabled={busy} onClick={() => setConfirming(false)}>
+              {copy.eraseCancel}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="admin-list__actions">
+          <button type="button" className="btn btn--muted" onClick={() => setConfirming(true)}>
+            {copy.eraseStart}
+          </button>
+        </div>
+      )}
+      {message && (
+        <p className={message.ok ? 'auth__hint' : 'auth__error'} role={message.ok ? 'status' : 'alert'}>
+          {message.text}
+        </p>
+      )}
     </div>
   );
 }

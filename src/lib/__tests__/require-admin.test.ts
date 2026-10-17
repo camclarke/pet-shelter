@@ -115,8 +115,24 @@ const USER_UPLOAD_ROUTES: Record<string, string> = {
     'an applicant uploading their own ID photo (id-document-handler.ts)',
 };
 
+/**
+ * A signed-in applicant asking the server to RECORD evidence about their own
+ * application — the consent's audit trail. It reads request HEADERS (the IP
+ * evidence and the user agent) and nothing else: never the body. Its own
+ * class, so USER_ROUTES' "never touches the request" stays exactly as strict.
+ */
+const USER_RECEIPT_ROUTES: Record<string, string> = {
+  'src/app/api/adoption-applications/[applicationId]/acceptance/route.ts':
+    "an applicant's consent audit trail: time, IP, account (acceptance-handler.ts)",
+};
+
+/** The only request members a receipt route may use, each a header read by name. */
+const RECEIPT_HEADERS = ["request.headers.get('x-forwarded-for')", "request.headers.get('fastly-client-ip')", "request.headers.get('user-agent')"];
+
 /** Routes whose whole handler lives in a pure, injectable module. */
 const DELEGATED_ROUTES: Record<string, string> = {
+  'src/app/api/adoption-applications/[applicationId]/acceptance/route.ts': 'src/lib/acceptance-handler.ts',
+  'src/app/api/adoption-applications/[applicationId]/erase-identity/route.ts': 'src/lib/identity-erase-handler.ts',
   'src/app/api/food/cook-batch/route.ts': 'src/lib/cook-batch-handler.ts',
   'src/app/api/account/delete/route.ts': 'src/lib/account-delete.ts',
   'src/app/api/adoption-applications/[applicationId]/id-document/[side]/route.ts':
@@ -201,7 +217,8 @@ test('every API route authenticates through requireAdmin before it touches the r
 
     const file = handler ?? route;
     const src = code(file);
-    const guard = route in USER_ROUTES || route in USER_UPLOAD_ROUTES ? 'requireUser(' : 'requireAdmin(';
+    const guard =
+      route in USER_ROUTES || route in USER_UPLOAD_ROUTES || route in USER_RECEIPT_ROUTES ? 'requireUser(' : 'requireAdmin(';
     const auth = src.indexOf(guard);
     assert.ok(
       auth >= 0,
@@ -227,6 +244,7 @@ test('every exemption names a route that exists, so a stale one cannot hide a ne
     ...Object.keys(DELEGATED_ROUTES),
     ...Object.keys(USER_ROUTES),
     ...Object.keys(USER_UPLOAD_ROUTES),
+    ...Object.keys(USER_RECEIPT_ROUTES),
   ]) {
     assert.ok(routes.includes(file), `${file} is listed as an exemption but does not exist`);
   }
@@ -272,6 +290,37 @@ test('an upload route reads its body ONCE, through the capped reader, after the 
     assert.ok(at('readApplication(') < body, 'the application must be read (open, owned, not erased) before the body');
     assert.ok(body < at('inspectJpeg('), 'the bytes are inspected after they are read, and before they are saved');
     assert.ok(at('inspectJpeg(') < at('saveIdDocument('), 'nothing is saved before the inspection');
+  }
+});
+
+test('a receipt route reads three named headers and nothing else, after the owner checks', () => {
+  for (const route of Object.keys(USER_RECEIPT_ROUTES)) {
+    const handler = DELEGATED_ROUTES[route];
+    assert.ok(handler, `${route} must hand its request to a pure handler`);
+    assert.ok(!(route in USER_ROUTES) && !(route in USER_UPLOAD_ROUTES), `${route} is in two classes`);
+    for (const file of [route, handler]) {
+      const src = code(file);
+      for (const reader of WHOLE_BODY_READERS) assert.ok(!src.includes(reader), `${file} calls ${reader}`);
+      assert.ok(!/\brequest\.body\b/.test(src), `${file} reads the body`);
+      assert.ok(!/\}\s*=\s*request\b/.test(src), `${file} destructures the request`);
+      assert.ok(!/=\s*request\s*[;,)]/.test(src), `${file} aliases the request`);
+    }
+    const src = code(handler);
+    // Every member access on the request is one of the allowed header reads.
+    let rest = src;
+    for (const allowed of RECEIPT_HEADERS) rest = rest.split(allowed).join('');
+    const at = rest.search(REQUEST_USE);
+    assert.ok(at < 0, `${handler} touches the request beyond the allowed headers: ${rest.slice(at, at + 40).trim()}…`);
+    const auth = src.indexOf('requireUser(');
+    const owner = src.search(/\.applicantUid\s*!==\s*caller\.uid/);
+    const read = src.indexOf('readApplication(');
+    assert.ok(auth >= 0 && owner > auth && read > auth, `${handler} must check the caller, then read the application`);
+    for (const allowed of RECEIPT_HEADERS) {
+      const i = src.indexOf(allowed);
+      assert.ok(i < 0 || (i > owner && i > read), `${handler} reads ${allowed} before the owner checks`);
+    }
+    const enabled = src.indexOf('.applicationsEnabled');
+    assert.ok(enabled > auth, `${handler} checks the switch before requireUser`);
   }
 });
 

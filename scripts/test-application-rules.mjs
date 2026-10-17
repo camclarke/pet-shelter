@@ -337,10 +337,14 @@ function mockAfter({
   ownerUid = ANA,
   applicationId = APP,
   petStatus = 'adopted',
+  acceptance = true,
 } = {}) {
   const adoption = `${DB}/adoptions/${PET}`;
   const pet = `${DB}/pets/${PET}`;
+  // acceptanceRecorded(): the consent's audit trail (2026-10-17).
+  const receipt = `${DB}/adoptionApplications/${APP}/private/acceptance`;
   return [
+    { function: 'exists', args: [{ exactValue: receipt }], result: { value: acceptance } },
     { function: 'get', args: [{ exactValue: pet }], result: { value: { data: { status: petStatusBefore } } } },
     { function: 'existsAfter', args: [{ exactValue: adoption }], result: { value: adoptionExists } },
     {
@@ -836,6 +840,14 @@ const cases = [
     stored({ status: 'interview' }),
     stored({ status: 'approved', updatedAt: NOW, decidedAt: NOW, decidedBy: ADMIN, idDocument: { front: RECEIVED } }),
     mockAfter(),
+  )],
+
+  // ── no approval without the recorded consent (2026-10-17) ────────────────
+  ['DENY', 'approve: the consent audit trail (private/acceptance) was never recorded', update(
+    WHO.admin,
+    storedWithId(),
+    storedWithId({ status: 'approved', updatedAt: NOW, decidedAt: NOW, decidedBy: ADMIN }),
+    mockAfter({ acceptance: false }),
   )],
 
   // ── no approval without a received ID ────────────────────────────────────

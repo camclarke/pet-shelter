@@ -48,10 +48,12 @@ import {
   DEFAULT_MY_APPLICATIONS_SERVICES,
   MyApplicationsView,
   itemsAfterFailedLoad,
+  needsAcceptanceRecord,
   withCarnetReceived,
 } from '@/app/account/MyApplications';
 import { getPublicPets, listMyApplications, withdrawMyApplication } from '../applications-client';
 import { uploadIdDocument } from '../id-document-client';
+import { recordAcceptance } from '@/lib/acceptance-client';
 import { APPLICATION_STEPS, type ApplicationStep } from '../application-steps';
 import { emptyAnswerDraft, type AnswerDraft } from '../applications';
 import type { MyApplication } from '../applications-client';
@@ -89,7 +91,7 @@ const decode = (html: string) =>
 function contractBlocks(html: string): string[] {
   const section = /<section class="contract"[^>]*>([\s\S]*?)<\/section>/.exec(html);
   assert.ok(section, 'no contract section rendered');
-  return [...section[1]!.matchAll(/<(h2|h3|p|li)\b[^>]*>([\s\S]*?)<\/\1>/g)].map((m) =>
+  return [...section[1]!.matchAll(/<(h2|h3|h4|p|li)\b[^>]*>([\s\S]*?)<\/\1>/g)].map((m) =>
     decode(m[2]!.replace(/<[^>]+>/g, '')),
   );
 }
@@ -292,9 +294,9 @@ test('the review: a summary with «Cambiar», the pet facts, the contract FILLED
   assert.ok(html.includes('Enviar no es la adopción: el equipo revisa tu solicitud y te escribe por WhatsApp.'));
 });
 
-test('the acceptance keeps its DRAFT marker while the owner and the lawyer have not approved it', () => {
-  assert.equal(ADOPTION_ACCEPTANCE.isDraft, true, 'switch-on guard 1 owns this flag; do not flip it here');
-  assert.ok(view('review').includes('apply-accept__draft'));
+test('the acceptance shows no DRAFT marker: the owner supplied the words on 2026-10-17', () => {
+  assert.equal(ADOPTION_ACCEPTANCE.isDraft, false);
+  assert.ok(!view('review').includes('apply-accept__draft'));
 });
 
 test('while sending, the one button is disabled and the screen says which half is in flight', () => {
@@ -375,6 +377,7 @@ test('the submit writes the batch FIRST and uploads the photo only after it comm
 
 test('the injectable services default to the REAL submit, upload and navigation — and production passes none', () => {
   assert.equal(DEFAULT_SERVICES.upload, uploadIdDocument, 'the default upload is not the route client');
+  assert.equal(DEFAULT_SERVICES.recordAcceptance, recordAcceptance, 'the default consent record is not the route client');
   const src = code(STEPPER);
   const defaults = src.slice(src.indexOf('export const DEFAULT_SERVICES'), src.indexOf('export interface ApplicationStepperProps'));
   assert.match(defaults, /const \{ submitApplication \} = await import\('@\/lib\/applications-client'\);\s*return submitApplication\(petId, user, submission\);/);
@@ -500,13 +503,16 @@ test('the leave dialog: our words, the safe choice first, never a browser box', 
   assert.equal(count(raw, 'btn--action'), 0, 'leaving is not the loud action');
 });
 
-test('the acceptance words take the pet name literally, whatever it contains (review 4c-2 #5)', () => {
+test("the acceptance is the owner's sentence, verbatim, whatever the pet is called (review 4c-2 #5)", () => {
+  // The owner's sentence (2026-10-17) names no animal, so no name can enter
+  // it — and a name that looks like a replacement pattern must not either.
+  const OWNER =
+    'He leído y acepto el Formulario de Adopción, sus Compromisos (Ley N° 700) y autorizo el tratamiento y almacenamiento seguro de mis datos personales, imágenes y ubicación de domicilio mientras mantenga la custodia del animalito.';
+  assert.equal(ADOPTION_ACCEPTANCE.label, OWNER);
   for (const name of ['Luna', 'Toby $&', "O'Brien $'", 'A $` B', '$1 {mascota}']) {
-    const label = acceptanceLabelFor(name);
-    assert.equal(label, `Quiero adoptar a ${name} bajo este compromiso, y sé que se firma en papel el día de la entrega.`, name);
+    assert.equal(acceptanceLabelFor(name), OWNER, name);
   }
-  const html = decode(view('review', { petName: 'Toby $&' }));
-  assert.ok(html.includes('Quiero adoptar a Toby $& bajo este compromiso'));
+  assert.ok(decode(view('review', { petName: 'Toby $&' })).includes(OWNER));
   assert.ok(!/ACCEPTANCE_PET_TOKEN,\s*petName\)|\.replace\(ACCEPTANCE_PET_TOKEN/.test(code(STEPPER)), 'String.replace is back');
 });
 
@@ -530,6 +536,20 @@ const MINE: MyApplication = {
   idDocumentMissing: true,
   identityErased: false,
 };
+
+test('«Mis solicitudes» asks again for the consent record of every OPEN, not-erased application only', () => {
+  assert.deepEqual(
+    needsAcceptanceRecord([
+      MINE,
+      { ...MINE, id: 'pet2__uid1', status: 'interview' },
+      { ...MINE, id: 'pet3__uid1', status: 'withdrawn' },
+      { ...MINE, id: 'pet4__uid1', status: 'approved' },
+      { ...MINE, id: 'pet5__uid1', identityErased: true },
+    ]),
+    ['pet1__uid1', 'pet2__uid1'],
+  );
+  assert.equal(DEFAULT_MY_APPLICATIONS_SERVICES.recordAcceptance, recordAcceptance);
+});
 
 function mine(overrides: Partial<Parameters<typeof MyApplicationsView>[0]> = {}): string {
   return decode(

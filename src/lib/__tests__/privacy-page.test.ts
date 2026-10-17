@@ -51,11 +51,18 @@ test('the page says an application survives account deletion, and no handler or 
   assert.match(read('src/app/privacy/page.tsx'), /no se borra cuando\s+borras tu cuenta/);
 
   for (const file of ['src/lib/account-delete.ts', 'src/app/api/account/delete/route.ts']) {
+    const src = read(file);
     assert.doesNotMatch(
-      read(file),
-      /adoptionApplications|['"]adoptions['"]|deleteApplication|deleteAdoption/,
-      `${file} now touches adoption records: update the privacy page`,
+      src,
+      /adoptionApplications|deleteApplication|deleteAdoption/,
+      `${file} now touches applications: update the privacy page`,
     );
+    // Since 2026-10-17 the route READS adoptions — one query, to refuse a
+    // deletion while an animal is in the person's custody. It must never
+    // write or delete one.
+    for (const use of src.matchAll(/collection\(['"]adoptions['"]\)[^;]*;/g)) {
+      assert.match(use[0], /^collection\('adoptions'\)\.where\('ownerUid', '==', uid\)\.limit\(1\)\.get\(\);$/, `${file}: ${use[0]}`);
+    }
   }
 
   // The application's own rules sit six spaces deep; nested blocks sit deeper.
@@ -66,6 +73,19 @@ test('the page says an application survives account deletion, and no handler or 
     block,
     /^ {6}allow [a-z, ]*\b(?:delete|write)\b[a-z, ]*: if (?!false;)/m,
     'the rules now let someone erase an application: update the privacy page',
+  );
+});
+
+test('SWITCH-ON GUARD: the form is not switched on before /privacy explains the custody rule', async () => {
+  // Since 2026-10-17 an account cannot be deleted while an adopted animal is
+  // with its owner (the contract's third additional clause). Today no adoption
+  // can exist, because the form is off; the /privacy rewrite of the switch-on
+  // release (4f) must say this before the first one can.
+  const { SHELTER } = await import('@/config/shelter');
+  const page = read('src/app/privacy/page.tsx');
+  assert.ok(
+    !SHELTER.adoptionApplications.enabled || /devolver|devuelvas|devolución/.test(page),
+    'adoptionApplications.enabled is true but /privacy does not explain that deleting your data while the animal is with you means returning it',
   );
 });
 

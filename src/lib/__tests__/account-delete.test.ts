@@ -22,10 +22,19 @@ function request(authorization: string | null = 'Bearer tok', body?: unknown): R
   });
 }
 
-function deps(token: VerifiedIdToken | Error, fail: Partial<Record<'avatars' | 'profile' | 'auth', Error>> = {}) {
+function deps(
+  token: VerifiedIdToken | Error,
+  fail: Partial<Record<'avatars' | 'profile' | 'auth', Error>> = {},
+  custody: boolean | Error = false,
+) {
   const calls: string[] = [];
   const logs: string[] = [];
   const d: AccountDeleteDeps = {
+    hasAnimalInCustody: async (uid) => {
+      calls.push(`custody:${uid}`);
+      if (custody instanceof Error) throw custody;
+      return custody;
+    },
     verifyIdToken: async (t, checkRevoked) => {
       calls.push(`verify:${t}:${checkRevoked}`);
       if (token instanceof Error) throw token;
@@ -49,7 +58,33 @@ function deps(token: VerifiedIdToken | Error, fail: Partial<Record<'avatars' | '
   return { d, calls, logs };
 }
 
-const deletes = (calls: string[]) => calls.filter((c) => !c.startsWith('verify:'));
+const deletes = (calls: string[]) => calls.filter((c) => !c.startsWith('verify:') && !c.startsWith('custody:'));
+
+test('an animal still in custody is 409 custody-active, and nothing is deleted (owner decision 2026-10-17)', async () => {
+  const { d, calls } = deps({ uid: 'u1', auth_time: NOW_S }, {}, true);
+  const res = await handleAccountDelete(request(), d);
+  assert.equal(res.status, 409);
+  assert.equal(res.headers.get(ACCOUNT_FAILURE_HEADER), 'custody-active');
+  assert.deepEqual(deletes(calls), []);
+  assert.ok(calls.includes('custody:u1'), 'asked about the VERIFIED uid');
+});
+
+test('a custody check that fails deletes nothing (500), rather than guessing "no animal"', async () => {
+  const { d, calls } = deps({ uid: 'u1', auth_time: NOW_S }, {}, new Error('unavailable'));
+  const res = await handleAccountDelete(request(), d);
+  assert.equal(res.status, 500);
+  assert.equal(res.headers.get(ACCOUNT_FAILURE_HEADER), 'delete-failed');
+  assert.deepEqual(deletes(calls), []);
+});
+
+test('the custody check runs only after the token, admin and recent-sign-in checks', async () => {
+  const admin = deps({ uid: 'a1', admin: true, auth_time: NOW_S }, {}, true);
+  assert.equal((await handleAccountDelete(request(), admin.d)).headers.get(ACCOUNT_FAILURE_HEADER), 'admin-account');
+  assert.ok(!admin.calls.some((c) => c.startsWith('custody:')));
+  const stale = deps({ uid: 'u1', auth_time: NOW_S - 3600 }, {}, true);
+  assert.equal((await handleAccountDelete(request(), stale.d)).headers.get(ACCOUNT_FAILURE_HEADER), 'requires-recent-login');
+  assert.ok(!stale.calls.some((c) => c.startsWith('custody:')));
+});
 
 test('no token is 401 and deletes nothing', async () => {
   const { d, calls } = deps({ uid: 'u1', auth_time: NOW_S });

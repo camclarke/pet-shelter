@@ -418,7 +418,7 @@ service cloud.firestore {
       // adminMovesApplication() each list exactly which fields may change, and
       // none of these is on either list. `idDocument` and `identityErasedAt`
       // are written later only through the Admin SDK (the ID-photo upload
-      // route, the retention sweep), which bypasses these rules.
+      // route, the admin's erase route), which bypasses these rules.
       function applicationKeys() {
         return ['petId', 'applicantUid', 'applicantEmail', 'applicantEmailVerified',
                 'answers', 'status', 'submittedAt', 'updatedAt', 'withdrawnAt',
@@ -429,13 +429,15 @@ service cloud.firestore {
 
       // ADOPTION_CONTRACT in src/config/adoption-contract.ts: version → the
       // sha256 of the exact text shown. THIS is the enforcing copy. It was
-      // EMPTY until the shelter supplied its real contract (portion 4c-1); it
-      // holds that one pair now, which changes nothing while
+      // EMPTY until the shelter supplied its real contract (portion 4c-1). Since
+      // 2026-10-17 it holds the paper's text PLUS the owner's three additional
+      // clauses; the paper-only version '2026-10-16' was dropped, because no
+      // application was ever made under it. Changes nothing while
       // applicationsEnabled() is false. A contract revision is a config change
       // AND a rules deploy; a test fails if the two drift.
       function acceptedContracts() {
         return {
-          '2026-10-16': '0874ed097f5fe7ad17ead270413a360ea00009910bec18d3b68bf20656a3dcfa'
+          '2026-10-17': '17a8c80435b956d9af4421749e0206ae012664deaa30fcfeff11c188f37cf850'
         };
       }
 
@@ -446,6 +448,16 @@ service cloud.firestore {
       // test fails if the sides checked here differ from it.
       function idDocumentReceived() {
         return resource.data.idDocument.get('front', null) is map;
+      }
+
+      // The audit trail of the electronic consent (the first additional
+      // clause): private/acceptance, with the time, the IP and the account,
+      // written ONLY by POST /api/adoption-applications/{id}/acceptance through
+      // the Admin SDK — the private create below admits 'home' and 'identity'
+      // alone, so no browser can forge one. ACCEPTANCE_DOCUMENT_ID in
+      // src/lib/applications.ts; a test fails if they drift.
+      function acceptanceRecorded() {
+        return exists(/databases/$(database)/documents/adoptionApplications/$(applicationId)/private/acceptance);
       }
 
       // SHELTER.bounds, for a home-address pin. A stored GeoPoint is a rules
@@ -485,7 +497,7 @@ service cloud.firestore {
       }
 
       // The ids whose `store` is 'identity' in src/config/shelter.ts — written
-      // ONLY to private/identity, which the retention sweep erases with the
+      // ONLY to private/identity, which the admin's erase route erases with the
       // carnet and the address. Never in `answers`, which nothing may erase.
       // THIS is the enforcing copy; a test fails if it drifts from the config.
       function identityAnswerKeys() {
@@ -587,11 +599,12 @@ service cloud.firestore {
           && (request.resource.data.status == 'withdrawn'
                 ? request.resource.data.withdrawnAt == request.time
                 : request.resource.data.withdrawnAt == null)
-          // No approval without a received ID photo (portion 4a). Enforced at
-          // approval rather than at create on purpose: the rules cannot see
-          // Storage, and the photo is uploaded after the application exists.
+          // No approval without a received ID photo (portion 4a), nor without
+          // the recorded consent (2026-10-17). Both are enforced at approval
+          // rather than at create on purpose: each is written by a server route
+          // after the application exists.
           && (request.resource.data.status != 'approved'
-                || (approvalIsOneBatch() && idDocumentReceived()));
+                || (approvalIsOneBatch() && idDocumentReceived() && acceptanceRecorded()));
       }
 
       allow get: if isAdmin()
@@ -652,7 +665,7 @@ service cloud.firestore {
       // ⚠️ Kept WITH the application, so it is not erased with the personal
       // details. Notes record that something happened — "el C.I. no coincide,
       // hay que corregirlo" — and never hold a C.I. number or anyone's phone.
-      // The retention sweep (portion 4e) BLANKS the text anyway, as a backstop:
+      // The admin's erase route (portion 4e) BLANKS the text anyway, as a backstop:
       // INTERNAL_NOTES_DOCUMENT in src/lib/applications.ts names this document
       // for it.
       match /internal/{docId} {
@@ -683,8 +696,8 @@ service cloud.firestore {
       // Both are created ONLY in the batch that creates the application:
       // `!exists` reads the parent before the batch, `existsAfter` after it,
       // and the parent's create requires both documents. Never deleted from a
-      // browser — erasure is the Admin SDK's (the identity sweep, or an
-      // admin's erase-on-request route), which must take its list of
+      // browser — erasure is the Admin SDK's (the admin's erase route), which
+      // must take its list of
       // documents from PRIVATE_DOCUMENT_IDS in src/lib/applications.ts.
       //
       // The pin is rounded to 4 decimals (about 11 m) in the browser

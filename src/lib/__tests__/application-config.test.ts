@@ -27,8 +27,10 @@ import {
   type AdoptionContract,
 } from '@/config/adoption-contract';
 import {
+  ACCEPTANCE_DOCUMENT_ID,
   ANSWER_MAX_CHARS,
   APPLICATION_STATUS_TRANSITIONS,
+  PRIVATE_DOCUMENT_IDS,
   ContractUnavailableError,
   MAX_APPLICATION_QUESTIONS,
   RULES_ANSWER_MAX_CHARS,
@@ -60,6 +62,7 @@ const FIXTURE: AdoptionContract = {
   version: '2000-01-01',
   ...FIXTURE_TEXT,
   emphasizedClauses: [],
+  additionalClauses: [],
   sha256: createHash('sha256').update(contractCanonicalText(FIXTURE_TEXT)).digest('hex'),
 };
 
@@ -411,9 +414,19 @@ test('the approval rule requires the received ID marker for exactly the configur
   );
   const admin = rulesFunctionBody('adminMovesApplication');
   assert.ok(
-    /status != 'approved'\s*\|\|\s*\(approvalIsOneBatch\(\) && idDocumentReceived\(\)\)/.test(admin),
-    'approval no longer requires both the one-batch pairing and the received ID',
+    /status != 'approved'\s*\|\|\s*\(approvalIsOneBatch\(\) && idDocumentReceived\(\) && acceptanceRecorded\(\)\)/.test(admin),
+    'approval no longer requires the one-batch pairing, the received ID AND the recorded consent',
   );
+});
+
+test("the approval rule requires the consent's audit trail, at the document ACCEPTANCE_DOCUMENT_ID names", () => {
+  const body = rulesFunctionBody('acceptanceRecorded').replace(/\s+/g, ' ');
+  assert.ok(
+    body.includes(`exists(/databases/$(database)/documents/adoptionApplications/$(applicationId)/private/${ACCEPTANCE_DOCUMENT_ID})`),
+    `acceptanceRecorded() must check private/${ACCEPTANCE_DOCUMENT_ID}`,
+  );
+  // No browser may create it: the private create admits PRIVATE_DOCUMENT_IDS alone.
+  assert.ok(!(PRIVATE_DOCUMENT_IDS as readonly string[]).includes(ACCEPTANCE_DOCUMENT_ID));
 });
 
 for (const fn of ['pinWithinServiceArea', 'withinServiceArea']) {
@@ -459,7 +472,13 @@ function contractProblems(contract: AdoptionContract): string[] {
 
 /** Every string of the contract, in order. */
 function contractStrings(contract: AdoptionContract): string[] {
-  return [...(contract.heading ? [contract.heading] : []), contract.opening, ...contract.clauses, contract.closing];
+  return [
+    ...(contract.heading ? [contract.heading] : []),
+    contract.opening,
+    ...contract.clauses,
+    contract.closing,
+    ...contract.additionalClauses.flatMap((c) => [c.title, ...c.blocks]),
+  ];
 }
 
 /** Every string the shelter's paper prints that the config carries — contract excluded. */
@@ -517,6 +536,37 @@ test('the contract checker catches a wrong hash, a bad version, a lost token and
   assert.equal(contractProblems({ ...FIXTURE, clauses: ['  '] }).length, 2);
   assert.ok(contractProblems({ ...FIXTURE, opening: FIXTURE.opening.replace(CONTRACT_CI_TOKEN, '') }).length >= 1);
   assert.ok(contractProblems({ ...FIXTURE, emphasizedClauses: [5] }).length >= 1);
+});
+
+test("the owner's three additional clauses follow the paper, verbatim, and the paper part hashes as before", () => {
+  // Literals: the titles and the number of paragraphs are the owner's text of
+  // 2026-10-17. A changed word shows up in the hash check below; these catch
+  // a clause dropped, reordered or merged.
+  assert.ok(ADOPTION_CONTRACT);
+  assert.equal(ADOPTION_CONTRACT.version, '2026-10-17');
+  assert.deepEqual(
+    ADOPTION_CONTRACT.additionalClauses.map((c) => [c.title, c.blocks.length]),
+    [
+      ['CLÁUSULA ADICIONAL: VALIDEZ DEL CONSENTIMIENTO ELECTRÓNICO', 2],
+      ['CLÁUSULA ADICIONAL: TRATAMIENTO Y ALMACENAMIENTO DE DATOS PERSONALES EN LA NUBE', 7],
+      ['CLÁUSULA ADICIONAL: CONDICIÓN RESOLUTORIA POR SUPRESIÓN DE DATOS', 1],
+    ],
+  );
+  const purposes = ADOPTION_CONTRACT.additionalClauses[1]!.blocks.filter((b) => /^\d\. /.test(b));
+  assert.deepEqual(purposes.map((b) => b.slice(0, 2)), ['1.', '2.', '3.'], 'the three purposes, numbered as written');
+  // What the clauses promise is what the system records and deletes.
+  const text = contractCanonicalText(ADOPTION_CONTRACT);
+  assert.ok(text.includes('la dirección IP de origen'), 'the acceptance route records the IP because the clause says so');
+  assert.ok(text.includes('fallecimiento por causas naturales'), 'the erase reason "died" means a natural death');
+  // "N°" is the degree sign throughout, never the ordinal indicator: the two
+  // look alike and hash differently.
+  assert.ok(!text.includes('º'));
+  // The paper part alone still hashes to the 2026-10-16 value, so the
+  // canonical function did not change under it.
+  const paper = createHash('sha256')
+    .update(contractCanonicalText({ ...ADOPTION_CONTRACT, additionalClauses: [] }), 'utf8')
+    .digest('hex');
+  assert.equal(paper, '0874ed097f5fe7ad17ead270413a360ea00009910bec18d3b68bf20656a3dcfa');
 });
 
 test('the configured contract exists and is internally consistent', () => {
