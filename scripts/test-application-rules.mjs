@@ -128,7 +128,7 @@ const SHIPPED_CONTRACT = (() => {
 })();
 
 /** Whether the evaluated file ships with applicationsEnabled() returning false. */
-const SHIPPED_SWITCH_OFF = /function applicationsEnabled\(\) \{\s*return false;\s*\}/.test(source);
+const SHIPPED_SWITCH_ON = /function applicationsEnabled\(\) \{\s*return true;\s*\}/.test(source);
 
 /** What the upload route records through the Admin SDK once the front arrives. */
 const RECEIVED = { receivedAt: EARLIER, bytes: 120000, generation: '1760000000000000' };
@@ -449,15 +449,15 @@ const cases = [
     functionMocks: mockCreate('available'),
   }, SHIPPED_CONTRACT_ON],
 
-  // ── portion 4c-1: the file EXACTLY as it ships (switch off, real pair) ───
-  // The inertness proof for releasing these rules before 4f: the complete
-  // three-document batch with the real contract is refused, by the switch.
-  ['DENY', 'SHIPPED FILE: the application, complete, with the real contract', {
+  // ── the file EXACTLY as it ships (switch ON since 2026-10-17, real pair) ──
+  // Since the switch-on, the complete three-document batch with the real
+  // contract is accepted; the other cases are unchanged.
+  ['ALLOW', 'SHIPPED FILE: the application, complete, with the real contract', {
     request: request(WHO.ana, 'create', APP_PATH, withShippedContract()),
     functionMocks: mockCreate('available'),
   }, SHIPPED_FILE],
-  ['DENY', 'SHIPPED FILE: its private/home', homeCreate(WHO.ana, home()), SHIPPED_FILE],
-  ['DENY', 'SHIPPED FILE: its private/identity', identityCreate(WHO.ana, identity()), SHIPPED_FILE],
+  ['ALLOW', 'SHIPPED FILE: its private/home', homeCreate(WHO.ana, home()), SHIPPED_FILE],
+  ['ALLOW', 'SHIPPED FILE: its private/identity', identityCreate(WHO.ana, identity()), SHIPPED_FILE],
   ['ALLOW', 'SHIPPED FILE: the applicant still reads own application', {
     request: request(WHO.ana, 'get', APP_PATH),
     resource: { data: stored() },
@@ -1333,9 +1333,10 @@ for (const [, name, body] of cases) {
   }
 }
 
-// The SHIPPED_FILE cases prove "inert while off" only if the file IS off.
-if (!SHIPPED_SWITCH_OFF && selected.some(([, , , options]) => options?.switch === 'shipped')) {
-  console.error(`${rulesPath} ships with applicationsEnabled() not returning false — the SHIPPED FILE cases would prove nothing`);
+// The SHIPPED_FILE cases prove the file AS SHIPPED only if it ships switched on
+// (2026-10-17: they were "inert while off" cases before the switch-on).
+if (!SHIPPED_SWITCH_ON && selected.some(([, , , options]) => options?.switch === 'shipped')) {
+  console.error(`${rulesPath} ships with applicationsEnabled() not returning true — the SHIPPED FILE cases would prove nothing`);
   process.exit(2);
 }
 

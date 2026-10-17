@@ -325,12 +325,12 @@ export const SHELTER: ShelterConfig = {
   },
 
   adoptionApplications: {
-    // ⚠️ OFF. See `enabled` above: the switch-on guards in
-    // application-identity.test.ts fail the moment this is true before the
-    // acceptance wording is approved, the erase action exists and /privacy is
-    // rewritten. Flipping it also means changing `applicationsEnabled()` in
-    // firestore.rules to match, then deploying the rules.
-    enabled: false,
+    // ON. Switched on 2026-10-17 with the owner's approval. The switch-on
+    // guards in application-identity.test.ts are satisfied (acceptance wording
+    // approved, erase action built, /privacy rewritten). The kill switch is
+    // `applicationsEnabled()` in firestore.rules plus a rules release: setting
+    // it back to false there stops every create, whatever this says.
+    enabled: true,
     questionsAreDraft: false,
 
     // ═══ WAWITAS' PAPER ADOPTION FORM (portion 4c-1) ═══════════════════════
