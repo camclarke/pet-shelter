@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { getPetBySlug } from '@/lib/pets-server';
 import { whatsappLink } from '@/lib/pets';
 import { SHELTER } from '@/config/shelter';
+import { ADOPTION_CONTRACT } from '@/config/adoption-contract';
+import { petFactRows } from '@/lib/application-steps';
 import { t } from '@/i18n';
 import { ApplicationForm } from './ApplicationForm';
 
@@ -57,6 +59,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ApplyPage({ params }: Props) {
   const config = SHELTER.adoptionApplications;
   if (!config.enabled) notFound();
+  // No contract, nothing to apply under: the form's first step IS the contract.
+  const contract = ADOPTION_CONTRACT;
+  if (contract === null) notFound();
 
   const { slug } = await params;
   const pet = await getPetBySlug(slug);
@@ -64,6 +69,12 @@ export default async function ApplyPage({ params }: Props) {
 
   const copy = t.applications;
   const accepting = pet.status === 'available';
+  // The paper's section 4, from the PUBLIC fields only (D16): nothing from
+  // `detail` or `medical`, and nothing about any application, is rendered here.
+  const petFacts = petFactRows(pet, config.petSection, {
+    age: (months) => t.formatAge(months),
+    ageRange: (min, max) => t.formatAgeRange(min, max),
+  });
 
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
@@ -92,6 +103,8 @@ export default async function ApplyPage({ params }: Props) {
             slug={pet.slug}
             shelterName={SHELTER.name}
             questions={config.questions}
+            contract={contract}
+            petFacts={petFacts}
           />
         ) : (
           <p className="auth__notice" role="status">

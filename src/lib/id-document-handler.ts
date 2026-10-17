@@ -5,9 +5,9 @@
  * No `server-only`, no Firebase import: the route injects token verification,
  * the application read, the Storage save and delete, and the marker
  * transaction, so every branch is unit-tested with fakes (the
- * `account-delete.ts` split). The browser will import
- * `ID_DOCUMENT_FAILURE_HEADER` and `idDocumentFailure()` from here in 4c, so
- * both halves agree on one header.
+ * `account-delete.ts` split). The header, the failure list and the size cap
+ * live in `id-document-protocol.ts`, which the browser imports (4c-2) and this
+ * file re-exports, so both halves agree on one header.
  *
  * ═══ WHY A ROUTE, NOT A CLIENT UPLOAD ═══════════════════════════════════════
  * An upload through the Firebase client SDK auto-mints a download token, and a
@@ -90,57 +90,17 @@ import { isIdDocumentSide } from './id-document-paths';
 import { inspectJpeg } from './jpeg-inspect';
 import { READ_DEADLINE_MS, readCapped, type CappedRead } from './read-capped';
 import type { SaveIdDocumentOutcome, StoredIdDocument } from './id-document-store';
+import { ID_DOCUMENT_FAILURE_HEADER, ID_DOCUMENT_MAX_BYTES, type IdDocumentFailure } from './id-document-protocol';
 import type { ApplicationStatus, IdDocumentSide } from './types';
 
-/**
- * The largest body accepted: about 1.5 MB. A 2048 px JPEG at the browser's
- * 0.85 quality is about 1 MB at most (INFERRED), and every extra megabyte is
- * ~30 s on a 256 kbps phone uplink against Firebase Hosting's 60 s ceiling.
- */
-export const ID_DOCUMENT_MAX_BYTES = 1_536 * 1024;
+// The wire contract lives in `id-document-protocol.ts` (portion 4c-2), so the
+// browser reads a response without bundling this handler. Re-exported here, so
+// the route and the tests import exactly what they did before the split.
+export { ID_DOCUMENT_FAILURES, ID_DOCUMENT_FAILURE_HEADER, ID_DOCUMENT_MAX_BYTES, idDocumentFailure } from './id-document-protocol';
+export type { IdDocumentFailure } from './id-document-protocol';
 
 /** The whole body read. Below Firebase Hosting's 60 s ceiling, with room for the save and the marker. */
 export const ID_DOCUMENT_READ_DEADLINE_MS = READ_DEADLINE_MS;
-
-/** Stamped on every failure THIS handler writes. Its absence means the edge answered. */
-export const ID_DOCUMENT_FAILURE_HEADER = 'X-Id-Document-Failure';
-
-export type IdDocumentFailure =
-  | 'unauthenticated'
-  | 'disabled'
-  | 'not-yours'
-  | 'unknown-side'
-  | 'not-jpeg'
-  | 'too-large'
-  | 'too-slow'
-  | 'not-open'
-  | 'erased'
-  | 'already-received'
-  | 'application-read-failed'
-  | 'body-read-failed'
-  | 'photo-too-small'
-  | 'not-clean-jpeg'
-  | 'save-failed'
-  | 'marker-failed';
-
-export const ID_DOCUMENT_FAILURES: readonly IdDocumentFailure[] = [
-  'unauthenticated',
-  'disabled',
-  'not-yours',
-  'unknown-side',
-  'not-jpeg',
-  'too-large',
-  'too-slow',
-  'not-open',
-  'erased',
-  'already-received',
-  'application-read-failed',
-  'body-read-failed',
-  'photo-too-small',
-  'not-clean-jpeg',
-  'save-failed',
-  'marker-failed',
-];
 
 /** The application as the handler needs it — raw values, validated here. */
 export interface UploadApplicationSnapshot {
@@ -389,20 +349,4 @@ export async function handleIdDocumentUpload(
 
   // 11. Received. Nothing in the answer can be used to read the photo.
   return new Response(null, { status: 201, headers: { 'cache-control': 'no-store' } });
-}
-
-/**
- * The browser's reading of a response (4c): null on success, one of our
- * failures when we wrote the header, `unexpected` when we did not — Firebase
- * Hosting's own 503 or 504 carries no header, and must not be read as ours.
- */
-export function idDocumentFailure(response: {
-  ok: boolean;
-  headers: { get(name: string): string | null };
-}): IdDocumentFailure | 'unexpected' | null {
-  if (response.ok) return null;
-  const header = response.headers.get(ID_DOCUMENT_FAILURE_HEADER);
-  return (ID_DOCUMENT_FAILURES as readonly string[]).includes(header ?? '')
-    ? (header as IdDocumentFailure)
-    : 'unexpected';
 }

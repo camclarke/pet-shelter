@@ -3793,6 +3793,420 @@ textarea {
   flex: 1 1 100%;
 }
 
+/* "Falta tu carnet" under an open application (portion 4c-2). The upload sits
+   on its own full-width row, below the text and above the withdraw button. */
+.my-applications__carnet {
+  display: block;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 3px solid var(--sun);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.my-applications__upload {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+/* ── the applicant's step-by-step form (ApplicationStepper.tsx, 4c-2) ──────
+   One column at every width. Every control is ≥ 44px; the buttons are full
+   width and stacked, Continuar first. No sticky bar: the iOS keyboard would
+   cover it. Nothing here sets a size on a button — the 19px floor stands. */
+.apply-stepper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.apply-step__title {
+  margin-top: var(--space-1);
+  font-size: 22px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* Focus is moved here on every step change, so a screen reader announces the
+   step. A programmatic focus target, not a control: no ring of its own. */
+.apply-step__title:focus {
+  outline: none;
+}
+
+.apply-step__lead {
+  margin-top: 0;
+}
+
+/* The paper's own introductory paragraph, verbatim, above DATOS PERSONALES. */
+.apply-step__intro {
+  padding: 10px 12px;
+  border-left: 3px solid var(--line-strong);
+  background: var(--cream);
+  opacity: 1;
+}
+
+.apply-step__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: var(--space-1);
+}
+
+.apply-step__primary,
+.apply-step__back {
+  width: 100%;
+}
+
+/* ── the contract (ContractText.tsx) — the shelter's words, never collapsed */
+.contract {
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  font-size: 17px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+.contract__heading {
+  margin: 0 0 12px;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 900;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  letter-spacing: 0.02em;
+}
+
+.contract__opening {
+  margin: 0 0 10px;
+}
+
+.contract__clauses {
+  margin: 0 0 12px 1.1em;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.contract__closing {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* The paper's dotted blank. Wide enough to read as a blank, never wider than
+   the line it sits in at 360px. */
+.contract__blank {
+  display: inline-block;
+  width: 9em;
+  max-width: 60%;
+  height: 1em;
+  vertical-align: baseline;
+  border-bottom: 2px dotted currentColor;
+  opacity: 0.6;
+}
+
+.contract__filled {
+  overflow-wrap: anywhere;
+}
+
+/* In place of the paper's signature lines (D11). An aside, never inside the
+   contract block, so it cannot be read as part of what was hashed. */
+.apply-paper-note {
+  padding: 10px 12px;
+  border-left: 3px solid var(--jade);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* ── the carnet photo (IdPhotoStep.tsx) ──────────────────────────────────── */
+.id-capture,
+.id-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.id-capture__tips,
+.id-capture__hint {
+  line-height: 1.5;
+}
+
+.id-capture__preview {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.id-capture__preview img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.id-capture__question {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.id-capture__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* A label styled as a button, around a visually-hidden file input: the native
+   picker opens from the person's own tap (Chrome 130+ drops the change event
+   of a programmatic click on a hidden input). */
+.id-capture__pick {
+  position: relative;
+  width: 100%;
+  cursor: pointer;
+}
+
+.id-capture__pick:focus-within {
+  outline: 3px solid var(--jade-deep);
+  outline-offset: 2px;
+}
+
+.id-capture__pick.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.id-upload__send {
+  width: 100%;
+}
+
+.id-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: stretch;
+}
+
+/* ── review and send (ReviewStep.tsx) ────────────────────────────────────── */
+.apply-review__group {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  min-width: 0;
+}
+
+.apply-review__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.apply-review__title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.apply-review__rows {
+  margin: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apply-review__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.apply-review__row dt {
+  font-size: 12.5px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.apply-review__row dd {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.apply-review__empty {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.apply-review__summary {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+
+.apply-review__before {
+  margin-top: var(--space-1);
+  font-size: 14px;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+/* The one checkbox. The whole row is the target, 44px at least; never
+   pre-ticked; the error sits beside it, never on a disabled button. */
+.apply-accept {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.apply-accept__box {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 14px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream);
+  font-size: 15px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.apply-accept__box input {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  accent-color: var(--jade);
+}
+
+.apply-accept__box:has(input:checked) {
+  border-color: var(--jade);
+}
+
+.apply-accept__box:has(input:focus-visible) {
+  outline: 2px solid var(--jade);
+  outline-offset: 2px;
+}
+
+.apply-accept--invalid .apply-accept__box {
+  border-color: var(--coral);
+}
+
+.apply-accept__draft {
+  align-self: flex-start;
+  padding: 2px 9px;
+  border: 1px dashed var(--sun);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.apply-upload-failed {
+  align-items: stretch;
+}
+
+/* Focus moves to these headings when the outcome appears (review 4c-2 #8):
+   programmatic targets, not controls — no ring of their own. */
+.apply-sent__title:focus {
+  outline: none;
+}
+
+/* "¿Salir sin enviar tu solicitud?" (LeaveDialog). Fixed to the bottom, so it
+   is seen whether the link tapped was in the header or the footer; never a
+   browser confirm. Above the header's stacking, below nothing. */
+.apply-leave {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.apply-leave__backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--charcoal) 45%, transparent);
+}
+
+.apply-leave__panel {
+  position: relative;
+  width: 100%;
+  max-width: 42rem;
+  margin: 0 16px 16px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--cream-2);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.apply-leave__body {
+  margin-top: 0;
+  opacity: 1;
+}
+
+.apply-leave__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.apply-leave__stay,
+.apply-leave__go {
+  width: 100%;
+}
+
+.apply-upload-failed .auth__link {
+  align-self: flex-start;
+}
+
+/* /adopt/contract prints as the commitments alone: no header, ticker, footer
+   or back link, black on white whatever the theme. */
+@media print {
+  body:has(.contract-page) .skip-link,
+  body:has(.contract-page) .header,
+  body:has(.contract-page) .ticker,
+  body:has(.contract-page) .site-footer,
+  body:has(.contract-page) .no-print {
+    display: none !important;
+  }
+
+  body:has(.contract-page) {
+    background: #fff;
+    color: #000;
+  }
+
+  .contract-page .auth {
+    max-width: none;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .contract-page .contract {
+    border: 0;
+    background: none;
+    padding: 0;
+  }
+}
+
 .queue-filter {
   max-width: 20rem;
   margin-top: var(--space-3);

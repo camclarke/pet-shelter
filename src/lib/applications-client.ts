@@ -36,10 +36,13 @@ import {
   buildApplicationCreate,
   buildHomeCreate,
   buildIdentityCreate,
+  idDocumentBadge,
+  isIdentityErased,
   requireAcceptance,
   requireContract,
   withdrawalPatch,
   type AcceptanceGiven,
+  type IdDocumentMarker,
   type ValidHome,
 } from './applications';
 import { resolveServerTime } from './server-time';
@@ -52,6 +55,14 @@ export interface MyApplication {
   status: ApplicationStatus;
   submittedAt: number | null;
   updatedAt: number | null;
+  /**
+   * Open, not erased, and a configured side of the ID photo has not arrived —
+   * "Falta tu carnet" (portion 4c-2). Decided by `idDocumentBadge`, the same
+   * predicate the admin queue's "Sin carnet" uses, so the two cannot disagree.
+   */
+  idDocumentMissing: boolean;
+  /** `isIdentityErased(identityErasedAt)` — the one "erased" check. */
+  identityErased: boolean;
 }
 
 function millis(value: unknown): number | null {
@@ -59,12 +70,18 @@ function millis(value: unknown): number | null {
 }
 
 function toMine(id: string, data: Record<string, unknown>): MyApplication {
+  const status = data.status as ApplicationStatus;
+  const identityErased = isIdentityErased(data.identityErasedAt);
   return {
     id,
     petId: String(data.petId ?? ''),
-    status: data.status as ApplicationStatus,
+    status,
     submittedAt: millis(data.submittedAt),
     updatedAt: millis(data.updatedAt),
+    idDocumentMissing:
+      idDocumentBadge({ status, idDocument: data.idDocument as IdDocumentMarker | undefined, identityErased }) ===
+      'missing',
+    identityErased,
   };
 }
 
@@ -87,18 +104,17 @@ export interface ApplicationSubmission {
   answers: Record<string, ApplicationAnswer>;
   /**
    * The `store: 'identity'` answers — into the admin-only, erasable
-   * `private/identity`. Optional in the TYPE only until the 4c-2 stepper
-   * passes it; a submission without it is refused before the network.
+   * `private/identity`. Required since the 4c-2 stepper; a JavaScript caller
+   * that omits it anyway is still refused before the network.
    */
-  identity?: Record<string, ApplicationAnswer>;
-  /** The address step. Optional in the TYPE only, like `identity`. */
-  home?: ValidHome;
+  identity: Record<string, ApplicationAnswer>;
+  /** The address step → `private/home`. Required, like `identity`. */
+  home: ValidHome;
   /**
-   * The acceptance box, ticked under the contract version the screen showed.
-   * Optional in the TYPE only, like `identity`: today's single-page form has
-   * no box, so its submit is refused before the network.
+   * The acceptance box, ticked under the contract version the screen showed
+   * (the review step). Required, and checked again before the network.
    */
-  acceptance?: AcceptanceGiven;
+  acceptance: AcceptanceGiven;
 }
 
 /**
@@ -120,10 +136,10 @@ export interface ApplicationSubmission {
  *
  * ── Why it can throw before sending anything ──────────────────────────────
  * - `ContractUnavailableError` if `ADOPTION_CONTRACT` were null or malformed.
- * - When `home` or `identity` is missing or invalid. Both are optional in the
- *   type only until the step-by-step form passes them (portion 4c-2): today's
- *   single-page form collects no address, and is switched off, so its submit is
- *   refused here rather than at the rules.
+ * - When `home` or `identity` is missing or invalid. Both are required by the
+ *   type since the step-by-step form (portion 4c-2) passes them; the runtime
+ *   checks stay, so a caller that skipped the type is refused here rather than
+ *   at the rules.
  * - `ContractNotAcceptedError` unless `acceptance` says the box was ticked for
  *   the contract version being recorded. Nothing records an acceptance the
  *   person did not give.

@@ -3,38 +3,36 @@
  *
  * Four states, in the order a visitor meets them:
  *   1. auth still resolving           → a quiet placeholder (never a flash of the sign-in prompt)
- *   2. signed out                     → why an account is needed, and a link that RETURNS here
- *   3. signed in, already applied     → the status of that application, not a second form
- *   4. signed in, not yet applied     → the questions, then an honest confirmation
+ *   2. signed out                     → what this is, why an account is needed,
+ *                                       a link to read the commitments first, and a
+ *                                       sign-in link that RETURNS here
+ *   3. signed in, already applied     → the status of that application, not a
+ *                                       second form — and "Falta tu carnet" with
+ *                                       the upload, while its ID photo is missing
+ *   4. signed in, not yet applied     → the seven-step form (`ApplicationStepper`)
  *
  * ⚠️ The WhatsApp button is rendered by the page ABOVE this component, in every
  * state. The account requirement lives here, below it, and never in front of it
  * — plan §6's design rule.
  *
- * ⚠️ Answers are never logged and never stored in the browser. A failed submit
- * keeps them in memory so nothing has to be retyped, and that is all: a shared
- * phone in a family is exactly where a stranger's household details must not
- * be left behind in localStorage.
+ * ⚠️ Answers are never logged and never stored in the browser. The stepper
+ * keeps them in memory only: a shared phone in a family is exactly where a
+ * stranger's household details must not be left behind in localStorage.
  */
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 
 import { useAuth } from '@/components/AuthProvider';
+import type { AdoptionContract } from '@/config/adoption-contract';
 import type { ApplicationQuestion } from '@/config/shelter';
-import {
-  emptyAnswerDraft,
-  splitAnswersByStore,
-  validateAnswers,
-  type AnswerDraft,
-  type AnswerDraftValue,
-  type ApplicationAnswerError,
-} from '@/lib/applications';
+import type { PetFact } from '@/lib/application-steps';
 import { signInHrefReturningTo } from '@/lib/return-path';
 import { t } from '@/i18n';
-import { ApplicationFields, questionDomId } from './ApplicationFields';
+import { ApplicationStepper } from './ApplicationStepper';
+import { IdPhotoUploader } from './IdPhotoStep';
 
 import type { MyApplication } from '@/lib/applications-client';
 
@@ -42,7 +40,6 @@ type Phase =
   | { kind: 'checking' }
   | { kind: 'existing'; application: MyApplication }
   | { kind: 'form' }
-  | { kind: 'sent' }
   | { kind: 'check-failed' };
 
 export interface ApplicationFormProps {
@@ -51,17 +48,26 @@ export interface ApplicationFormProps {
   slug: string;
   shelterName: string;
   questions: readonly ApplicationQuestion[];
+  /** `ADOPTION_CONTRACT`, non-null: the page 404s while there is none. */
+  contract: AdoptionContract;
+  /** DATOS DEL PELUDITO ADOPTADO, from the public pet document (D16). */
+  petFacts: readonly PetFact[];
 }
 
-export function ApplicationForm({ petId, petName, slug, shelterName, questions }: ApplicationFormProps) {
+export function ApplicationForm({
+  petId,
+  petName,
+  slug,
+  shelterName,
+  questions,
+  contract,
+  petFacts,
+}: ApplicationFormProps) {
   const copy = t.applications;
   const { user, loading } = useAuth();
 
   const [phase, setPhase] = useState<Phase>({ kind: 'checking' });
-  const [draft, setDraft] = useState<AnswerDraft>(() => emptyAnswerDraft(questions));
-  const [errors, setErrors] = useState<Record<string, ApplicationAnswerError>>({});
-  const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [justUploaded, setJustUploaded] = useState(false);
 
   const check = useCallback(async () => {
     if (!user) return;
@@ -80,66 +86,11 @@ export function ApplicationForm({ petId, petName, slug, shelterName, questions }
     if (!loading && user) void check();
   }, [loading, user, check]);
 
-  function change(id: string, value: AnswerDraftValue) {
-    setDraft((previous) => ({ ...previous, [id]: value }));
-    // Clear that one error as soon as it is being fixed; the rest stay until
-    // the next submit, so the list does not jump while someone is typing.
-    setErrors((previous) => {
-      if (!(id in previous)) return previous;
-      const next = { ...previous };
-      delete next[id];
-      return next;
-    });
-  }
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!user) return;
-    setNotice(null);
-
-    const validation = validateAnswers(questions, draft);
-    if (!validation.valid) {
-      setErrors(validation.errors);
-      setNotice(copy.fixErrors);
-      const first = questions.find((q) => q.id in validation.errors);
-      if (first) document.getElementById(questionDomId(first.id))?.scrollIntoView({ block: 'center' });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const { submitApplication } = await import('@/lib/applications-client');
-      // The C.I., the references and the landlord go to private/identity, never
-      // into `answers`. This single-page form collects no address, so the
-      // client refuses before sending anything — the 4c-2 stepper replaces it.
-      const split = splitAnswersByStore(questions, validation.answers);
-      await submitApplication(petId, user, { answers: split.application, identity: split.identity });
-      setPhase({ kind: 'sent' });
-      window.scrollTo({ top: 0 });
-    } catch (caught) {
-      const code = (caught as { code?: string })?.code;
-      // The code only. The payload is a private person's household.
-      console.error('[apply] could not submit', code);
-      setNotice(code === 'permission-denied' ? copy.submitRefused : copy.submitFailed);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (loading) {
     return <p className="auth__loading" aria-busy="true">{copy.loading}</p>;
   }
 
-  if (!user) {
-    return (
-      <div className="apply-gate">
-        <p className="auth__prose">{copy.signInPrompt}</p>
-        <Link href={signInHrefReturningTo(`/adopt/${slug}/apply`)} className="btn btn--action">
-          {copy.signInButton}
-        </Link>
-      </div>
-    );
-  }
+  if (!user) return <SignInGate slug={slug} />;
 
   switch (phase.kind) {
     case 'checking':
@@ -159,72 +110,105 @@ export function ApplicationForm({ petId, petName, slug, shelterName, questions }
 
     case 'existing':
       return (
-        <div className="apply-gate">
-          <p className="auth__notice" role="status">
-            {copy.alreadyApplied}{' '}
-            <strong className="app-status">{t.applicantStatusLabel(phase.application.status)}</strong>
-          </p>
-          <p className="auth__prose">{t.applicantStatusExplanation(phase.application.status)}</p>
-          <Link href="/account" className="btn btn--brand">
-            {copy.goToAccount}
-          </Link>
-        </div>
+        <ExistingApplication
+          application={phase.application}
+          justUploaded={justUploaded}
+          uploader={
+            <IdPhotoUploader
+              user={user}
+              applicationId={phase.application.id}
+              onUploaded={() => {
+                setJustUploaded(true);
+                setPhase({ kind: 'existing', application: { ...phase.application, idDocumentMissing: false } });
+              }}
+            />
+          }
+        />
       );
-
-    case 'sent':
-      return <ApplicationSent petName={petName} shelterName={shelterName} slug={slug} />;
 
     case 'form':
       return (
-        <form className="auth__form apply-form" onSubmit={submit} noValidate>
+        <div className="apply-form">
           <p className="auth__hint">{copy.privacy(shelterName)}</p>
-          <ApplicationFields
+          <ApplicationStepper
+            user={user}
+            petId={petId}
+            petName={petName}
+            slug={slug}
+            shelterName={shelterName}
             questions={questions}
-            draft={draft}
-            errors={errors}
-            disabled={busy}
-            onChange={change}
+            contract={contract}
+            petFacts={petFacts}
           />
-          {notice && (
-            <p className="auth__error" role="alert">
-              {notice}
-            </p>
-          )}
-          <button type="submit" className="btn btn--action auth__submit" disabled={busy}>
-            {busy ? copy.submitting : copy.submit}
-          </button>
-        </form>
+        </div>
       );
   }
 }
 
-/** The confirmation. Every line of it is true — see `confirmationSteps` in the es catalogue. */
-export function ApplicationSent({
-  petName,
-  shelterName,
-  slug,
-}: {
-  petName: string;
-  shelterName: string;
-  slug: string;
-}) {
+/**
+ * Signed out: what this is (a request, completed in person, signed on paper),
+ * why an account is needed, a sign-in link that RETURNS here, and the
+ * commitments to read BEFORE creating an account (D13). Presentational.
+ */
+export function SignInGate({ slug }: { slug: string }) {
   const copy = t.applications;
+  const steps = t.applicationSteps;
   return (
-    <div className="apply-sent" role="status">
-      <h2 className="t-title apply-sent__title">{copy.confirmationTitle}</h2>
-      <ol className="apply-steps">
-        {copy.confirmationSteps(petName, shelterName).map((step) => (
-          <li key={step}>{step}</li>
-        ))}
-      </ol>
-      <div className="auth__actions">
-        <Link href="/account" className="btn btn--brand">
-          {copy.goToAccount}
-        </Link>
-        <Link href={`/adopt/${slug}`} className="auth__link apply-back">
-          {copy.backToPet(petName)}
-        </Link>
-      </div>
+    <div className="apply-gate">
+      <p className="auth__prose">{steps.gateIntro}</p>
+      <p className="auth__prose">{copy.signInPrompt}</p>
+      <Link href={signInHrefReturningTo(`/adopt/${slug}/apply`)} className="btn btn--action">
+        {copy.signInButton}
+      </Link>
+      <Link href="/adopt/contract" className="auth__link">
+        {steps.readContract}
+      </Link>
     </div>
   );
 }
+
+/**
+ * Already applied: the status, never a second form — and "Falta tu carnet"
+ * with the upload while the ID photo is missing. This page only renders while
+ * applications are switched on, so the upload is offered unconditionally here
+ * (`/account` checks the switch, because it renders either way). Presentational:
+ * the uploader is handed in.
+ */
+export function ExistingApplication({
+  application,
+  justUploaded,
+  uploader,
+}: {
+  application: MyApplication;
+  justUploaded: boolean;
+  uploader: ReactNode;
+}) {
+  const copy = t.applications;
+  const steps = t.applicationSteps;
+  return (
+    <div className="apply-gate">
+      <p className="auth__notice" role="status">
+        {copy.alreadyApplied}{' '}
+        <strong className="app-status">{t.applicantStatusLabel(application.status)}</strong>
+      </p>
+      <p className="auth__prose">{t.applicantStatusExplanation(application.status)}</p>
+      {application.idDocumentMissing ? (
+        <div className="id-missing">
+          <p className="auth__notice auth__notice--warn">{steps.carnetMissing}</p>
+          {uploader}
+        </div>
+      ) : (
+        justUploaded && (
+          <p className="auth__notice" role="status">
+            {steps.uploadDone}
+          </p>
+        )
+      )}
+      <Link href="/account" className="btn btn--brand">
+        {copy.goToAccount}
+      </Link>
+    </div>
+  );
+}
+
+export { ApplicationSent } from './ApplicationSent';

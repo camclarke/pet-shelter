@@ -320,6 +320,8 @@ test('nothing that touches private/identity logs anything but an error code', ()
     'src/app/admin/applications/[applicationId]/ApplicationReview.tsx',
     'src/app/adopt/[slug]/apply/ApplicationForm.tsx',
     'src/app/adopt/[slug]/apply/ApplicationFields.tsx',
+    'src/app/adopt/[slug]/apply/ApplicationStepper.tsx',
+    'src/lib/application-steps.ts',
   ]) {
     assert.deepEqual(payloadLoggingProblems(file, read(file)), []);
   }
@@ -349,10 +351,18 @@ test('the queue never loads private/identity; the review reads it on its own', (
 });
 
 test('the identity answers are never written into answers', () => {
-  // The single-page form and the client both split before writing.
-  const form = code('src/app/adopt/[slug]/apply/ApplicationForm.tsx');
-  assert.ok(form.includes('splitAnswersByStore('), 'the form no longer splits the answers by store');
-  assert.match(form, /answers: split\.application, identity: split\.identity/);
+  // Since 4c-2 the stepper builds its submission through the pure, tested
+  // buildSubmission(), which splits by store — and hands each half to the
+  // client under its own name.
+  const steps = code('src/lib/application-steps.ts');
+  const builder = steps.slice(steps.indexOf('export function buildSubmission'));
+  assert.ok(builder.includes('splitAnswersByStore('), 'buildSubmission no longer splits the answers by store');
+  assert.match(builder, /answers: split\.application, identity: split\.identity/);
+  const stepper = code('src/app/adopt/[slug]/apply/ApplicationStepper.tsx');
+  assert.ok(stepper.includes('buildSubmission(stepperState, questions)'), 'the stepper no longer uses buildSubmission');
+  assert.match(stepper, /answers: submission\.answers,\s*identity: submission\.identity,\s*home: submission\.home,/);
+  // The old single-page submit is gone: nothing else on the apply page writes.
+  assert.ok(!code('src/app/adopt/[slug]/apply/ApplicationForm.tsx').includes('submitApplication'));
 });
 
 // ─── 6. THE SWITCH-ON GUARDS ────────────────────────────────────────────────

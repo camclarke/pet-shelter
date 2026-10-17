@@ -40,7 +40,8 @@ import type {
   ApprovalBlocker,
   ApprovalWarning,
 } from '@/lib/applications';
-import type { ApplicationCopy, EventsCopy } from './messages';
+import type { ApplicationCopy, ApplicationStepsCopy, EventsCopy } from './messages';
+import type { IdPhotoProblem, IdUploadProblem } from '@/lib/id-document-client';
 import { EVENT_LIMITS, type EventError, type EventWarning } from '@/lib/events';
 import { WALL_YEAR_MAX, WALL_YEAR_MIN } from '@/lib/zoned-time';
 
@@ -298,7 +299,7 @@ const APPLICATION_COPY: ApplicationCopy = {
   submitFailed:
     'No pudimos enviar la solicitud. Revisa tu conexión e intenta de nuevo: tus respuestas siguen aquí.',
   submitRefused:
-    'No pudimos guardar la solicitud. Puede que este animalito ya no esté disponible o que ya hayas postulado. Revisa «Mi cuenta».',
+    'No pudimos guardar la solicitud. Puede que este animalito ya no esté disponible, que ya hayas postulado o que el compromiso haya cambiado: recarga la página.',
   confirmationTitle: 'Recibimos tu solicitud',
   confirmationSteps: (petName, shelterName) => [
     `El equipo de ${shelterName} revisa cada solicitud a mano. Puede tomar unos días.`,
@@ -411,6 +412,109 @@ const APPLICATION_COPY: ApplicationCopy = {
     'No pudimos cargar los datos personales y las referencias. Recarga la página para intentar de nuevo.',
   identityAnswersErased:
     'Los datos personales y las referencias se borraron, según la política de privacidad del refugio.',
+};
+
+/**
+ * The step-by-step form (portion 4c-2, plan §5.4). Ours, in neutral tuteo; the
+ * paper's labels come from config, verbatim. No line promises a retention
+ * period: that copy arrives with /privacy in portion 4f.
+ */
+const ID_PHOTO_PROBLEM: Record<IdPhotoProblem, string> = {
+  unreadable: 'No pudimos abrir esta foto. Prueba con «Tomar foto» o elige otra.',
+  'too-small': 'La foto es muy pequeña para leer el carnet. Acércate más o elige otra.',
+  rejected: 'No pudimos preparar esta foto. Prueba con otra.',
+  failed: 'No pudimos preparar esta foto. Prueba con otra.',
+};
+
+const ID_UPLOAD_PROBLEM: Record<IdUploadProblem, string> = {
+  retry: 'No pudimos subir la foto de tu carnet. Revisa tu conexión e intenta de nuevo.',
+  closed: 'Esta solicitud ya está cerrada, así que no se puede subir el carnet.',
+  'sign-in': 'Vuelve a entrar a tu cuenta e intenta de nuevo.',
+  paused:
+    'Las solicitudes en línea están pausadas, así que ahora no se puede subir el carnet. Escríbele al equipo por WhatsApp.',
+  'photo-too-small': 'La foto es muy pequeña para leer el carnet. Acércate más o elige otra.',
+  'photo-rejected': 'No pudimos preparar esta foto. Prueba con otra.',
+};
+
+const APPLICATION_STEPS_COPY: ApplicationStepsCopy = {
+  stepOf: (step, total, title) => `Paso ${step} de ${total} · ${title}`,
+  titleContract: 'El compromiso',
+  titleCarnet: 'Tu carnet',
+  titleAddress: (petName) => `Dónde vivirá ${petName}`,
+  titleReview: 'Revisar y enviar',
+  back: 'Atrás',
+  continue: 'Continuar',
+  continueWithPhoto: 'Sí, continuar',
+  backToReview: 'Guardar y volver a revisar',
+  fixStep: 'Revisa lo marcado antes de seguir.',
+
+  gateIntro:
+    'Esto es una solicitud: el equipo la revisa y te escribe por WhatsApp. La adopción se completa en persona el día de la entrega, cuando firmas el compromiso en papel. Te toma unos 10 minutos. Ten a mano tu carnet de identidad.',
+  readContract: 'Leer el compromiso',
+
+  contractLead:
+    'Este es el mismo compromiso que se firma en papel el día de la entrega. Léelo con calma antes de seguir. En el paso siguiente te pedimos una foto de tu carnet.',
+  paperNote:
+    'Este compromiso no se firma aquí. Lo firman en papel tú, como adoptante, y la persona rescatista, el día de la entrega.',
+  blankName: '(tu nombre)',
+  blankCi: '(tu número de carnet)',
+  contractLabel: 'Texto del compromiso',
+
+  carnetLead: 'Una foto del frente de tu carnet de identidad. Solo la ve el equipo del refugio.',
+  carnetTips: 'Ponlo sobre una mesa, con buena luz y sin flash. Que se lean todos los datos.',
+  carnetGalleryHint:
+    'Si la cámara se cierra o la página se recarga, toma la foto con la cámara de tu celular y luego elígela con «Elegir de la galería».',
+  takePhoto: 'Tomar foto',
+  chooseGallery: 'Elegir de la galería',
+  preparingPhoto: 'Preparando la foto…',
+  previewQuestion: '¿Se leen bien tus datos?',
+  retake: 'Tomar otra',
+  previewAlt: 'Vista previa de la foto de tu carnet',
+  photoRequired: 'Toma o elige una foto de tu carnet para seguir.',
+  photoProblem: (problem) => ID_PHOTO_PROBLEM[problem],
+
+  addressLead: (petName) => `El equipo visita cada hogar. Escribe la dirección donde va a vivir ${petName}.`,
+  addressHint: 'Calle, número y zona.',
+  detailsHint: 'Color de la puerta, una tienda o cancha cerca: lo que ayude a llegar.',
+
+  reviewLead: 'Revisa tus datos antes de enviar. Puedes cambiar cualquier paso.',
+  change: 'Cambiar',
+  changeStep: (title) => `Cambiar: ${title}`,
+  photoReadySummary: 'Foto lista para enviar.',
+  photoMissingSummary: 'Falta la foto de tu carnet.',
+  contractFilledLead: 'El compromiso, con tus datos:',
+  acceptanceDraftTag: 'Texto en borrador',
+  acceptanceRequired: 'Marca la casilla para enviar tu solicitud.',
+  beforeSend: 'Enviar no es la adopción: el equipo revisa tu solicitud y te escribe por WhatsApp.',
+  sendingApplication: 'Enviando tu solicitud…',
+  sendingPhoto: 'Subiendo la foto de tu carnet…',
+
+  uploadFailed: 'Tu solicitud llegó, pero la foto de tu carnet no. Sin ella no se puede aprobar.',
+  uploadProblem: (problem) => ID_UPLOAD_PROBLEM[problem],
+  retryUpload: 'Reintentar',
+  uploadLater: 'También puedes subirla después desde «Mis solicitudes».',
+  confirmationPaper: 'El compromiso se firma en papel el día de la entrega.',
+  confirmationCarnet: 'La foto de tu carnet solo la ve el equipo del refugio.',
+
+  leaveTitle: '¿Salir sin enviar tu solicitud?',
+  leaveBody:
+    'Lo que escribiste no se guarda hasta que envías la solicitud. Si sales ahora, se pierde, y la foto de tu carnet también.',
+  leaveStay: 'Seguir aquí',
+  leaveGo: 'Salir sin enviar',
+
+  carnetMissing: 'Falta la foto de tu carnet. Sin ella no se puede aprobar tu solicitud.',
+  carnetMissingPaused:
+    'Falta la foto de tu carnet. Las solicitudes en línea están pausadas: escríbele al equipo por WhatsApp.',
+  uploadPhoto: 'Subir foto',
+  uploadThisPhoto: 'Subir esta foto',
+  uploadingPhoto: 'Subiendo la foto de tu carnet…',
+  uploadDone: 'Recibimos la foto de tu carnet.',
+  cancel: 'Cancelar',
+
+  contractPageTitle: 'El compromiso de adopción',
+  contractPageIntro: (shelterName) =>
+    `Esto es lo que se compromete a cumplir quien adopta un animalito de ${shelterName}. Es el mismo texto que se firma en papel el día de la entrega.`,
+  contractPageBack: '← Ver los animalitos en adopción',
 };
 
 import type { FoodCategory, FoodHazard } from '@/lib/types';
@@ -1944,6 +2048,8 @@ export const es: Messages = {
   },
 
   applications: APPLICATION_COPY,
+
+  applicationSteps: APPLICATION_STEPS_COPY,
 
   foodCategoryLabel: (category) => FOOD_CATEGORY[category],
 

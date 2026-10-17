@@ -389,6 +389,109 @@ export interface ApplicationCopy {
   readonly identityAnswersErased: string;
 }
 
+/**
+ * The applicant's step-by-step form (portion 4c-2, plan §5). OUR words only,
+ * in neutral tuteo: every label of the shelter's paper comes from config,
+ * verbatim, and is never re-worded here.
+ *
+ * ⚠️ Like `ApplicationCopy`, each line must be TRUE about what happens next:
+ * nothing sends a message, the paper is signed at handover, and the carnet
+ * photo is seen by the shelter team only. No line here promises a retention
+ * period — that copy is written with /privacy in portion 4f.
+ */
+export interface ApplicationStepsCopy {
+  /** "Paso 3 de 7 · Dónde vivirá Luna". */
+  stepOf(step: number, total: number, title: string): string;
+  readonly titleContract: string;
+  readonly titleCarnet: string;
+  titleAddress(petName: string): string;
+  readonly titleReview: string;
+  readonly back: string;
+  readonly continue: string;
+  /** Step 2's "Continuar" once a photo is ready: the answer to «¿Se leen bien tus datos?». */
+  readonly continueWithPhoto: string;
+  /** "Continuar" on a step reached through «Cambiar» on the review. */
+  readonly backToReview: string;
+  readonly fixStep: string;
+
+  // ── before sign-in ───────────────────────────────────────────────────────
+  readonly gateIntro: string;
+  readonly readContract: string;
+
+  // ── 1. the contract ──────────────────────────────────────────────────────
+  readonly contractLead: string;
+  /** The aside in place of the paper's signature lines (D11). Never inside the contract block. */
+  readonly paperNote: string;
+  /** Read aloud inside the blank for the name (screen readers only). */
+  readonly blankName: string;
+  readonly blankCi: string;
+  readonly contractLabel: string;
+
+  // ── 2. the carnet ────────────────────────────────────────────────────────
+  readonly carnetLead: string;
+  readonly carnetTips: string;
+  readonly carnetGalleryHint: string;
+  readonly takePhoto: string;
+  readonly chooseGallery: string;
+  readonly preparingPhoto: string;
+  readonly previewQuestion: string;
+  readonly retake: string;
+  readonly previewAlt: string;
+  readonly photoRequired: string;
+  photoProblem(problem: IdPhotoProblem): string;
+
+  // ── 3. the address ───────────────────────────────────────────────────────
+  addressLead(petName: string): string;
+  readonly addressHint: string;
+  readonly detailsHint: string;
+
+  // ── 7. review and send ───────────────────────────────────────────────────
+  readonly reviewLead: string;
+  readonly change: string;
+  /** The accessible name of a «Cambiar» button: which step it opens. */
+  changeStep(title: string): string;
+  readonly photoReadySummary: string;
+  /** The review's carnet line when no photo is ready — it must say what is true now. */
+  readonly photoMissingSummary: string;
+  readonly contractFilledLead: string;
+  readonly acceptanceDraftTag: string;
+  readonly acceptanceRequired: string;
+  readonly beforeSend: string;
+  readonly sendingApplication: string;
+  readonly sendingPhoto: string;
+
+  // ── after sending ────────────────────────────────────────────────────────
+  readonly uploadFailed: string;
+  uploadProblem(problem: IdUploadProblem): string;
+  readonly retryUpload: string;
+  readonly uploadLater: string;
+  readonly confirmationPaper: string;
+  readonly confirmationCarnet: string;
+
+  // ── leaving with something unsent (an in-app link, the back gesture) ─────
+  readonly leaveTitle: string;
+  readonly leaveBody: string;
+  readonly leaveStay: string;
+  readonly leaveGo: string;
+
+  // ── "Falta tu carnet": the existing application, and /account ────────────
+  readonly carnetMissing: string;
+  /** The same, while online applications are switched off (the kill switch). */
+  readonly carnetMissingPaused: string;
+  readonly uploadPhoto: string;
+  readonly uploadThisPhoto: string;
+  readonly uploadingPhoto: string;
+  readonly uploadDone: string;
+  readonly cancel: string;
+
+  // ── /adopt/contract ──────────────────────────────────────────────────────
+  readonly contractPageTitle: string;
+  contractPageIntro(shelterName: string): string;
+  readonly contractPageBack: string;
+}
+
+import type { IdPhotoProblem, IdUploadProblem } from '@/lib/id-document-client';
+
 import type { FoodCategory, FoodHazard } from '@/lib/types';
 import type { DonationError, DonationLineError, DonationLineWarning } from '@/lib/food-parse';
 import type {
@@ -990,6 +1093,9 @@ export interface Messages {
   approvalWarning(warning: ApprovalWarning, detail: { otherOpenCount: number }): string;
 
   readonly applications: ApplicationCopy;
+
+  /** The applicant's step-by-step form (portion 4c-2). */
+  readonly applicationSteps: ApplicationStepsCopy;
 
   // ── accounts: sign-in, the profile, the email link page ─────────────────
 

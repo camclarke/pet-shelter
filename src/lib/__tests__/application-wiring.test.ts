@@ -113,6 +113,18 @@ test('no application code logs anything but an error code (an ALLOWLIST)', () =>
     ['lib', 'applications-admin.ts'],
     ['app', 'adopt', '[slug]', 'apply', 'ApplicationForm.tsx'],
     ['app', 'adopt', '[slug]', 'apply', 'ApplicationFields.tsx'],
+    // The 4c-2 stepper: a C.I., two references' phones, an address and the
+    // carnet photo flow through these.
+    ['app', 'adopt', '[slug]', 'apply', 'ApplicationStepper.tsx'],
+    ['app', 'adopt', '[slug]', 'apply', 'ApplicationSent.tsx'],
+    ['app', 'adopt', '[slug]', 'apply', 'ContractText.tsx'],
+    ['app', 'adopt', '[slug]', 'apply', 'HomeStep.tsx'],
+    ['app', 'adopt', '[slug]', 'apply', 'IdPhotoStep.tsx'],
+    ['app', 'adopt', '[slug]', 'apply', 'ReviewStep.tsx'],
+    ['app', 'adopt', 'contract', 'page.tsx'],
+    ['lib', 'application-steps.ts'],
+    ['lib', 'id-document-client.ts'],
+    ['lib', 'id-document-protocol.ts'],
     ['app', 'account', 'MyApplications.tsx'],
     ['app', 'admin', 'applications', 'ApplicationsQueue.tsx'],
     ['app', 'admin', 'applications', '[applicationId]', 'ApplicationReview.tsx'],

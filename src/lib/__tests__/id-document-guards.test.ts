@@ -258,6 +258,152 @@ test('only the three ID-photo modules build a path — a new one must be added h
   assert.deepEqual(literal, ['src/lib/id-document-paths.ts'], 'the prefix is spelled once');
 });
 
+// ─── the APPLICANT never touches Storage (portion 4c-2) ──────────────────────
+// Plan §6 4c-2, critic #11: the applicant's photo goes to the upload route,
+// never through the Firebase Storage client — a client upload auto-mints a
+// download token no rule can revoke — and nothing on the applicant side may
+// reach `getDownloadURL` or `pets-admin.ts`, even transitively.
+
+/**
+ * Every module the applicant's BROWSER runs — the roots of the walk. The apply
+ * page itself is a Server Component (it reads the public pet through the Admin
+ * SDK), so it is not a root; everything it hands to the browser is.
+ */
+const APPLICANT_ROOTS = [
+  'src/app/adopt/[slug]/apply/ApplicationForm.tsx',
+  'src/app/adopt/[slug]/apply/ApplicationStepper.tsx',
+  'src/app/adopt/[slug]/apply/ApplicationFields.tsx',
+  'src/app/adopt/[slug]/apply/ApplicationSent.tsx',
+  'src/app/adopt/[slug]/apply/ContractText.tsx',
+  'src/app/adopt/[slug]/apply/HomeStep.tsx',
+  'src/app/adopt/[slug]/apply/IdPhotoStep.tsx',
+  'src/app/adopt/[slug]/apply/ReviewStep.tsx',
+  'src/app/adopt/contract/page.tsx',
+  'src/app/account/MyApplications.tsx',
+  'src/lib/applications-client.ts',
+  'src/lib/id-document-client.ts',
+];
+
+/**
+ * The local files `file` imports AT RUNTIME: like `localImports`, minus the
+ * statements TypeScript erases — `import type`, `export type`, and an
+ * `import { type A, type B }` whose every name is a type. Without this the
+ * walk would follow `@/i18n`'s type-only imports into half of `src/lib` and
+ * report modules no browser ever loads.
+ */
+function runtimeImports(file: string): string[] {
+  const src = code(file);
+  const specifiers: string[] = [];
+  for (const m of src.matchAll(/(?:^|[\s;])(import|export)\s+(type\s+)?([^'";]*?)from\s*['"]([^'"]+)['"]/g)) {
+    if (m[2]) continue; // import type … / export type …
+    const clause = m[3]!.trim();
+    const braces = /^\{([^}]*)\}$/.exec(clause);
+    if (braces) {
+      const names = braces[1]!.split(',').map((n) => n.trim()).filter(Boolean);
+      if (names.length > 0 && names.every((n) => n.startsWith('type '))) continue;
+    }
+    specifiers.push(m[4]!);
+  }
+  for (const m of src.matchAll(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specifiers.push(m[1]!);
+  for (const m of src.matchAll(/^\s*import\s*['"]([^'"]+)['"]/gm)) specifiers.push(m[1]!);
+  const out: string[] = [];
+  for (const spec of specifiers) {
+    let base: string;
+    if (spec.startsWith('@/')) base = join('src', spec.slice(2));
+    else if (spec.startsWith('.')) base = join(dirname(file), spec);
+    else continue;
+    const candidates = [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts')].map((p) => p.split(sep).join('/'));
+    const found = candidates.find((p) => SOURCES.includes(p));
+    assert.ok(found, `${file} imports ${spec}, which resolves to no source file — the walk is broken`);
+    out.push(found);
+  }
+  return out;
+}
+
+function runtimeClosure(file: string): string[] {
+  const seen = new Set<string>();
+  const queue = [file];
+  while (queue.length > 0) {
+    const next = queue.pop()!;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    queue.push(...runtimeImports(next));
+  }
+  return [...seen].sort();
+}
+
+/** Where the Storage client is initialised — and only initialised. */
+const STORAGE_INIT = 'src/lib/firebase-client.ts';
+
+test('the applicant walk is not vacuous (controls)', () => {
+  const stepper = runtimeClosure('src/app/adopt/[slug]/apply/ApplicationStepper.tsx');
+  for (const expected of [
+    'src/lib/application-steps.ts',
+    'src/lib/applications.ts',
+    'src/lib/id-document-client.ts',
+    'src/lib/id-document-protocol.ts',
+    'src/lib/jpeg-inspect.ts',
+    'src/lib/image-strip.ts',
+    'src/app/adopt/[slug]/apply/ContractText.tsx',
+  ]) {
+    assert.ok(stepper.includes(expected), `the stepper's closure does not reach ${expected}`);
+  }
+  // The dynamic import of the client is followed, and so the one Storage
+  // initialiser is in reach — which is what makes its exemption below mean
+  // something.
+  const form = runtimeClosure('src/app/adopt/[slug]/apply/ApplicationForm.tsx');
+  assert.ok(form.includes('src/lib/applications-client.ts'), 'the dynamic import is not followed');
+  assert.ok(form.includes(STORAGE_INIT));
+  // A type-only import is skipped, and a value import is not.
+  assert.ok(localImports('src/i18n/es.ts').includes('src/lib/card-extract-client.ts'), 'control: es.ts type-imports it');
+  assert.ok(!runtimeImports('src/i18n/es.ts').includes('src/lib/card-extract-client.ts'), 'a type-only import was followed');
+  assert.ok(runtimeImports('src/i18n/es.ts').includes('src/lib/placements.ts'), 'a value import was skipped');
+});
+
+test('no applicant module can reach Firebase Storage, getDownloadURL or pets-admin, even transitively (critic #11)', () => {
+  const offenders: string[] = [];
+  for (const root of APPLICANT_ROOTS) {
+    for (const file of runtimeClosure(root)) {
+      const src = code(file);
+      if (file.endsWith('/pets-admin.ts')) offenders.push(`${root} reaches pets-admin.ts`);
+      if (/\b(getDownloadURL|uploadBytes|uploadBytesResumable|uploadString|getBlob|deleteObject)\b/.test(src)) {
+        offenders.push(`${root} reaches ${file}, which calls Storage`);
+      }
+      if (file !== STORAGE_INIT && /['"]firebase\/storage['"]|['"]firebase-admin\/storage['"]/.test(src)) {
+        offenders.push(`${root} reaches ${file}, which imports Firebase Storage`);
+      }
+      if (file !== STORAGE_INIT && (/\{[^}]*\bstorage\b[^}]*\}\s*=\s*getFirebase\(\)/.test(src) || /getFirebase\(\)\.storage/.test(src))) {
+        offenders.push(`${root} reaches ${file}, which takes the Storage instance`);
+      }
+      // The handler and its server half stay on the server (the protocol split).
+      for (const server of ['id-document-handler.ts', 'id-document-store.ts', 'require-admin.ts', 'read-capped.ts', 'firebase-admin.ts', 'pets-server.ts']) {
+        if (file === `src/lib/${server}`) offenders.push(`${root} reaches src/lib/${server}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test('the Storage initialiser only initialises: getStorage and the emulator hook, nothing that reads or writes', () => {
+  const src = code(STORAGE_INIT);
+  const imports = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"]firebase\/storage['"]/g)];
+  assert.equal(imports.length, 1);
+  const names = imports[0]![1]!.split(',').map((n) => n.trim()).filter(Boolean).sort();
+  assert.deepEqual(names, ['connectStorageEmulator', 'getStorage', 'type FirebaseStorage']);
+});
+
+test('the upload goes to the route with the user token, as raw JPEG — never a Storage path', () => {
+  const client = code('src/lib/id-document-client.ts');
+  assert.match(client, /`\/api\/adoption-applications\/\$\{encodeURIComponent\(applicationId\)\}\/id-document\/\$\{side\}`/);
+  assert.match(client, /Authorization: `Bearer \$\{token\}`/);
+  assert.match(client, /'Content-Type': 'image\/jpeg'/);
+  assert.ok(!client.includes(ID_DOCUMENT_ROOT), 'the applicant client names the Storage prefix');
+  assert.ok(!/\bidDocument(Path|Prefix)\(/.test(client), 'the applicant client builds a Storage path');
+  // The browser reads the route's answer through the protocol module, never the handler.
+  assert.match(client, /from '\.\/id-document-protocol'/);
+  assert.ok(!/id-document-handler/.test(client));
+});
+
 // ─── deletion always names every version ─────────────────────────────────────
 
 test('only id-document-store.ts deletes ID photos, and always with versions: true (critic #8)', () => {
