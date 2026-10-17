@@ -1,12 +1,15 @@
 /**
  * Step 3 — the address, which goes ONLY into `private/home` (admin-only, read
- * back by the applicant, erasable). PRESENTATIONAL ONLY: values in, changes out.
+ * back by the applicant, erasable). Values in, changes out: the only state
+ * held here is whether the map is open and whether it failed.
  *
- * The two labels are the paper's, verbatim, from config (`homeLabels`); the
- * hints are ours. The paper's CROQUIS UBICACIÓN is the map pin of portion 4d
- * and is NOT shown here — never a dead field, never a promise of a map. Until
- * then NÚMERO DE CASA Y DETALLES carries the directions, and the pin is sent
- * as null.
+ * The three labels are the paper's, verbatim, from config (`homeLabels`); the
+ * hints are ours. The paper's CROQUIS UBICACIÓN is an OPTIONAL pin (owner
+ * decision, 2026-10-17): the typed address is required, the map is not, so the
+ * form still works when the map cannot load.
+ *
+ * The map is not loaded until the person taps «Marcar mi casa en el mapa»: a
+ * person who skips it never contacts OpenStreetMap's tile server.
  *
  * `autoComplete="off"`: an address typed on a shared family phone must not be
  * offered back to the next person by the browser.
@@ -14,28 +17,51 @@
 
 'use client';
 
+import { useState } from 'react';
 import type { ApplicationConfig } from '@/config/shelter';
 import {
   HOME_ADDRESS_MAX_CHARS,
   HOME_REFERENCE_MAX_CHARS,
   type HomeValidation,
+  type PinCoordinates,
 } from '@/lib/applications';
+import { LazyAddressMap, type LazyAddressMapProps } from '@/components/LazyAddressMap';
 import { t } from '@/i18n';
 
 export const HOME_ADDRESS_DOM_ID = 'apply-home-address';
 export const HOME_DETAILS_DOM_ID = 'apply-home-details';
+export const HOME_MAP_DOM_ID = 'apply-home-map';
 
 export interface HomeStepProps {
   labels: ApplicationConfig['homeLabels'];
   petName: string;
   addressText: string;
   reference: string;
+  pin: PinCoordinates | null;
   errors: HomeValidation['errors'];
   disabled: boolean;
   onChange: (field: 'addressText' | 'reference', value: string) => void;
+  /** A new mark, or null for «Quitar la marca». */
+  onPin: (pin: PinCoordinates | null) => void;
+  /** Replaces the map's dynamic import; tests pass a fake. */
+  loadMap?: LazyAddressMapProps['load'];
 }
 
-export function HomeStep({ labels, petName, addressText, reference, errors, disabled, onChange }: HomeStepProps) {
+export function HomeStep({
+  labels,
+  petName,
+  addressText,
+  reference,
+  pin,
+  errors,
+  disabled,
+  onChange,
+  onPin,
+  loadMap,
+}: HomeStepProps) {
+  // Open on return to this step with a mark, so the person sees what they marked.
+  const [mapOpen, setMapOpen] = useState(pin !== null);
+  const [mapFailed, setMapFailed] = useState(false);
   const copy = t.applications;
   const steps = t.applicationSteps;
   const fields = [
@@ -101,6 +127,58 @@ export function HomeStep({ labels, petName, addressText, reference, errors, disa
           </label>
         );
       })}
+
+      <div
+        id={HOME_MAP_DOM_ID}
+        className={`auth__field apply-field apply-map${errors.pin ? ' apply-field--invalid' : ''}`}
+        role="group"
+        aria-labelledby={`${HOME_MAP_DOM_ID}-label`}
+        aria-describedby={`${HOME_MAP_DOM_ID}-hint`}
+        tabIndex={-1}
+      >
+        <span id={`${HOME_MAP_DOM_ID}-label`} className="apply-field__label">
+          {labels.map} <small className="apply-field__mark">({copy.optionalMark})</small>
+        </span>
+        <small id={`${HOME_MAP_DOM_ID}-hint`} className="auth__hint">
+          {steps.mapHint}
+        </small>
+
+        {mapFailed ? (
+          <p className="auth__hint apply-map__status" role="status">
+            {steps.mapFailed}
+          </p>
+        ) : mapOpen ? (
+          <>
+            <p className="auth__hint apply-map__status" aria-live="polite">
+              {pin ? steps.mapMarked : steps.mapTap}
+            </p>
+            <LazyAddressMap
+              pin={pin}
+              onPin={disabled ? undefined : (next) => onPin(next)}
+              onFailed={() => setMapFailed(true)}
+              label={steps.mapLabel}
+              loadingText={steps.mapLoading}
+              load={loadMap}
+            />
+          </>
+        ) : (
+          <button type="button" className="btn btn--ghost apply-map__open" disabled={disabled} onClick={() => setMapOpen(true)}>
+            {steps.mapOpen}
+          </button>
+        )}
+
+        {pin && (
+          <button type="button" className="btn btn--ghost apply-map__clear" disabled={disabled} onClick={() => onPin(null)}>
+            {steps.mapClear}
+          </button>
+        )}
+
+        {errors.pin && (
+          <small id={`${HOME_MAP_DOM_ID}-error`} className="apply-field__error" role="alert">
+            {t.applicationHomeError(errors.pin)}
+          </small>
+        )}
+      </div>
     </>
   );
 }

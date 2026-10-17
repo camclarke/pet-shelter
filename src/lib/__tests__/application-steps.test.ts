@@ -81,7 +81,7 @@ function completeAnswers(overrides: AnswerDraft = {}): AnswerDraft {
 function state(overrides: Partial<StepperState> = {}): StepperState {
   return {
     answers: completeAnswers(),
-    home: { addressText: 'Av. Blanco Galindo km 4, zona Sarco', reference: '' },
+    home: { addressText: 'Av. Blanco Galindo km 4, zona Sarco', reference: '', pin: null },
     photoReady: true,
     accepted: true,
     ...overrides,
@@ -129,20 +129,37 @@ test('the contract step never blocks; the carnet step blocks without a ready pho
   assert.equal(validateStep('carnet', state(), QUESTIONS).valid, true);
 });
 
-test('the address step blocks on the address, not on the optional details, and never sends a pin', () => {
-  const missing = validateStep('address', state({ home: { addressText: '  ', reference: '' } }), QUESTIONS);
+test('the address step blocks on the address, not on the optional details or the optional pin', () => {
+  const missing = validateStep('address', state({ home: { addressText: '  ', reference: '', pin: null } }), QUESTIONS);
   assert.equal(missing.valid, false);
   assert.deepEqual(missing.homeErrors, { addressText: 'address-required' });
   // 4 characters refused, 5 accepted — HOME_ADDRESS_MIN_CHARS, as literals.
-  assert.equal(validateStep('address', state({ home: { addressText: 'Sucr', reference: '' } }), QUESTIONS).homeErrors.addressText, 'address-too-short');
-  assert.equal(validateStep('address', state({ home: { addressText: 'Sucre', reference: '' } }), QUESTIONS).valid, true);
+  assert.equal(validateStep('address', state({ home: { addressText: 'Sucr', reference: '', pin: null } }), QUESTIONS).homeErrors.addressText, 'address-too-short');
+  assert.equal(validateStep('address', state({ home: { addressText: 'Sucre', reference: '', pin: null } }), QUESTIONS).valid, true);
   assert.equal(
-    validateStep('address', state({ home: { addressText: 'Calle Sucre 123', reference: 'x'.repeat(301) } }), QUESTIONS).homeErrors.reference,
+    validateStep('address', state({ home: { addressText: 'Calle Sucre 123', reference: 'x'.repeat(301), pin: null } }), QUESTIONS).homeErrors.reference,
     'reference-too-long',
   );
-  assert.equal(validateStep('address', state({ home: { addressText: 'Calle Sucre 123', reference: '' } }), QUESTIONS).valid, true);
-  assert.equal(buildSubmission(state(), QUESTIONS).home.geo, null, 'no map until portion 4d');
+  assert.equal(validateStep('address', state({ home: { addressText: 'Calle Sucre 123', reference: '', pin: null } }), QUESTIONS).valid, true);
+  assert.equal(buildSubmission(state(), QUESTIONS).home.geo, null, 'a skipped map sends no pin');
   assert.equal(buildSubmission(state(), QUESTIONS).home.precision, null);
+});
+
+test('a marked pin is sent rounded to 4 decimals, as an exact point', () => {
+  const marked = state({ home: { addressText: 'Calle Sucre 123', reference: '', pin: { latitude: -17.39351234, longitude: -66.15704987 } } });
+  assert.equal(validateStep('address', marked, QUESTIONS).valid, true);
+  const sent = buildSubmission(marked, QUESTIONS).home;
+  assert.deepEqual(sent.geo, { latitude: -17.3935, longitude: -66.157 });
+  assert.equal(sent.precision, 'exact');
+});
+
+test('a pin outside the service area stops step 3, on the pin, with the typed address untouched', () => {
+  // Santa Cruz de la Sierra: far outside Cochabamba's box.
+  const outside = state({ home: { addressText: 'Calle Sucre 123', reference: '', pin: { latitude: -17.7833, longitude: -63.1821 } } });
+  const refused = validateStep('address', outside, QUESTIONS);
+  assert.equal(refused.valid, false);
+  assert.deepEqual(refused.homeErrors, { pin: 'pin-outside-area' });
+  assert.throws(() => buildSubmission(outside, QUESTIONS));
 });
 
 test("a section step checks ONLY its own questions: a gap on step 6 never stops step 4", () => {
@@ -255,7 +272,7 @@ test('the submission carries NO acceptance: the caller passes it explicitly', ()
 test('an incomplete submission throws, naming the step to send the person back to', () => {
   const cases: [Partial<StepperState>, string][] = [
     [{ photoReady: false }, 'carnet'],
-    [{ home: { addressText: '', reference: '' } }, 'address'],
+    [{ home: { addressText: '', reference: '', pin: null } }, 'address'],
     [{ answers: completeAnswers({ age: '16' }) }, 'personal'],
     [{ answers: completeAnswers({ personalRefName: '' }) }, 'references'],
     [{ answers: completeAnswers({ movingSoon: null }) }, 'dwelling'],
@@ -379,13 +396,13 @@ test('?paso= is read as plain digits only', () => {
 test('leaving warns once anything is typed, chosen or ticked — and not on a blank form', () => {
   const blank: StepperState = {
     answers: emptyAnswerDraft(QUESTIONS),
-    home: { addressText: '', reference: '' },
+    home: { addressText: '', reference: '', pin: null },
     photoReady: false,
     accepted: false,
   };
   assert.equal(hasUnsentData(blank), false);
   assert.equal(hasUnsentData({ ...blank, photoReady: true }), true);
-  assert.equal(hasUnsentData({ ...blank, home: { addressText: 'x', reference: '' } }), true);
+  assert.equal(hasUnsentData({ ...blank, home: { addressText: 'x', reference: '', pin: null } }), true);
   assert.equal(hasUnsentData({ ...blank, answers: { ...blank.answers, movingSoon: false } }), true);
   assert.equal(hasUnsentData({ ...blank, answers: { ...blank.answers, fullName: '   ' } }), false);
 });
@@ -406,11 +423,18 @@ test('the review shows a choice by its PRINTED label, a yes-or-no as a boolean, 
 });
 
 test('the address review uses the paper labels and tidies what was typed', () => {
-  const rows = addressReviewRows(config.homeLabels, { addressText: '  Calle   Sucre 123 ', reference: '' });
+  const rows = addressReviewRows(config.homeLabels, { addressText: '  Calle   Sucre 123 ', reference: '', pin: null });
   assert.deepEqual(rows, [
     { id: 'addressText', label: 'DIRECCIÓN EXACTA DONDE ESTARÁ EL PELUDITO', value: 'Calle Sucre 123' },
     { id: 'reference', label: 'NÚMERO DE CASA Y DETALLES', value: null },
+    { id: 'pin', label: 'CROQUIS UBICACIÓN', value: null },
   ]);
+  const marked = addressReviewRows(config.homeLabels, {
+    addressText: 'Calle Sucre 123',
+    reference: '',
+    pin: { latitude: -17.3935, longitude: -66.157 },
+  });
+  assert.equal(marked.find((r) => r.id === 'pin')?.value, true, 'the summary says it is marked, not the coordinates');
 });
 
 test('the contract blanks are filled from the name and the C.I. typed in step 4', () => {

@@ -43,12 +43,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link';
 
 import { useAuth } from '@/components/AuthProvider';
+import { LazyAddressMap } from '@/components/LazyAddressMap';
 import { SHELTER, type ApplicationQuestion } from '@/config/shelter';
 import {
   APPLICATION_STATUS_TRANSITIONS,
   applicantLabel,
   applicantPhone,
   choiceLabel,
+  googleMapsUrl,
   isOpenApplication,
   isQuestionAsked,
   isReceivedMarker,
@@ -586,6 +588,39 @@ export function IdDocumentViewerView({
   );
 }
 
+/**
+ * The applicant's pin, read-only. The map loads only on tap, like the
+ * applicant's: opening a review does not contact the tile server.
+ */
+function HomeMap({ latitude, longitude }: { latitude: number; longitude: number }) {
+  const copy = t.applications;
+  const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="answer__note apply-map apply-map--admin">
+      <div className="apply-map__links">
+        <button type="button" className="btn btn--ghost" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
+          {open ? copy.homeMapHide : copy.homeMapShow}
+        </button>
+        <a className="btn btn--ghost" href={googleMapsUrl(latitude, longitude)} target="_blank" rel="noopener noreferrer">
+          {copy.homeMapGoogle}
+        </a>
+      </div>
+      {open &&
+        (failed ? (
+          <p role="status">{copy.homeMapFailed}</p>
+        ) : (
+          <LazyAddressMap
+            pin={{ latitude, longitude }}
+            label={copy.homeMapLabel}
+            loadingText={t.applicationSteps.mapLoading}
+            onFailed={() => setFailed(true)}
+          />
+        ))}
+    </div>
+  );
+}
+
 /** `private/home` as the screen holds it. */
 export type HomeState = ApplicationHomeView | 'loading' | 'missing' | 'failed';
 
@@ -603,6 +638,7 @@ function HomeText({ home }: { home: HomeState }) {
           ? copy.homePin(home.geo.latitude.toFixed(4), home.geo.longitude.toFixed(4))
           : copy.homeNoPin}
       </span>
+      {home.geo && <HomeMap latitude={home.geo.latitude} longitude={home.geo.longitude} />}
       {home.correctedAt !== null && (
         <span className="answer__note">{copy.homeCorrectedOn(formatDate(home.correctedAt))}</span>
       )}

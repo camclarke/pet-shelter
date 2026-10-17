@@ -3659,6 +3659,69 @@ textarea {
   border-color: var(--coral);
 }
 
+/* ── The CROQUIS UBICACIÓN map (portion 4d) ──────────────────────────────── */
+
+.apply-map {
+  gap: 10px;
+}
+
+.apply-map__status {
+  margin: 0;
+}
+
+.apply-map__open,
+.apply-map__clear {
+  align-self: flex-start;
+  min-height: 44px;
+}
+
+.apply-map__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.apply-map__links .btn {
+  min-height: 44px;
+}
+
+.apply-map--admin {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.address-map {
+  width: 100%;
+  height: 300px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  /* Leaflet's panes stack to z-index 1000; keep them under the site header. */
+  position: relative;
+  z-index: 0;
+}
+
+.address-map--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  opacity: 0.75;
+}
+
+/* Leaflet's zoom buttons are 30 px on touch screens: a finger needs 44. */
+.address-map.leaflet-container .leaflet-bar a {
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
+  font-size: 22px;
+}
+
+.address-map.leaflet-container .leaflet-control-attribution {
+  font-size: 11px;
+}
+
 /* Radio CARDS: a visible choice and a 44px target, rather than a native picker
    that costs a tap and a scroll per question on a phone. */
 .apply-options {
