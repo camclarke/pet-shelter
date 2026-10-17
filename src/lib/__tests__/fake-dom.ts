@@ -666,7 +666,26 @@ export interface Installed {
  * environment on. `before` lists the pages already in the tab's history.
  */
 export function installFakeDom(href: string, before: string[] = []): Installed {
-  const win = new FakeWindow(href, before);
+  const raw = new FakeWindow(href, before);
+  // In a browser `window` and `self` ARE the global object: `self.Int8Array`
+  // exists. Code outside the app relies on that — tsx's bundled es-module-lexer
+  // takes `typeof self !== 'undefined' ? self : global` as its asm.js stdlib
+  // and calls `new self.Int8Array(…)`, which failed on Node 22 with
+  // "u.Int8Array is not a constructor" the first time it parsed a module after
+  // the fake was installed. So the fake window answers what it defines, and
+  // falls back to the real global for everything else.
+  const win = new Proxy(raw, {
+    get(target, prop) {
+      return prop in target ? Reflect.get(target, prop, target) : Reflect.get(globalThis, prop);
+    },
+    has(target, prop) {
+      return prop in target || prop in globalThis;
+    },
+  }) as FakeWindow;
+  raw.self = win;
+  raw.top = win;
+  raw.window = win;
+  raw.document.defaultView = win;
   const installed: Installed = {
     window: win,
     document: win.document,
