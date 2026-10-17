@@ -376,6 +376,12 @@ export interface ApplicationCopy {
   /** The pin as text, already rounded to 4 decimals at the source. */
   homePin(latitude: string, longitude: string): string;
   readonly homeNoPin: string;
+  /** Admin review: show and hide the read-only map, and the link to Google Maps. */
+  readonly homeMapShow: string;
+  readonly homeMapHide: string;
+  readonly homeMapGoogle: string;
+  readonly homeMapLabel: string;
+  readonly homeMapFailed: string;
   homeCorrectedOn(date: string): string;
   readonly homeLoadFailed: string;
 
@@ -444,6 +450,17 @@ export interface ApplicationStepsCopy {
   addressLead(petName: string): string;
   readonly addressHint: string;
   readonly detailsHint: string;
+  /** Step 3's optional map (the paper's CROQUIS UBICACIÓN). */
+  readonly mapHint: string;
+  readonly mapOpen: string;
+  readonly mapLoading: string;
+  readonly mapLabel: string;
+  readonly mapTap: string;
+  readonly mapMarked: string;
+  readonly mapClear: string;
+  readonly mapFailed: string;
+  readonly mapZoomIn: string;
+  readonly mapZoomOut: string;
 
   // ── 7. review and send ───────────────────────────────────────────────────
   readonly reviewLead: string;

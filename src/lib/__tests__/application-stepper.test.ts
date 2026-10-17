@@ -157,7 +157,7 @@ function view(step: ApplicationStep, overrides: Partial<ApplicationStepperViewPr
     questions: QUESTIONS,
     contract: CONTRACT,
     answers: answers({ fullName: 'Ana Pérez', ciNumber: '1234567' }),
-    home: { addressText: 'Calle Sucre 123', reference: '' },
+    home: { addressText: 'Calle Sucre 123', reference: '', pin: null },
     accepted: false,
     photo: READY,
     errors: NO_ERRORS,
@@ -167,6 +167,7 @@ function view(step: ApplicationStep, overrides: Partial<ApplicationStepperViewPr
     petFacts: [{ label: 'NOMBRE', value: 'Luna' }],
     onAnswer: () => {},
     onHome: () => {},
+    onPin: () => {},
     onAccept: () => {},
     onFile: () => {},
     onBack: () => {},
@@ -238,11 +239,15 @@ test('step 2 with a ready photo shows the local preview and asks «¿Se leen bie
   assert.ok(problem.includes(es.applicationSteps.photoProblem('too-small')));
 });
 
-test("step 3 asks the paper's two address fields, verbatim, and no map", () => {
+test("step 3 asks the paper's address fields verbatim, and the CROQUIS is an optional map that is NOT loaded yet", () => {
   const html = decode(view('address'));
   assert.ok(html.includes('DIRECCIÓN EXACTA DONDE ESTARÁ EL PELUDITO'));
   assert.ok(html.includes('NÚMERO DE CASA Y DETALLES'));
-  assert.ok(!/CROQUIS|mapa/i.test(html), 'the croquis is portion 4d');
+  assert.ok(html.includes('CROQUIS UBICACIÓN'));
+  assert.ok(html.includes('CROQUIS UBICACIÓN <small class="apply-field__mark">(opcional)</small>'), 'marked optional');
+  assert.ok(html.includes(`>${es.applicationSteps.mapOpen}</button>`), 'a button opens the map');
+  // Nothing of the map before the tap: no tile URL, no Leaflet, no loading box.
+  assert.ok(!/openstreetmap|leaflet|address-map/i.test(html), 'the map must not load until asked for');
   // React serialises the prop as `autoComplete`; HTML attribute names are case-insensitive.
   assert.equal((html.match(/autocomplete="off"/gi) ?? []).length, 2, 'a shared phone must not offer an address back');
 });

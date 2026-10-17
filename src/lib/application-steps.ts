@@ -39,6 +39,7 @@ import {
   type ApplicationAnswerError,
   type HomeDraft,
   type HomeValidation,
+  type PinCoordinates,
   type ValidHome,
 } from './applications';
 import type { ApplicationAnswer, PetSex, Species } from './types';
@@ -167,7 +168,8 @@ export function stepQuestions(
 /** Everything the steps decide on. The photo is reduced to "is there one ready". */
 export interface StepperState {
   answers: AnswerDraft;
-  home: { addressText: string; reference: string };
+  /** `pin` is the CROQUIS: optional, null until the person marks the map. */
+  home: { addressText: string; reference: string; pin: PinCoordinates | null };
   photoReady: boolean;
   accepted: boolean;
 }
@@ -188,9 +190,9 @@ export interface StepValidation {
   stepError: StepError | null;
 }
 
-/** The pin is the map's (portion 4d). Until then there is none: the details text carries the directions. */
+/** The pin travels as marked; `validateHome` rounds it and checks the service area. */
 function homeDraftOf(state: StepperState): HomeDraft {
-  return { addressText: state.home.addressText, reference: state.home.reference, pin: null };
+  return { addressText: state.home.addressText, reference: state.home.reference, pin: state.home.pin };
 }
 
 const VALID: StepValidation = { valid: true, answerErrors: {}, homeErrors: {}, stepError: null };
@@ -343,6 +345,9 @@ export function addressReviewRows(
   return [
     { id: 'addressText', label: labels.address, value: tidy(home.addressText) || null },
     { id: 'reference', label: labels.details, value: tidy(home.reference) || null },
+    // Sí when marked; "not answered" when skipped. Coordinates mean nothing to
+    // the person reading their own summary.
+    { id: 'pin', label: labels.map, value: home.pin ? true : null },
   ];
 }
 

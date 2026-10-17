@@ -667,6 +667,15 @@ function roundTo4(value: number): number {
   return rounded === 0 ? 0 : rounded;
 }
 
+/**
+ * A Google Maps link to a pin, for the admin review. Only the rounded point
+ * travels, and only when an admin taps the link.
+ */
+export function googleMapsUrl(latitude: number, longitude: number): string {
+  const pin = roundPin4({ latitude, longitude });
+  return `https://www.google.com/maps/search/?api=1&query=${pin.latitude},${pin.longitude}`;
+}
+
 export type ApplicationHomeError =
   | 'address-required'
   | 'address-too-short'

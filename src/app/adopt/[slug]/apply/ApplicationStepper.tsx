@@ -80,6 +80,7 @@ import {
   type AnswerDraftValue,
   type ApplicationAnswerError,
   type HomeValidation,
+  type PinCoordinates,
 } from '@/lib/applications';
 import type { ApplicationSubmission } from '@/lib/applications-client';
 import {
@@ -93,7 +94,7 @@ import { t } from '@/i18n';
 import { ApplicationFields, questionDomId } from './ApplicationFields';
 import { ApplicationSent } from './ApplicationSent';
 import { ContractText } from './ContractText';
-import { HOME_ADDRESS_DOM_ID, HOME_DETAILS_DOM_ID, HomeStep } from './HomeStep';
+import { HOME_ADDRESS_DOM_ID, HOME_DETAILS_DOM_ID, HOME_MAP_DOM_ID, HomeStep } from './HomeStep';
 import { ID_PHOTO_SIDE, IdPhotoPickerView, useIdPhoto, type IdPhotoState } from './IdPhotoStep';
 import { ACCEPTANCE_DOM_ID, ReviewStep, type ReviewGroup, type SendingPhase } from './ReviewStep';
 
@@ -161,6 +162,7 @@ export interface ApplicationStepperViewProps {
   headingRef?: Ref<HTMLHeadingElement>;
   onAnswer: (id: string, value: AnswerDraftValue) => void;
   onHome: (field: 'addressText' | 'reference', value: string) => void;
+  onPin: (pin: PinCoordinates | null) => void;
   onAccept: (accepted: boolean) => void;
   onFile: (file: File) => void;
   onBack: () => void;
@@ -221,9 +223,11 @@ export function ApplicationStepperView(props: ApplicationStepperViewProps) {
           petName={petName}
           addressText={home.addressText}
           reference={home.reference}
+          pin={home.pin}
           errors={errors.home}
           disabled={busy}
           onChange={props.onHome}
+          onPin={props.onPin}
         />
       )}
 
@@ -425,6 +429,7 @@ function firstErrorDomId(step: ApplicationStep, errors: StepErrors, questions: r
   if (step === 'address') {
     if (errors.home.addressText) return HOME_ADDRESS_DOM_ID;
     if (errors.home.reference) return HOME_DETAILS_DOM_ID;
+    if (errors.home.pin) return HOME_MAP_DOM_ID;
     return null;
   }
   if (step === 'review') return errors.step === 'acceptance-required' ? ACCEPTANCE_DOM_ID : null;
@@ -491,7 +496,7 @@ export function ApplicationStepper({
   const [step, setStep] = useState<ApplicationStep>('contract');
   const [furthest, setFurthest] = useState(1);
   const [answers, setAnswers] = useState<AnswerDraft>(() => emptyAnswerDraft(questions));
-  const [home, setHome] = useState<StepperState['home']>({ addressText: '', reference: '' });
+  const [home, setHome] = useState<StepperState['home']>({ addressText: '', reference: '', pin: null });
   const [accepted, setAccepted] = useState(false);
   const [errors, setErrors] = useState<StepErrors>(NO_ERRORS);
   const [notice, setNotice] = useState<string | null>(null);
@@ -811,6 +816,10 @@ export function ApplicationStepper({
         onHome={(field, value) => {
           setHome((previous) => ({ ...previous, [field]: value }));
           clearError('home', field);
+        }}
+        onPin={(pin) => {
+          setHome((previous) => ({ ...previous, pin }));
+          clearError('home', 'pin');
         }}
         onAccept={(value) => {
           setAccepted(value);

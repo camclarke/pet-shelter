@@ -77,6 +77,24 @@ export interface ShelterConfig {
   };
 
   /**
+   * The map an adoption applicant may mark their home on (portion 4d). Loaded
+   * only when the person taps to open it, so nobody who skips it ever contacts
+   * the tile server. A forking shelter changes the centre; the tiles and
+   * attribution are OpenStreetMap's, under its tile usage policy
+   * (https://operations.osmfoundation.org/policies/tiles/), which requires the
+   * attribution to stay visible.
+   */
+  map: {
+    tileUrl: string;
+    attribution: string;
+    center: { latitude: number; longitude: number };
+    zoom: number;
+    /** The furthest out a person may zoom: the service area, not the continent. */
+    minZoom: number;
+    maxZoom: number;
+  };
+
+  /**
    * The optional online adoption application. See `ApplicationConfig`.
    * WhatsApp stays the primary way to adopt whatever this says.
    */
@@ -230,7 +248,7 @@ export interface ApplicationConfig {
    * The paper's labels for the two fields that live in `private/home`, not in
    * `questions` (a test forbids a QUESTION that asks for an address). Verbatim.
    */
-  homeLabels: { address: string; details: string };
+  homeLabels: { address: string; details: string; map: string };
   /**
    * The paper's fourth section, DATOS DEL PELUDITO ADOPTADO, verbatim — its
    * heading, its field labels and its printed choices (portion 4c-2). The
@@ -296,6 +314,16 @@ export const SHELTER: ShelterConfig = {
     maxLng: -65.85,
   },
 
+  map: {
+    tileUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    // Plaza 14 de Septiembre, the centre of Cochabamba.
+    center: { latitude: -17.3935, longitude: -66.157 },
+    zoom: 13,
+    minZoom: 11,
+    maxZoom: 19,
+  },
+
   adoptionApplications: {
     // ⚠️ OFF. See `enabled` above: the switch-on guards in
     // application-identity.test.ts fail the moment this is true before the
@@ -344,6 +372,8 @@ export const SHELTER: ShelterConfig = {
     homeLabels: {
       address: 'DIRECCIÓN EXACTA DONDE ESTARÁ EL PELUDITO',
       details: 'NÚMERO DE CASA Y DETALLES',
+      // The paper's CROQUIS UBICACIÓN box: online, an optional pin on a map.
+      map: 'CROQUIS UBICACIÓN',
     },
     // Section 4 of the paper, verbatim ("GENERO" without its accent, as
     // printed). Shown read-only on the review step, filled from the public
