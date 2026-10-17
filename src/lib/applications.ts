@@ -821,27 +821,41 @@ export function buildHomeCreate(input: {
  * Every document under `adoptionApplications/{id}/private/`. MIRRORED in the
  * rules' `private` create (`docId in [...]`); a test fails if they drift.
  *
- * ⚠️ The retention sweep (portion 4e) and the admin erase route MUST import
+ * ⚠️ The admin's erase route (portion 4e; nothing is erased automatically) MUST import
  * this list rather than naming documents themselves, so neither can forget
- * `identity`. A switch-on guard checks the sweep does.
+ * `identity`. A guard (application-identity.test.ts, guard 3) checks it does.
  */
 export const PRIVATE_DOCUMENT_IDS = ['home', 'identity'] as const;
 export type PrivateDocumentId = (typeof PRIVATE_DOCUMENT_IDS)[number];
 
 /**
+ * `adoptionApplications/{id}/private/acceptance` — the audit trail of the
+ * electronic consent (the contract's first additional clause): when, from
+ * which IP, by which account. Written ONLY by the acceptance route through the
+ * Admin SDK; the rules' private create admits `PRIVATE_DOCUMENT_IDS` alone, so
+ * no browser can write one. Admin-only to read.
+ *
+ * Deliberately NOT in `PRIVATE_DOCUMENT_IDS`: the erase action removes the
+ * carnet photo and the address (the retention clause names those), and keeps
+ * this record — it is the evidence that the agreement was made.
+ * MIRRORED in the rules' `acceptanceRecorded()`; a test fails if they drift.
+ */
+export const ACCEPTANCE_DOCUMENT_ID = 'acceptance';
+
+/**
  * `adoptionApplications/{id}/internal/notes` — the shelter's notes on an
  * applicant. Unlike the private documents it is KEPT with the application, so
  * the rule for writing it is that notes record that a correction was needed,
- * never a C.I. number or anyone's phone (D15). The retention sweep (portion
- * 4e) must BLANK its `text` when it erases the personal details, as a backstop
+ *never a C.I. number or anyone's phone (D15). The admin's erase route
+ * (portion 4e) must BLANK its `text` when it erases the personal details, as a backstop
  * for a note that broke that rule. MIRRORED in the rules' `match /internal/
- * {docId}` (`docId == 'notes'`); a test fails if they drift, and a switch-on
- * guard checks the sweep imports this.
+ * {docId}` (`docId == 'notes'`); a test fails if they drift, and a guard
+ * checks the erase route imports this.
  */
 export const INTERNAL_NOTES_DOCUMENT = {
   subcollection: 'internal',
   id: 'notes',
-  /** The field the sweep sets to '' — the only one that holds free text. */
+  /** The field the erase sets to '' — the only one that holds free text. */
   blankField: 'text',
 } as const;
 
@@ -1036,7 +1050,13 @@ export type ApprovalBlocker =
    * 2026-10-16: the front is required before approval. The rules enforce it
    * too (`idDocumentReceived()`), so this is the screen saying so first.
    */
-  | 'id-document-missing';
+  | 'id-document-missing'
+  /**
+   * No `private/acceptance`: the audit trail of the electronic consent (time,
+   * IP, account) was never recorded. The rules enforce it too
+   * (`acceptanceRecorded()`), so this is the screen saying so first.
+   */
+  | 'acceptance-missing';
 
 export type ApprovalWarning =
   /** Other people are still waiting on this same animal. */
@@ -1155,6 +1175,8 @@ export interface ApprovalContext {
   otherApplications: readonly Pick<AdoptionApplication, 'id' | 'status'>[];
   /** Whether `pets/{petId}/location/current` exists. Required, so no caller can skip asking. */
   hasRecordedLocation: boolean;
+  /** Whether `private/acceptance` exists. Required, so no caller can skip asking. */
+  hasAcceptanceRecord: boolean;
 }
 
 export interface ApprovalCheck {
@@ -1197,6 +1219,8 @@ export function approvalCheck(
   if (!idDocumentComplete(context.application.idDocument, idDocumentSides)) {
     blockers.push('id-document-missing');
   }
+
+  if (!context.hasAcceptanceRecord) blockers.push('acceptance-missing');
 
   const otherOpenIds = context.otherApplications
     .filter((other) => other.id !== context.application.id && isOpenApplication(other.status))

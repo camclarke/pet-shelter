@@ -33,6 +33,10 @@ function bucket() {
 export async function POST(request: Request): Promise<Response> {
   return handleAccountDelete(request, {
     verifyIdToken: verifyAdminIdToken,
+    hasAnimalInCustody: async (uid) => {
+      const found = await getAdminDb().collection('adoptions').where('ownerUid', '==', uid).limit(1).get();
+      return !found.empty;
+    },
     deleteAvatars: async (uid) => {
       await bucket().deleteFiles({ prefix: `users/${uid}/` });
     },

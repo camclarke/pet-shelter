@@ -254,6 +254,8 @@ const APPROVAL_BLOCKER: Record<ApprovalBlocker, string> = {
     'Este animalito todavía no puede pasar a adoptado: está en camino, en cuarentena o su rescate se canceló. Primero tiene que llegar y tener el alta.',
   'id-document-missing':
     'Todavía no llegó la foto del carnet de identidad de esta persona, y sin ella no se puede aprobar. Pídele por WhatsApp que la suba desde «Mis solicitudes» en su cuenta.',
+  'acceptance-missing':
+    'No quedó registrada la constancia de aceptación del compromiso (fecha, hora e IP), y sin ella no se puede aprobar. Pídele por WhatsApp que abra «Mis solicitudes» en su cuenta para registrarla.',
 };
 
 /**
@@ -398,6 +400,31 @@ const APPLICATION_COPY: ApplicationCopy = {
     `La foto del carnet, la dirección y los datos personales se borraron el ${date}, según la política de privacidad del refugio.`,
   identityErasedUndated:
     'La foto del carnet, la dirección y los datos personales se borraron, según la política de privacidad del refugio.',
+  eraseTitle: 'Borrar carnet y dirección',
+  eraseLead:
+    'Borra para siempre la foto del carnet, la dirección, el punto en el mapa y los datos personales de esta solicitud. Se conservan la solicitud y la constancia de aceptación. No se puede deshacer.',
+  eraseOpenHint: 'Primero decide la solicitud: una solicitud abierta no se puede borrar.',
+  eraseReasonLabel: 'Motivo',
+  eraseReason: (reason) =>
+    ({
+      returned: 'El animalito fue devuelto al refugio',
+      died: 'El animalito falleció por causas naturales',
+      'not-adopted': 'No hubo adopción (solicitud rechazada o retirada)',
+    })[reason],
+  eraseDiedWarning:
+    'Si el animalito murió por maltrato o abandono, no borres: estos datos sirven para la denuncia ante POFOMA o el Ministerio Público.',
+  eraseConfirm: (applicant, petName) =>
+    `¿Borrar para siempre el carnet, la dirección y los datos personales de ${applicant} (solicitud por ${petName})? No se puede deshacer.`,
+  eraseStart: 'Borrar carnet y dirección…',
+  eraseButton: 'Sí, borrar para siempre',
+  eraseCancel: 'Cancelar',
+  eraseDone: 'Listo: se borraron el carnet, la dirección y los datos personales.',
+  eraseFailed: (failure) =>
+    failure === 'still-in-custody'
+      ? 'Todavía figura con esta familia. Primero registra el reingreso del animalito en su ficha; después borra.'
+      : failure === 'reason-mismatch'
+        ? 'Ese motivo no corresponde al estado de la solicitud.'
+        : 'No se pudo borrar. Vuelve a intentarlo: lo que ya se borró no se repite.',
   homeTitle: 'Dirección',
   homeMissing: 'Sin dirección.',
   homeReference: (reference) => `Número de casa y detalles: ${reference}`,
@@ -906,6 +933,10 @@ const ACCOUNT_COPY: AccountCopy = {
         return 'Pasó demasiado tiempo desde que confirmaste. Vuelve a intentarlo.';
       case 'admin-account':
         return ACCOUNT_COPY.adminCannotDelete;
+      // The contract's third additional clause: deleting your data while the
+      // animal is with you means returning it within 24 hours.
+      case 'custody-active':
+        return 'Tienes un animalito adoptado con nosotros, así que tu cuenta no se borra desde aquí: según el compromiso de adopción, pedir que borremos tus datos significa devolverlo al refugio en 24 horas. Escríbenos por WhatsApp para coordinarlo.';
       case 'unauthenticated':
         return 'Tu sesión venció. Vuelve a iniciar sesión e intenta de nuevo.';
       // The server deletes the Auth user LAST, so a failure part-way always

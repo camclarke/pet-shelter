@@ -427,15 +427,18 @@ test('switch-on guard 2: /privacy describes the data this form collects, field b
   assert.deepEqual(missing, [], `/privacy does not mention ${missing.map((p) => `«${p}»`).join(', ')} — rewrite it before switching on (4f)`);
 });
 
-const SWEEP_ROUTE = 'src/app/api/internal/identity-sweep/route.ts';
+// Portion 4e, as the owner decided it on 2026-10-17: NOTHING is erased
+// automatically, so there is no scheduled sweep. An admin erases, with a
+// reason (returned, a natural death, or no adoption), through this route.
+const SWEEP_ROUTE = 'src/app/api/adoption-applications/[applicationId]/erase-identity/route.ts';
 
-test('switch-on guard 3: the retention sweep exists and takes PRIVATE_DOCUMENT_IDS and INTERNAL_NOTES_DOCUMENT', () => {
-  // Portion 4e. Without it the policy's "erased 30 days after a rejection or
-  // withdrawal" is a promise nothing keeps. It must import the shared list so
-  // it cannot forget private/identity, and the notes document so it blanks
-  // their text (review 4c-1 #1).
-  if (!config.enabled) return;
-  assert.ok(existsSync(join(ROOT, SWEEP_ROUTE)), `${SWEEP_ROUTE} does not exist — build the 4e sweep before switching on`);
+test('guard 3: the erase action exists and takes PRIVATE_DOCUMENT_IDS and INTERNAL_NOTES_DOCUMENT', () => {
+  // Without it the contract's retention clause ("serán eliminados y purgados
+  // definitivamente") is a promise nothing keeps. It must import the shared
+  // list so it cannot forget private/identity, and the notes document so it
+  // blanks their text (review 4c-1 #1). Enforced always now, not only at
+  // switch-on: the route exists.
+  assert.ok(existsSync(join(ROOT, SWEEP_ROUTE)), `${SWEEP_ROUTE} does not exist`);
   // The route, or a local module it imports (the plan's pure identity-sweep.ts).
   const route = code(SWEEP_ROUTE);
   const locals = [...route.matchAll(/from\s*['"]((?:@\/|\.)[^'"]+)['"]/g)].map((m) => {

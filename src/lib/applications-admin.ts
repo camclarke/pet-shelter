@@ -48,6 +48,7 @@ import type { User } from 'firebase/auth';
 
 import { getFirebase } from './firebase-client';
 import {
+  ACCEPTANCE_DOCUMENT_ID,
   INTERNAL_NOTES_DOCUMENT,
   adminStatusPatch,
   approvalCheck,
@@ -57,6 +58,12 @@ import {
   type ApprovalCheck,
 } from './applications';
 import { ID_DOCUMENT_SIDES } from './id-document-paths';
+import {
+  identityEraseFailure,
+  identityErasePath,
+  type EraseReason,
+  type IdentityEraseFailure,
+} from './identity-erase-protocol';
 import { applyWriteOps, resolveServerTime } from './server-time';
 import type {
   AdoptionApplication,
@@ -304,6 +311,30 @@ export async function saveInternalNotes(applicationId: string, text: string, use
  * see `approveApplication`. Throws on an illegal transition before anything is
  * sent, via `adminStatusPatch`.
  */
+/**
+ * The admin's erase action: POST /api/adoption-applications/{id}/erase-identity
+ * with a reason. See `identity-erase-handler.ts`. Returns null on success, or
+ * the failure the route named (`unexpected` for the edge, `network` for none).
+ */
+export async function eraseApplicationIdentity(
+  user: Pick<User, 'getIdToken'>,
+  applicationId: string,
+  reason: EraseReason,
+): Promise<IdentityEraseFailure | 'unexpected' | 'network' | null> {
+  try {
+    const token = await user.getIdToken();
+    const response = await fetch(identityErasePath(applicationId), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    return identityEraseFailure(response);
+  } catch {
+    return 'network';
+  }
+}
+
 export async function moveApplication(
   application: Pick<ApplicationRecord, 'id' | 'status'>,
   to: Exclude<ApplicationStatus, 'approved'>,
@@ -323,6 +354,12 @@ export interface ApprovalPreview {
   others: ApplicationRecord[];
 }
 
+/** Whether the consent's audit trail, `private/acceptance`, was recorded. */
+async function hasAcceptanceRecord(applicationId: string): Promise<boolean> {
+  const { db } = getFirebase();
+  return (await getDoc(doc(db, 'adoptionApplications', applicationId, 'private', ACCEPTANCE_DOCUMENT_ID))).exists();
+}
+
 /** Whether the pet has a `location/current` — which approving hands to the new owner. */
 async function hasRecordedLocation(petId: string): Promise<boolean> {
   const { db } = getFirebase();
@@ -337,10 +374,11 @@ async function readPet(petId: string): Promise<Pet | null> {
 
 /** What the approval screen shows before anyone confirms. */
 export async function previewApproval(application: ApplicationRecord): Promise<ApprovalPreview> {
-  const [pet, forPet, located] = await Promise.all([
+  const [pet, forPet, located, accepted] = await Promise.all([
     readPet(application.petId),
     listApplicationsForPet(application.petId),
     hasRecordedLocation(application.petId),
+    hasAcceptanceRecord(application.id),
   ]);
   const others = forPet.filter((other) => other.id !== application.id);
   return {
@@ -351,6 +389,7 @@ export async function previewApproval(application: ApplicationRecord): Promise<A
       pet: pet ? { id: pet.id, status: pet.status } : null,
       otherApplications: others,
       hasRecordedLocation: located,
+      hasAcceptanceRecord: accepted,
     }),
   };
 }
@@ -388,11 +427,12 @@ export async function approveApplication(
   const { db } = getFirebase();
   const petRef = doc(db, 'pets', application.petId);
 
-  const [current, pet, forPet, located, openCustody, openPlacements] = await Promise.all([
+  const [current, pet, forPet, located, accepted, openCustody, openPlacements] = await Promise.all([
     getApplication(application.id),
     readPet(application.petId),
     listApplicationsForPet(application.petId),
     hasRecordedLocation(application.petId),
+    hasAcceptanceRecord(application.id),
     getDocs(query(collection(petRef, 'custody'), where('endedAt', '==', null))),
     getDocs(query(collection(petRef, 'placements'), where('endedAt', '==', null))),
   ]);
@@ -403,6 +443,7 @@ export async function approveApplication(
     pet: pet ? { id: pet.id, status: pet.status } : null,
     otherApplications: forPet.filter((other) => other.id !== current.id),
     hasRecordedLocation: located,
+    hasAcceptanceRecord: accepted,
     adminUid: user.uid,
     holder,
     newCustodyId: doc(collection(petRef, 'custody')).id,

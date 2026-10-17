@@ -77,23 +77,32 @@ const USER = { uid: 'u1', getIdToken: async () => 'token' };
 interface Mounted {
   m: Modules;
   env: Installed;
-  calls: { submit: unknown[][]; upload: unknown[][]; navigate: string[] };
+  calls: { submit: unknown[][]; upload: unknown[][]; accept: unknown[][]; navigate: string[]; order: string[] };
   unmount: () => Promise<void>;
 }
 
-async function mountStepper(options: { upload?: (...args: unknown[]) => Promise<unknown> } = {}): Promise<Mounted> {
+async function mountStepper(
+  options: { upload?: (...args: unknown[]) => Promise<unknown>; accept?: (...args: unknown[]) => Promise<unknown> } = {},
+): Promise<Mounted> {
   const env = first ?? installFakeDom(APPLY, [DOSSIER]);
   first = null;
   const m = await load();
-  const calls: Mounted['calls'] = { submit: [], upload: [], navigate: [] };
+  const calls: Mounted['calls'] = { submit: [], upload: [], accept: [], navigate: [], order: [] };
   const services = {
     submit: async (...args: unknown[]) => {
       calls.submit.push(args);
+      calls.order.push('submit');
       return 'pet1__u1';
     },
     upload: async (...args: unknown[]) => {
       calls.upload.push(args);
+      calls.order.push('upload');
       return options.upload ? options.upload(...args) : { ok: true };
+    },
+    recordAcceptance: async (...args: unknown[]) => {
+      calls.accept.push(args);
+      calls.order.push('accept');
+      return options.accept ? options.accept(...args) : { ok: true };
     },
     navigate: (href: string) => {
       calls.navigate.push(href);
@@ -218,6 +227,26 @@ test('CONTAINER: the batch is sent first, and the photo only after it, to that a
   assert.equal(h.calls.upload.length, 1);
   assert.equal(h.calls.upload[0]![1], 'pet1__u1', 'the photo went to another application');
   assert.equal(h.calls.upload[0]![2], 'front');
+  assert.equal(textOf(find(h.env.document, 'h2')), 'Recibimos tu solicitud');
+  await h.unmount();
+});
+
+test('CONTAINER: the consent is recorded after the batch and before the photo, for that application', async () => {
+  const h = await mountStepper();
+  await fillToReview(h);
+  await act(h.m, () => check(acceptanceBox(h)));
+  await act(h.m, () => click(button(h, 'Enviar solicitud')));
+  assert.deepEqual(h.calls.order, ['submit', 'accept', 'upload']);
+  assert.equal(h.calls.accept[0]![1], 'pet1__u1');
+  await h.unmount();
+});
+
+test('CONTAINER: a consent record that fails does not stop the photo or the confirmation', async () => {
+  const h = await mountStepper({ accept: async () => ({ ok: false, failure: 'network' }) });
+  await fillToReview(h);
+  await act(h.m, () => check(acceptanceBox(h)));
+  await act(h.m, () => click(button(h, 'Enviar solicitud')));
+  assert.deepEqual(h.calls.order, ['submit', 'accept', 'upload']);
   assert.equal(textOf(find(h.env.document, 'h2')), 'Recibimos tu solicitud');
   await h.unmount();
 });
@@ -618,6 +647,7 @@ test('CONTAINER «Mis solicitudes»: after an upload the line says it arrived at
     },
     pets: async () => new Map(),
     withdraw: async () => {},
+    recordAcceptance: async () => ({ ok: true as const }),
   };
   const container = env.document.createElement('div');
   env.document.body.appendChild(container);

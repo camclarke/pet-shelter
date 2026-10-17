@@ -28,6 +28,14 @@
  *      no one able to enter an animal. Revoke the claim first, by script.
  *   3. a sign-in from the last five minutes       → 403 requires-recent-login
  *      A borrowed, still-signed-in phone must not be enough to erase someone.
+ *   4. no animal in this person's custody          → 409 custody-active
+ *      Owner decision, 2026-10-17, and the contract's third additional clause:
+ *      while an adopted animal is with them, deleting their data resolves the
+ *      adoption and obliges them to return the animal within 24 hours. That is
+ *      a conversation with the shelter, not a button — so the account stays,
+ *      and the screen says to write by WhatsApp. "In custody" means an
+ *      `adoptions/{petId}` document names them: re-admission and the admin's
+ *      "died" erase both remove it.
  */
 
 import { requireUser, type VerifyIdToken } from './require-admin';
@@ -38,17 +46,25 @@ export const ACCOUNT_DELETE_PATH = '/api/account/delete';
 /** Stamped on every failure THIS handler writes. Its absence means the edge answered. */
 export const ACCOUNT_FAILURE_HEADER = 'X-Account-Failure';
 
-export type AccountDeleteFailure = 'unauthenticated' | 'admin-account' | 'requires-recent-login' | 'delete-failed';
+export type AccountDeleteFailure =
+  | 'unauthenticated'
+  | 'admin-account'
+  | 'requires-recent-login'
+  | 'custody-active'
+  | 'delete-failed';
 
 const FAILURES: readonly AccountDeleteFailure[] = [
   'unauthenticated',
   'admin-account',
   'requires-recent-login',
+  'custody-active',
   'delete-failed',
 ];
 
 export interface AccountDeleteDeps {
   verifyIdToken: VerifyIdToken;
+  /** Whether any `adoptions/{petId}` names this uid as its owner. */
+  hasAnimalInCustody(uid: string): Promise<boolean>;
   /** Every object under `users/{uid}/`. */
   deleteAvatars(uid: string): Promise<void>;
   deleteProfile(uid: string): Promise<void>;
@@ -81,6 +97,16 @@ export async function handleAccountDelete(request: Request, deps: AccountDeleteD
 
   // The uid comes from the VERIFIED token. Nothing in the request body is read.
   const { uid } = caller;
+
+  let inCustody: boolean;
+  try {
+    inCustody = await deps.hasAnimalInCustody(uid);
+  } catch (err) {
+    deps.log(`[account-delete] custody check failed for uid ${uid}`, err);
+    return failure('delete-failed', 500);
+  }
+  if (inCustody) return failure('custody-active', 409);
+
   try {
     await deps.deleteAvatars(uid);
     await deps.deleteProfile(uid);

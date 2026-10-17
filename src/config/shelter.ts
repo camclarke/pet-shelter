@@ -160,7 +160,7 @@ export type ApplicationQuestionKind =
  *   Only what the shelter needs to recognise and call the person, plus the
  *   housing answers.
  * - `'identity'` → `private/identity`, an admin-only document created in the
- *   same batch and erased by the retention sweep with the carnet photo and the
+ *   same batch and erased by the admin's erase action with the carnet photo and the
  *   address. Identity numbers, personal details, and ALL third-party data (the
  *   references' and the landlord's names and phones), which belong to people
  *   who never agreed to anything.
@@ -229,7 +229,7 @@ export interface ApplicationConfig {
    * ⚠️ FALSE. The questions are now the shelter's own paper form (portion
    * 4c-1), but switching on still waits on things tests enforce: the
    * acceptance wording approved by the owner and the lawyer
-   * (`ADOPTION_ACCEPTANCE.isDraft`), the retention sweep (4e), and the
+   * (`ADOPTION_ACCEPTANCE.isDraft`), the admin's erase action (4e), and the
    * /privacy rewrite (4f). Each has a guard that fails the moment this is
    * true without it.
    */
@@ -327,7 +327,7 @@ export const SHELTER: ShelterConfig = {
   adoptionApplications: {
     // ⚠️ OFF. See `enabled` above: the switch-on guards in
     // application-identity.test.ts fail the moment this is true before the
-    // acceptance wording is approved, the sweep exists and /privacy is
+    // acceptance wording is approved, the erase action exists and /privacy is
     // rewritten. Flipping it also means changing `applicationsEnabled()` in
     // firestore.rules to match, then deploying the rules.
     enabled: false,

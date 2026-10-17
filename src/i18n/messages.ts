@@ -369,6 +369,19 @@ export interface ApplicationCopy {
   identityErased(date: string): string;
   /** The same, when the erase carries no readable date. */
   readonly identityErasedUndated: string;
+  /** The admin's erase action (2026-10-17): title, explanation, reasons, confirmation. */
+  readonly eraseTitle: string;
+  readonly eraseLead: string;
+  readonly eraseOpenHint: string;
+  readonly eraseReasonLabel: string;
+  eraseReason(reason: 'returned' | 'died' | 'not-adopted'): string;
+  readonly eraseDiedWarning: string;
+  eraseConfirm(applicant: string, petName: string): string;
+  readonly eraseStart: string;
+  readonly eraseButton: string;
+  readonly eraseCancel: string;
+  readonly eraseDone: string;
+  eraseFailed(failure: string): string;
   readonly homeTitle: string;
   /** `private/home` does not exist — never an error, never a payload. */
   readonly homeMissing: string;

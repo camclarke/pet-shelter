@@ -688,6 +688,7 @@ function input(over: Partial<ApprovalInput> = {}): ApprovalInput {
     pet: { id: 'pet1', status: 'available' },
     otherApplications: [],
     hasRecordedLocation: false,
+    hasAcceptanceRecord: true,
     adminUid: 'admin-1',
     holder: 'Ana Pérez',
     newCustodyId: 'cust-new',
@@ -757,6 +758,15 @@ test('a missing ID photo makes the approval batch throw, not commit', () => {
   assert.throws(
     () => buildApprovalWrites(input({ application: { ...input().application, idDocument: { front: null } } })),
     (error: unknown) => error instanceof ApprovalBlockedError && error.blockers.includes('id-document-missing'),
+  );
+});
+
+test('without the recorded consent (private/acceptance) approval is blocked, and the batch throws', () => {
+  assert.deepEqual(approvalCheck(input({ hasAcceptanceRecord: false })).blockers, ['acceptance-missing']);
+  assert.deepEqual(approvalCheck(input()).blockers, [], 'the fixture itself approves');
+  assert.throws(
+    () => buildApprovalWrites(input({ hasAcceptanceRecord: false })),
+    (error: unknown) => error instanceof ApprovalBlockedError && error.blockers.includes('acceptance-missing'),
   );
 });
 

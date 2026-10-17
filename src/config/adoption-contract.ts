@@ -69,6 +69,21 @@ export interface AdoptionContract {
    * text looks, not what it says.
    */
   emphasizedClauses: readonly number[];
+  /**
+   * Clauses added AFTER the paper, for the online form (owner, 2026-10-17):
+   * electronic consent, cloud storage of personal data, and the resolution of
+   * the adoption on a deletion request. Verbatim, hashed after the closing.
+   * Each block is one paragraph — a numbered purpose is its own block, with
+   * its number as written.
+   */
+  additionalClauses: readonly ContractAdditionalClause[];
+}
+
+export interface ContractAdditionalClause {
+  /** The title as written ("CLÁUSULA ADICIONAL: …"). Hashed. */
+  title: string;
+  /** Its paragraphs, in order, verbatim. Hashed, each its own block. */
+  blocks: readonly string[];
 }
 
 /** Where the paper leaves a dotted blank for the applicant's name. */
@@ -77,14 +92,20 @@ export const CONTRACT_NAME_TOKEN = '{nombre}';
 export const CONTRACT_CI_TOKEN = '{ci}';
 
 /**
- * The shelter's REAL contract, verbatim. Confirmed by the owner word for word
- * on 2026-10-16, Bolivia time (version = that date, owner decision D9). The
- * transcription was corrected against the photograph on 2026-10-17 (the
- * heading); the version stays the confirmation date.
+ * The shelter's REAL contract, verbatim. The paper part (heading, opening, the
+ * nine commitments, closing) was confirmed by the owner word for word on
+ * 2026-10-16, Bolivia time, and checked again against the photographs on
+ * 2026-10-17. The three additional clauses are the owner's text of 2026-10-17,
+ * verbatim — their legal citations are the owner's and the lawyer's, not
+ * checked here. Version = 2026-10-17, the day the full text took effect.
+ *
+ * The previous version, '2026-10-16' (sha256 0874ed09…), was the paper part
+ * alone. No application was ever made under it (the form was switched off),
+ * so it is dropped from `acceptedContracts()` rather than kept.
  */
 export const ADOPTION_CONTRACT: AdoptionContract | null = {
-  version: '2026-10-16',
-  sha256: '0874ed097f5fe7ad17ead270413a360ea00009910bec18d3b68bf20656a3dcfa',
+  version: '2026-10-17',
+  sha256: '17a8c80435b956d9af4421749e0206ae012664deaa30fcfeff11c188f37cf850',
   // Printed large, centred and underlined on page 2.
   heading: 'COMPROMISOS',
   opening:
@@ -104,37 +125,74 @@ export const ADOPTION_CONTRACT: AdoptionContract | null = {
     'EN CASO DE INCUMPLIR EL PRESENTE COMPROMISO. LA LEY 700/2015, BAJO REGLAMENTOS MUNICIPALES, EL ENCARGADO DE ADOPCION TIENEN TODA LA POTESTAD DE DAR POR NULA LA ADOPCIÓN Y SUJETAR A CORRESPONDIENTES SANSIONES. DEBIENDO ENTREGAR AL ANIMAL ADOPTADO EN 24 HRS, CASO CONTRARIO SE REALIZARÁN ACCIONES LEGALES CORRESPONDIENTES.',
   // The 48-hour loss-or-theft clause is the one the paper prints in bold.
   emphasizedClauses: [2],
+  additionalClauses: [
+    {
+      title: 'CLÁUSULA ADICIONAL: VALIDEZ DEL CONSENTIMIENTO ELECTRÓNICO',
+      blocks: [
+        'Conformidad electrónica: Al marcar la casilla de verificación (checkbox) y presionar el botón de confirmación en la plataforma web, el adoptante manifiesta su consentimiento expreso de manera libre, previa e informada, otorgando a este acuerdo plena validez jurídica y fuerza obligatoria entre partes, de conformidad con los Artículos 452, 453 y 454 del Código Civil Boliviano y el Artículo 78 y siguientes de la Ley N° 164 (Ley General de Telecomunicaciones y TIC).',
+        'Las partes reconocen como prueba fehaciente de la celebración del acuerdo la pista de auditoría digital registrada en el sistema, la cual almacena la fecha y hora exacta (estampa de tiempo), la dirección IP de origen y los datos de autenticación del usuario.',
+      ],
+    },
+    {
+      title: 'CLÁUSULA ADICIONAL: TRATAMIENTO Y ALMACENAMIENTO DE DATOS PERSONALES EN LA NUBE',
+      blocks: [
+        'Autorización y almacenamiento seguro: En cumplimiento de los Artículos 21 (Derecho a la Privacidad) y 130 (Acción de Protección de Privacidad - Habeas Data) de la Constitución Política del Estado, el adoptante autoriza de forma expresa al albergue a recolectar, digitalizar y almacenar en una base de datos segura en la nube (Google Cloud Platform) la fotografía de su Cédula de Identidad, número de contacto y la ubicación fija georreferenciada de su domicilio.',
+        'Finalidad y confidencialidad: Dichos datos se utilizarán de manera exclusiva y confidencial para:',
+        '1. El registro y comprobación de identidad del custodio responsable.',
+        '2. El seguimiento periódico del estado del animal de compañía.',
+        '3. El ejercicio de acciones administrativas o penales ante POFOMA o el Ministerio Público en caso de presunto abandono o maltrato (Ley N° 700 y Art. 350 bis del Código Penal).',
+        'Queda prohibida la divulgación, comercialización o transferencia de estos datos a terceros ajenos a la protección del animal.',
+        'Plazo de retención y eliminación definitiva: La fotografía del documento de identidad y los datos de ubicación se conservarán únicamente durante la vida biológica del animal adoptado o mientras subsista la relación de custodia contractual. Una vez acreditado el fallecimiento por causas naturales del animal o formalizada su devolución al albergue, los archivos fotográficos de identidad serán eliminados y purgados definitivamente del sistema.',
+      ],
+    },
+    {
+      title: 'CLÁUSULA ADICIONAL: CONDICIÓN RESOLUTORIA POR SUPRESIÓN DE DATOS',
+      blocks: [
+        'Revocatoria y restitución: El adoptante reconoce que la conservación de sus datos de identidad y domicilio es la condición indispensable para mantener la custodia del animalito. En consecuencia, si el adoptante solicita la baja o eliminación de sus datos de la plataforma mientras el animal se encuentre con vida, dicha solicitud producirá la resolución automática e inmediata de la adopción, quedando obligado a restituir al animal al albergue en un plazo perentorio de veinticuatro (24) horas.',
+      ],
+    },
+  ],
 };
 
 /**
  * The exact text the hash covers: the heading (if the paper prints one), the
  * opening TEMPLATE (tokens unfilled), each clause, and the closing — separated
- * by a blank line. The rules hold ONE pair for every applicant, so the hash is
+ * by a blank line, then each additional clause's title and blocks the same
+ * way. A contract without additional clauses hashes exactly as it did before
+ * they existed. The rules hold ONE pair for every applicant, so the hash is
  * of the template; the filled-in name and C.I. are stored anyway (the name in
  * `answers`, the C.I. in `private/identity`). Changing this function changes
  * every hash, so it is pinned by a test.
  */
 export function contractCanonicalText(
-  contract: Pick<AdoptionContract, 'heading' | 'opening' | 'clauses' | 'closing'>,
+  contract: Pick<AdoptionContract, 'heading' | 'opening' | 'clauses' | 'closing'> &
+    Partial<Pick<AdoptionContract, 'additionalClauses'>>,
 ): string {
   return [
     ...(contract.heading ? [contract.heading] : []),
     contract.opening,
     ...contract.clauses,
     contract.closing,
+    ...(contract.additionalClauses ?? []).flatMap((clause) => [clause.title, ...clause.blocks]),
   ].join('\n\n');
 }
 
 /**
- * The words of the one checkbox an applicant ticks before sending (owner
- * decision D12). `{mascota}` is the animal's name.
+ * The words of the one checkbox an applicant ticks before sending. Since
+ * 2026-10-17 they are the owner's own sentence, verbatim (the guillemets that
+ * quoted it in the owner's message are not part of it). Under the first
+ * additional clause, ticking this box and pressing «Enviar» IS the electronic
+ * consent, so its audit trail is recorded: `termsAcceptedAt` on the
+ * application, and `private/acceptance` (time, IP, account), written by the
+ * acceptance route. The contract is ALSO signed in ink at handover (owner
+ * decision, 2026-10-17), as a second record.
  *
- * Deliberately no "lo" or "la": a pronoun for the animal would need gender
- * agreement, and this string lives in config, outside `src/i18n`'s helpers.
+ * `{mascota}`, the animal's name, may appear in a label; the owner's sentence
+ * does not use it.
  *
- * ⚠️ `isDraft` stays TRUE until the owner AND the shelter's lawyer approve
- * these exact words (lawyer question 3). A test refuses
- * `adoptionApplications.enabled: true` while it is.
+ * ⚠️ `isDraft` guarded the approval of these words (lawyer question 3). False
+ * since the owner supplied them on 2026-10-17. A test refuses
+ * `adoptionApplications.enabled: true` while it is true.
  */
 export interface AdoptionAcceptance {
   /** Shown verbatim beside the checkbox, with `ACCEPTANCE_PET_TOKEN` filled in. */
@@ -147,8 +205,9 @@ export interface AdoptionAcceptance {
 export const ACCEPTANCE_PET_TOKEN = '{mascota}';
 
 export const ADOPTION_ACCEPTANCE: AdoptionAcceptance = {
-  label: 'Quiero adoptar a {mascota} bajo este compromiso, y sé que se firma en papel el día de la entrega.',
-  isDraft: true,
+  label:
+    'He leído y acepto el Formulario de Adopción, sus Compromisos (Ley N° 700) y autorizo el tratamiento y almacenamiento seguro de mis datos personales, imágenes y ubicación de domicilio mientras mantenga la custodia del animalito.',
+  isDraft: false,
 };
 
 /**
@@ -173,11 +232,17 @@ export const ADOPTION_ACCEPTANCE: AdoptionAcceptance = {
  * ⚠️ A test refuses `adoptionApplications.enabled: true` while this is false.
  * If an answer is "no", the change is removing a field — free while no
  * application exists.
+ *
+ * TRUE since 2026-10-17, on the OWNER's confirmation: Q1, Q5 and Q6 are kept
+ * exactly as the lawyer-approved paper form already asks them; Q4 and Q7 are
+ * answered by the additional clauses (the carnet photo and the address are
+ * kept while the custody lasts; storage on Google Cloud Platform is authorised
+ * expressly).
  */
 export interface AdoptionLegalReview {
   readonly dataCollectionApproved: boolean;
 }
 
 export const ADOPTION_LEGAL_REVIEW: AdoptionLegalReview = {
-  dataCollectionApproved: false,
+  dataCollectionApproved: true,
 };

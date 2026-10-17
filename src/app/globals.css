@@ -3960,6 +3960,25 @@ textarea {
   line-height: 1.55;
 }
 
+/* The owner's additional clauses (2026-10-17), after the paper's closing. */
+.contract__additional {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.contract__additional p {
+  margin: 0;
+}
+
+.contract__additional-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
 /* The paper's dotted blank. Wide enough to read as a blank, never wider than
    the line it sits in at 360px. */
 .contract__blank {

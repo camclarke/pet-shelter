@@ -25,7 +25,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import type { User } from 'firebase/auth';
 
@@ -36,7 +36,8 @@ import {
   withdrawMyApplication,
   type MyApplication,
 } from '@/lib/applications-client';
-import { applicantCanWithdraw } from '@/lib/applications';
+import { applicantCanWithdraw, isOpenApplication } from '@/lib/applications';
+import { recordAcceptance } from '@/lib/acceptance-client';
 import { formatDate } from '@/lib/date-input';
 import { t } from '@/i18n';
 import type { Pet } from '@/lib/types';
@@ -65,13 +66,26 @@ export interface MyApplicationsServices {
   list: typeof listMyApplications;
   pets: typeof getPublicPets;
   withdraw: typeof withdrawMyApplication;
+  recordAcceptance: typeof recordAcceptance;
 }
 
 export const DEFAULT_MY_APPLICATIONS_SERVICES: MyApplicationsServices = {
   list: listMyApplications,
   pets: getPublicPets,
   withdraw: withdrawMyApplication,
+  recordAcceptance,
 };
+
+/**
+ * The open applications whose consent record should be (re)requested: the
+ * form records it right after sending, and this is the second chance if that
+ * call was lost. The route records once, so a repeat changes nothing; the
+ * applicant cannot read whether a record exists (admin-only), so every open,
+ * not-erased application is asked about once per visit.
+ */
+export function needsAcceptanceRecord(items: readonly MyApplication[]): string[] {
+  return items.filter((item) => isOpenApplication(item.status) && !item.identityErased).map((item) => item.id);
+}
 
 export function MyApplications({
   user,
@@ -88,6 +102,8 @@ export function MyApplications({
   const [busy, setBusy] = useState(false);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const [uploadedFor, setUploadedFor] = useState<string | null>(null);
+  // Asked once per visit; a reload after an upload or a withdrawal asks no more.
+  const acceptanceAsked = useRef(new Set<string>());
 
   const load = useCallback(async () => {
     setError(null);
@@ -95,6 +111,13 @@ export function MyApplications({
       const mine = await services.list(user);
       setPets(await services.pets(mine.map((m) => m.petId)));
       setItems(mine);
+      if (SHELTER.adoptionApplications.enabled) {
+        for (const id of needsAcceptanceRecord(mine)) {
+          if (acceptanceAsked.current.has(id)) continue;
+          acceptanceAsked.current.add(id);
+          void services.recordAcceptance(user, id);
+        }
+      }
     } catch (caught) {
       console.error('[account] could not load applications', (caught as { code?: string })?.code);
       setError(copy.loadFailed);

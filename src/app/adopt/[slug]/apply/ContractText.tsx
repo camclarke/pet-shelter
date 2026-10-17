@@ -6,7 +6,8 @@
  *
  * ═══ NOTHING DISPLAYED MAY DIFFER FROM WHAT IS HASHED ══════════════════════
  * Every block is `ADOPTION_CONTRACT`'s own string, verbatim: the heading, the
- * opening, each clause, the closing. The only thing this file adds is what
+ * opening, each clause, the closing, then each additional clause's title and
+ * paragraphs. The only thing this file adds is what
  * goes in the two blanks — the applicant's name and C.I. on the review, or an
  * empty dotted line (with words for a screen reader) everywhere else. A test
  * strips the tags from the static markup and compares it, block by block,
@@ -53,6 +54,8 @@ function Blank({ words }: { words: string }) {
 export function ContractText({ contract, mode, name, ci, headingLevel = 'h3' }: ContractTextProps) {
   const copy = t.applicationSteps;
   const Heading = headingLevel;
+  // One level below the contract's own heading.
+  const ClauseHeading = headingLevel === 'h2' ? 'h3' : 'h4';
   const parts = splitContractOpening(contract.opening, CONTRACT_NAME_TOKEN, CONTRACT_CI_TOKEN);
   const emphasized = new Set(contract.emphasizedClauses);
 
@@ -79,6 +82,14 @@ export function ContractText({ contract, mode, name, ci, headingLevel = 'h3' }: 
         ))}
       </ul>
       <p className="contract__closing">{contract.closing}</p>
+      {contract.additionalClauses.map((clause) => (
+        <div key={clause.title} className="contract__additional">
+          <ClauseHeading className="contract__additional-title">{clause.title}</ClauseHeading>
+          {clause.blocks.map((block, i) => (
+            <p key={i}>{block}</p>
+          ))}
+        </div>
+      ))}
     </section>
   );
 }

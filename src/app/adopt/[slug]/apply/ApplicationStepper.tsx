@@ -83,6 +83,7 @@ import {
   type PinCoordinates,
 } from '@/lib/applications';
 import type { ApplicationSubmission } from '@/lib/applications-client';
+import { recordAcceptance } from '@/lib/acceptance-client';
 import {
   canUploadLater,
   idUploadProblem,
@@ -397,6 +398,8 @@ type Phase =
 export interface StepperServices {
   submit: (petId: string, user: User, submission: ApplicationSubmission) => Promise<string>;
   upload: typeof uploadIdDocument;
+  /** Records the consent's audit trail (time, IP, account). Never throws. */
+  recordAcceptance: typeof recordAcceptance;
   /** Leave for a page the person confirmed leaving for. A full load: nothing to keep. */
   navigate: (href: string) => void;
 }
@@ -408,6 +411,7 @@ export const DEFAULT_SERVICES: StepperServices = {
     return submitApplication(petId, user, submission);
   },
   upload: uploadIdDocument,
+  recordAcceptance,
   navigate: (href) => window.location.assign(href),
 };
 
@@ -747,6 +751,12 @@ export function ApplicationStepper({
       setSending('idle');
       return;
     }
+
+    // The consent's audit trail, right after the application exists and before
+    // the photo. A failure does not stop the photo: approval is blocked until a
+    // record exists, and «Mis solicitudes» tries again.
+    const recorded = await services.recordAcceptance(user, applicationId);
+    if (!recorded.ok) console.warn('[apply] consent record not saved yet');
 
     // Only now does the application exist, so only now can the photo go.
     await sendPhoto(applicationId, photo.photo);
