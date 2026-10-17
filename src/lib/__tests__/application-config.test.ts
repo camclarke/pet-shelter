@@ -470,6 +470,16 @@ function paperFormStrings(): string[] {
     config.homeLabels.details,
     ...config.sections.map((s) => s.label),
     ...config.questions.flatMap((q) => [q.label, q.intro ?? '', ...(q.options ?? []).map((o) => o.label)]),
+    // Section 4, DATOS DEL PELUDITO ADOPTADO, shown read-only on the review (4c-2).
+    config.petSection.title,
+    config.petSection.name,
+    config.petSection.age,
+    config.petSection.breed,
+    config.petSection.color,
+    config.petSection.species,
+    config.petSection.sex,
+    ...Object.values(config.petSection.speciesValues),
+    ...Object.values(config.petSection.sexValues),
   ].filter((s) => s !== '');
 }
 

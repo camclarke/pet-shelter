@@ -231,6 +231,26 @@ export interface ApplicationConfig {
    * `questions` (a test forbids a QUESTION that asks for an address). Verbatim.
    */
   homeLabels: { address: string; details: string };
+  /**
+   * The paper's fourth section, DATOS DEL PELUDITO ADOPTADO, verbatim — its
+   * heading, its field labels and its printed choices (portion 4c-2). The
+   * review step shows these filled from the PUBLIC pet document, read-only:
+   * the applicant is never asked them and nothing here is stored (D16).
+   * Sterilisation, vaccines and RESPONSABLE stay on the paper the team fills
+   * in at handover. The paper's section number is dropped (D7).
+   */
+  petSection: {
+    title: string;
+    name: string;
+    age: string;
+    breed: string;
+    color: string;
+    species: string;
+    sex: string;
+    /** The paper prints CANINO / FELINO only; another species shows no ESPECIE row. */
+    speciesValues: { dog: string; cat: string };
+    sexValues: { female: string; male: string };
+  };
   questions: readonly ApplicationQuestion[];
   /**
    * Which sides of the applicant's identity card are photographed. Every side
@@ -324,6 +344,20 @@ export const SHELTER: ShelterConfig = {
     homeLabels: {
       address: 'DIRECCIÓN EXACTA DONDE ESTARÁ EL PELUDITO',
       details: 'NÚMERO DE CASA Y DETALLES',
+    },
+    // Section 4 of the paper, verbatim ("GENERO" without its accent, as
+    // printed). Shown read-only on the review step, filled from the public
+    // pet document; never asked, never stored (D16).
+    petSection: {
+      title: 'DATOS DEL PELUDITO ADOPTADO',
+      name: 'NOMBRE',
+      age: 'EDAD',
+      breed: 'RAZA',
+      color: 'COLOR',
+      species: 'ESPECIE',
+      sex: 'GENERO',
+      speciesValues: { dog: 'CANINO', cat: 'FELINO' },
+      sexValues: { female: 'HEMBRA', male: 'MACHO' },
     },
     questions: [
       // ── 1. DATOS PERSONALES ─────────────────────────────────────────────

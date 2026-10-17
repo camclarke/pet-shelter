@@ -46,6 +46,12 @@ export interface ApplicationFieldsProps {
   onChange: (id: string, value: AnswerDraftValue) => void;
   /** Render only this section — what a step of the 4c-2 stepper shows. All sections when absent. */
   onlySection?: ApplicationSection;
+  /**
+   * Keep the section's legend for screen readers only. The stepper's step
+   * heading already says "Paso 4 de 7 · DATOS PERSONALES"; a visible legend
+   * would print the paper's heading twice.
+   */
+  legendHidden?: boolean;
 }
 
 export function ApplicationFields({
@@ -55,6 +61,7 @@ export function ApplicationFields({
   disabled,
   onChange,
   onlySection,
+  legendHidden = false,
 }: ApplicationFieldsProps) {
   const copy = t.applications;
   const sections = SHELTER.adoptionApplications.sections.filter(
@@ -70,7 +77,7 @@ export function ApplicationFields({
         if (inSection.length === 0) return null;
         return (
           <fieldset key={section.id} className="admin-form__fieldset apply-section">
-            <legend className="t-label">{section.label}</legend>
+            <legend className={legendHidden ? 'sr-only' : 't-label'}>{section.label}</legend>
             {inSection.map((question) => {
               const id = questionDomId(question.id);
               const error = errors[question.id];
