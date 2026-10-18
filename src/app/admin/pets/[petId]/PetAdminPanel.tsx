@@ -240,7 +240,7 @@ export function PetAdminPanel({ petId }: { petId: string }) {
         <div>
           <h1 className="t-title">{pet?.name || 'Sin nombre'}</h1>
           <p className="admin__sub">
-            {pet && `${t.statusLabel(pet.status)} · ${t.formatMeta(pet)}`}
+            {pet && [t.statusLabel(pet.status), t.formatMeta(pet)].filter(Boolean).join(' · ')}
           </p>
         </div>
         <div className="admin__header-actions">

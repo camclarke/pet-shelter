@@ -74,6 +74,9 @@ function PetPoster({ pet, index }: { pet: Pet; index: number }) {
   // composes it through `t.mixedBreedWithTraits` — and it simply never reached
   // the wall.
   const breedLine = t.formatBreedLine(pet.breed);
+  // Known parts only, and '' when nothing is known: a pet publishes with a
+  // name and a photo since 2026-10-18, so sex, size and age can all be absent.
+  const meta = t.formatMeta(pet);
 
   return (
     <Link
@@ -101,7 +104,7 @@ function PetPoster({ pet, index }: { pet: Pet; index: number }) {
       <div className="poster__footer">
         <div className="t-name poster__name">{pet.name}</div>
         {breedLine && <div className="t-data poster__breed">{breedLine}</div>}
-        <div className="t-data">{t.formatMeta(pet)}</div>
+        {meta && <div className="t-data">{meta}</div>}
         <div className="poster__cta">
           Adóptame <span aria-hidden="true">↗</span>
         </div>

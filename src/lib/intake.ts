@@ -14,6 +14,7 @@
  */
 
 import { normalizeMicrochipCode, type MicrochipStandard } from './microchip';
+import { coverPhotoFrom } from './types';
 import type {
   AdultWeightBand,
   PetPhotoSlot,
@@ -48,7 +49,12 @@ export interface DraftMedia {
   slot: PetPhotoSlot;
   path: string;
   url: string;
-  /** Spanish alt text. Required before publish — see `IntakeError.alt-required`. */
+  /**
+   * Spanish alt text. Optional since 2026-10-18: a blank one publishes as
+   * `t.defaultPhotoAlt(name)` ("Foto de Luna") — built from the name only,
+   * never from details nobody wrote down. `alt-required` survives only as a
+   * completeness hint in `validateStep`.
+   */
   alt: string;
   width: number | null;
   height: number | null;
@@ -209,7 +215,14 @@ export interface RegisterRef {
 export type IntakeStep = 'identity' | 'media' | 'story';
 
 /**
- * Why a draft cannot advance or publish.
+ * What a draft is missing.
+ *
+ * ⚠️ Since 2026-10-18 only four of these BLOCK publishing — see
+ * `PUBLISH_BLOCKING_ERRORS`. The rest are completeness hints that
+ * `validateStep` still reports, so a wizard step reads as unfinished and the
+ * dashboard's progress stays honest, but none of them keeps an animal off the
+ * site. They are kept rather than deleted because the wording ("De esto
+ * depende cómo se le nombra en toda la página") is still true advice.
  *
  * Microchip problems are NOT in this union — they come back from
  * `validateMicrochip()` as a `MicrochipError` and are rendered through
@@ -390,7 +403,10 @@ export function chipConflictApplies(draft: PetDraft): boolean {
 }
 
 /**
- * What is missing from one step.
+ * What is missing from one step — a COMPLETENESS check, not the publish gate.
+ *
+ * It drives the step ticks in the wizard and `draftProgress`. Publishing asks
+ * `publishBlockers`, which is far shorter (owner decision 2026-10-18).
  *
  * Note what is NOT checked here: the microchip code's own validity. That is
  * `validateMicrochip()`'s job, it already has 10 tests, and duplicating its
@@ -441,13 +457,71 @@ export function validateStep(step: IntakeStep, draft: PetDraft): IntakeError[] {
 }
 
 /**
+ * Codes that BLOCK publishing. Everything else `validateStep` reports is a
+ * completeness hint — it marks a wizard step as not done and thins the
+ * dashboard's progress, but never keeps an animal off the site.
+ */
+export const PUBLISH_BLOCKING_ERRORS: readonly IntakeError[] = [
+  'name-required',
+  'photo-required',
+  'microchip-required',
+  'microchip-conflict',
+];
+
+/**
+ * Whether the draft holds at least one photo that may appear on the public
+ * page — the same test `coverPhotoFrom()` applies when it picks the cover.
+ *
+ * ⚠️ NOT `media.length > 0`. A draft whose only photograph is the teeth or
+ * genital shot has a photo, but none that can be shown: publishing it would
+ * put a page with no picture on the wall while the gate said "has a photo".
+ */
+export function hasPublicPhoto(draft: Pick<PetDraft, 'media'>): boolean {
+  return coverPhotoFrom(draft.media) !== null;
+}
+
+/**
  * Everything standing between this draft and the public wall.
  *
- * Steps 1 and 2 only, on purpose — publishing with no story is a supported
- * path, and the admin dashboard shows what is incomplete rather than refusing.
+ * ── Owner decision, 2026-10-18 ─────────────────────────────────────────────
+ * "To publish a dog, only a name and a picture are required." So the gate is a
+ * name, one photo that can be shown, and the two microchip checks — the only
+ * ones whose failure writes something WRONG rather than something missing: a
+ * "tiene microchip" with no number, or one chip on two animals.
+ *
+ * Species, sex, size, breed and age stopped blocking. The public pages render
+ * an unknown as an omission (see `t.petFacts`, `t.formatMeta`), never as a
+ * default and never as a guessed gender. A blank photo description gets
+ * `t.defaultPhotoAlt(name)` at publish, and a missing or malformed slug gets
+ * `publishSlugBase()` — neither is the volunteer's problem any more.
  */
 export function publishBlockers(draft: PetDraft): IntakeError[] {
-  return [...validateStep('identity', draft), ...validateStep('media', draft)];
+  const errors: IntakeError[] = [];
+  if (draft.name.trim().length === 0) errors.push('name-required');
+  if (!hasPublicPhoto(draft)) errors.push('photo-required');
+  if (draft.hasMicrochip && draft.microchipCode.trim().length === 0) {
+    errors.push('microchip-required');
+  }
+  if (chipConflictApplies(draft)) errors.push('microchip-conflict');
+  return errors;
+}
+
+/**
+ * The slug a draft publishes under, before collision handling. Never empty.
+ *
+ * In order: the slug as typed when it is valid; the typed slug or the name run
+ * through `slugify`; and finally the draft id, lowercased and reduced to the
+ * slug alphabet. The last step is what keeps `takenSlugs('')` from ever being
+ * asked — an empty prefix matches EVERY slug — for a name like "Ñ" or "!!!"
+ * that slugifies to nothing.
+ */
+export function publishSlugBase(draft: Pick<PetDraft, 'id' | 'name' | 'slug'>): string {
+  if (isValidSlug(draft.slug)) return draft.slug;
+  for (const candidate of [slugify(draft.slug), slugify(draft.name)]) {
+    if (isValidSlug(candidate)) return candidate;
+  }
+  const fromId = slugify(draft.id);
+  return isValidSlug(fromId) ? fromId : 'mascota';
 }
 
 export function canPublish(draft: PetDraft): boolean {
@@ -457,20 +531,21 @@ export function canPublish(draft: PetDraft): boolean {
 /**
  * What an animal needs to be REGISTERED IN THE SHELTER: a name and one photo.
  *
- * ⚠️ Deliberately far short of `publishBlockers`, and the two answer different
- * questions. Registering is "this animal is in our care and has a record" —
- * it is saved, it is listed, and it can receive medical records from that
- * moment. Publishing is "a stranger may read a page about it", and that page
- * cannot be written without species, sex, size, breed and age: every Spanish
- * sentence about the animal inflects on its sex.
+ * Since 2026-10-18 this nearly coincides with `publishBlockers`, by the
+ * owner's decision. The two still answer different questions and still differ
+ * in two places: publishing needs a photo that can be SHOWN (registering
+ * accepts any — a teeth shot still identifies the animal to the shelter), and
+ * publishing refuses the two microchip errors. Registering is "this animal is
+ * in our care and has a record"; publishing is "a stranger may read a page
+ * about it", and that page now renders an unknown sex without a gendered word.
  *
  * Until 2026-10-10 the form showed all nine publish blockers as errors from the
  * first keystroke, so admitting a dog at the gate read as a nine-field job. A
  * gate stricter than the shelter's reality gets worked around (plan §3), and
  * the workaround here is the paper notebook.
  *
- * No photo description is asked for here. Alt text is for the public page; it
- * stays in `publishBlockers`.
+ * No photo description is asked for here, nor at publish any more: a blank
+ * one gets `t.defaultPhotoAlt(name)`.
  */
 export function registerBlockers(draft: PetDraft): IntakeError[] {
   const errors: IntakeError[] = [];

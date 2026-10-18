@@ -40,9 +40,10 @@ export interface ChipMatch {
   formerNames: string[];
   status: PetStatus;
   coverPhoto: string | null;
-  species: Species;
-  sex: PetSex;
-  size: PetSize;
+  /** Null on a pet published without it — a name and a photo are enough. */
+  species: Species | null;
+  sex: PetSex | null;
+  size: PetSize | null;
   breed: string;
   ageMonths: number | null;
 }

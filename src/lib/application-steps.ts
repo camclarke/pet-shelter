@@ -404,8 +404,10 @@ export interface PublicPetFacts {
   name: string;
   breed: string;
   colorPattern: string | null;
-  species: Species;
-  sex: PetSex;
+  /** Null when nobody recorded it: a pet publishes with a name and a photo. */
+  species: Species | null;
+  /** Null when unknown — the SEXO row is then left out, never guessed. */
+  sex: PetSex | null;
   ageMonths: number | null;
   ageMonthsMin: number | null;
   ageMonthsMax: number | null;
@@ -433,11 +435,16 @@ export function petFactRows(
     pet.ageIsEstimate && typeof min === 'number' && typeof max === 'number' && Number.isFinite(min) && max >= min;
   if (ranged) rows.push({ label: labels.age, value: format.ageRange(min, max) });
   else if (pet.ageMonths !== null) rows.push({ label: labels.age, value: format.age(pet.ageMonths) });
-  if (pet.breed.trim() !== '') rows.push({ label: labels.breed, value: pet.breed.trim() });
+  // `?? ''`: a document written before breed became optional, or by hand, can
+  // lack the field entirely, and `.trim()` on undefined would 500 the page.
+  const breed = (pet.breed ?? '').trim();
+  if (breed !== '') rows.push({ label: labels.breed, value: breed });
   if (pet.colorPattern && pet.colorPattern.trim() !== '') rows.push({ label: labels.color, value: pet.colorPattern.trim() });
   if (pet.species === 'dog' || pet.species === 'cat') {
     rows.push({ label: labels.species, value: labels.speciesValues[pet.species] });
   }
-  rows.push({ label: labels.sex, value: labels.sexValues[pet.sex] });
+  if (pet.sex === 'male' || pet.sex === 'female') {
+    rows.push({ label: labels.sex, value: labels.sexValues[pet.sex] });
+  }
   return rows;
 }

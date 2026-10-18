@@ -12,9 +12,10 @@
  * normal case, not an edge case.
  *
  * `publishBlockers` is the gate between a half-typed record and the front page
- * of a live shelter's site. It has to be exactly as strict as the plan says —
- * steps 1 and 2 block, the story does not — because a gate that is too strict
- * gets worked around at 22:00 with a rescue in the car.
+ * of a live shelter's site. Since 2026-10-18 it is exactly what the owner
+ * decided — "to publish a dog, only a name and a picture are required" — plus
+ * the two microchip checks, because a gate that is too strict gets worked
+ * around at 22:00 with a rescue in the car.
  */
 
 import { test } from 'node:test';
@@ -25,6 +26,9 @@ import { join } from 'node:path';
 import {
   canPublish,
   disambiguateSlug,
+  hasPublicPhoto,
+  PUBLISH_BLOCKING_ERRORS,
+  publishSlugBase,
   draftDefaults,
   draftProgress,
   isValidSlug,
@@ -270,8 +274,91 @@ test('a missing photo blocks publishing', () => {
   assert.equal(canPublish(completeDraft({ media: [] })), false);
 });
 
-test('an incomplete identity blocks publishing', () => {
-  assert.equal(canPublish(completeDraft({ sex: null })), false);
+test('an incomplete identity no longer blocks publishing (owner decision 2026-10-18)', () => {
+  // "To publish a dog, only a name and a picture are required." Each of these
+  // used to be its own blocker; none of them is now.
+  for (const overrides of [
+    { sex: null },
+    { species: null },
+    { size: null },
+    { breed: '' },
+    { ageYears: null, ageMonthsPart: null, ageUnknown: false },
+    { ageYears: 99 },
+    { slug: '' },
+    { slug: 'Not A Slug!' },
+    { media: [photo({ alt: '' })] },
+  ] satisfies Partial<PetDraft>[]) {
+    assert.deepEqual(publishBlockers(completeDraft(overrides)), [], JSON.stringify(overrides));
+  }
+});
+
+test('the publish gate is a name, a showable photo and the two chip checks — nothing else', () => {
+  assert.deepEqual(PUBLISH_BLOCKING_ERRORS, [
+    'name-required',
+    'photo-required',
+    'microchip-required',
+    'microchip-conflict',
+  ]);
+  // Everything that can block at once, from the emptiest draft that can still
+  // carry a chip conflict: each code the gate emits is on the list.
+  const worst: PetDraft = {
+    ...draftDefaults('p1'),
+    hasMicrochip: true,
+    microchipCode: '',
+  };
+  assert.deepEqual(publishBlockers(worst), ['name-required', 'photo-required', 'microchip-required']);
+  const conflicted = completeDraft({
+    hasMicrochip: true,
+    microchipCode: '068 0000 0000 0042',
+    chipConflict: { petId: 'other', code: '068000000000042' },
+  });
+  assert.deepEqual(publishBlockers(conflicted), ['microchip-conflict']);
+  for (const code of [...publishBlockers(worst), ...publishBlockers(conflicted)]) {
+    assert.ok(PUBLISH_BLOCKING_ERRORS.includes(code), code);
+  }
+});
+
+test('a "tiene microchip" with no number still blocks publishing', () => {
+  assert.deepEqual(publishBlockers(completeDraft({ hasMicrochip: true, microchipCode: '   ' })), [
+    'microchip-required',
+  ]);
+});
+
+test('a draft whose only photos are private-slot shots has no photo to publish', () => {
+  // A teeth or genital photograph is a photo, but never a PUBLIC one — so a
+  // page built from it would have no picture while the gate said it had one.
+  const privateOnly = completeDraft({
+    media: [
+      photo({ id: 't', slot: 'teeth', url: '' }),
+      photo({ id: 'g', slot: 'genitals', url: '' }),
+    ],
+  });
+  assert.equal(hasPublicPhoto(privateOnly), false);
+  assert.deepEqual(publishBlockers(privateOnly), ['photo-required']);
+  // Registering accepts it: the shelter can still identify the animal.
+  assert.deepEqual(registerBlockers({ ...privateOnly, name: 'Luna' }), []);
+  // Control: add one front photo AFTER the private ones and it publishes.
+  const withFront = { ...privateOnly, media: [...privateOnly.media, photo({ id: 'f' })] };
+  assert.equal(hasPublicPhoto(withFront), true);
+  assert.deepEqual(publishBlockers(withFront), []);
+});
+
+test('publishSlugBase is never empty and keeps a valid typed slug', () => {
+  assert.equal(publishSlugBase({ id: 'AbC123', name: 'Luna', slug: 'luna-de-miel' }), 'luna-de-miel');
+  assert.equal(publishSlugBase({ id: 'AbC123', name: 'Luna', slug: '' }), 'luna');
+  assert.equal(publishSlugBase({ id: 'AbC123', name: 'Luna', slug: 'Luna Llena!' }), 'luna-llena');
+  // A name that slugifies to nothing falls back to the id, lowercased.
+  assert.equal(publishSlugBase({ id: 'AbC123', name: '¡¡!!', slug: '' }), 'abc123');
+  // And even an id with no slug-alphabet characters yields something.
+  assert.equal(publishSlugBase({ id: '___', name: '!!', slug: '' }), 'mascota');
+  for (const draft of [
+    { id: 'x', name: '', slug: '' },
+    { id: '', name: '', slug: '' },
+    { id: 'Zq9', name: '   ', slug: '---' },
+  ]) {
+    const slug = publishSlugBase(draft);
+    assert.ok(slug.length > 0 && isValidSlug(slug), JSON.stringify(draft));
+  }
 });
 
 test('publishBlockers reports identity and media problems together', () => {
@@ -306,15 +393,17 @@ test('draftProgress starts at 0 for a fresh draft', () => {
 // page about it". Each test below would pass on the OLD single gate only by
 // accident, so each pins one side of the difference.
 
-test('a name and one photo register an animal, with every other field blank', () => {
+test('a name and one photo register an animal AND publish it, with every other field blank', () => {
+  // Owner decision 2026-10-18: the two thresholds now coincide for an
+  // ordinary front photo. The species/sex/size/breed/age hints survive only
+  // in validateStep, as completeness — never as a blocker.
   const draft: PetDraft = { ...draftDefaults('p1'), name: 'Luna', media: [photo()] };
   assert.deepEqual(registerBlockers(draft), []);
   assert.equal(canRegister(draft), true);
-  // Control: the same draft is far from publishable. If these ever agree, one
-  // gate has swallowed the other.
-  assert.equal(canPublish(draft), false);
+  assert.deepEqual(publishBlockers(draft), []);
+  assert.equal(canPublish(draft), true);
   for (const code of ['species-required', 'sex-required', 'size-required', 'breed-required', 'age-required']) {
-    assert.ok(publishBlockers(draft).includes(code as never), `${code} must still block publishing`);
+    assert.ok(validateStep('identity', draft).includes(code as never), `${code} is still a completeness hint`);
   }
 });
 
@@ -332,10 +421,12 @@ test('a name of only spaces is not a name', () => {
   assert.deepEqual(registerBlockers(draft), ['name-required']);
 });
 
-test('a photo with no description still registers; the description is for the public page', () => {
+test('a photo with no description registers and publishes; the alt text is generated from the name', () => {
   const draft: PetDraft = { ...draftDefaults('p1'), name: 'Luna', media: [photo({ alt: '' })] };
   assert.deepEqual(registerBlockers(draft), []);
-  assert.ok(publishBlockers(draft).includes('alt-required'));
+  assert.deepEqual(publishBlockers(draft), []);
+  // Still a completeness hint on the photos step.
+  assert.ok(validateStep('media', draft).includes('alt-required'));
 });
 
 test('registering never depends on a model: a draft no analysis touched registers', () => {
@@ -417,7 +508,7 @@ test('what a public page needs is a closed list, never the red error list', () =
   assert.ok(src.indexOf('className="admin-errors"') < src.indexOf('intake-more--publish'));
 });
 
-test('publishing is still gated on everything it was', () => {
+test('the wizard refuses to publish on the same short gate the screen shows', () => {
   const src = source(WIZARD_SRC);
   // Since 2026-10-15 the button carries `aria-disabled` while blocked, so a
   // tap lands and explains itself. The gate moved into the handler, which

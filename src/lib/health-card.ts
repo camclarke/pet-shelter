@@ -166,8 +166,8 @@ export interface HealthCardIdentity {
 /** The published-pet fields the card reads. */
 export interface HealthCardPetInput {
   name: string;
-  species: Species;
-  sex: PetSex;
+  species: Species | null;
+  sex: PetSex | null;
   breed: string;
   colorPattern: string | null;
   birthdateMs: number | null;

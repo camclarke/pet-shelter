@@ -10,8 +10,9 @@
  *
  * 1. **Steps 3 onward do not block publishing.** Plan section 3: a rescue
  *    arriving at 22:00 needs to be on the wall, not blocked on a temperament
- *    checklist. `publishBlockers()` covers identity and media only, and the
- *    test suite asserts that an empty story publishes. A gate that is stricter
+ *    checklist. Since 2026-10-18 (owner decision) `publishBlockers()` asks for
+ *    a name, one photo that can be shown, and the two microchip checks —
+ *    nothing else — and the test suite asserts that an empty story publishes. A gate that is stricter
  *    than the shelter's reality gets worked around, and the workaround is the
  *    WhatsApp group this system exists to replace.
  *
@@ -1185,7 +1186,7 @@ export function IntakeWizard() {
           <div className="admin-match__body">
             <strong className="admin-match__name">{readmit.name}</strong>
             <p className="admin-match__meta">
-              {readmit.breed} · {t.formatMeta(readmit)}
+              {[readmit.breed, t.formatMeta(readmit)].filter(Boolean).join(' · ')}
             </p>
             <p className="admin-match__meta">Estado actual: {t.statusLabel(readmit.status)}</p>
             {readmit.formerNames.length > 0 && (
@@ -1993,8 +1994,9 @@ export function IntakeWizard() {
                         Ese chip ya es de {chipMatch.name}
                       </strong>
                       <p className="admin-match__meta">
-                        {chipMatch.breed} · {t.formatMeta(chipMatch)} ·{' '}
-                        {t.statusLabel(chipMatch.status)}
+                        {[chipMatch.breed, t.formatMeta(chipMatch), t.statusLabel(chipMatch.status)]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </p>
                       <p className="admin-match__meta">
                         {formatMicrochipCode(chipLookupCode ?? '')}
@@ -2095,9 +2097,9 @@ export function IntakeWizard() {
                         value={media.alt}
                         placeholder="Perra mestiza café echada en el patio"
                         disabled={busy}
-                        aria-invalid={
-                          publishIntent && media.alt.trim().length === 0 ? 'true' : undefined
-                        }
+                        // Optional since 2026-10-18: a blank description
+                        // publishes as "Foto de {nombre}", so it is never
+                        // marked as a problem.
                         onChange={(e) => setAlt(media.id, e.target.value)}
                       />
                     </label>

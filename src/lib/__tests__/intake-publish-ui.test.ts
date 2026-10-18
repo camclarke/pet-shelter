@@ -168,14 +168,19 @@ test('publish intent is a tap on Publicar, or «Disponible» — nothing else', 
 });
 
 test('a fresh intake has no publish intent, so registering stays calm', () => {
-  // The register path of PR #74: a name and one photo, nothing else.
+  // The register path of PR #74: a name and one photo, nothing else. Since
+  // 2026-10-18 the same draft is also publishable (owner decision), so there
+  // is nothing to mark at all.
   const draft: PetDraft = { ...draftDefaults('p1'), name: 'Luna', media: [photo()] };
   assert.deepEqual(registerBlockers(draft), []);
+  assert.deepEqual(publishBlockers(draft), []);
   assert.equal(draft.status, 'shelter');
   assert.equal(hasPublishIntent(false, draft.status), false);
-  // Control: the same draft is far from publishable, so without the intent
-  // gate the screen WOULD be marking fields here.
-  assert.ok(publishBlockers(draft).length >= 5);
+  // Control: an EMPTY draft does block, so without the intent gate the screen
+  // WOULD mark its two fields from the first keystroke.
+  const empty = draftDefaults('p1');
+  assert.equal(hasPublishIntent(false, empty.status), false);
+  assert.deepEqual(publishBlockers(empty), ['name-required', 'photo-required']);
 });
 
 test('the marks are gated on publish intent in the wizard', () => {
