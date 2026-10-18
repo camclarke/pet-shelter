@@ -118,7 +118,7 @@ export function RationsSection() {
     return { row, result, form, serving: parseServing(form.ladlesText) };
   });
 
-  const dogs = computed.filter((c) => POT_SPECIES.includes(c.row.pet.species));
+  const dogs = computed.filter((c) => c.row.pet.species !== null && POT_SPECIES.includes(c.row.pet.species));
   const shares = potShares(
     dogs.map((c) => ({
       petId: c.row.pet.id,
@@ -181,14 +181,17 @@ export function RationsSection() {
       {computed.length > 0 && (
         <ul className="food-lines">
           {computed.map(({ row, result, form, serving }) => {
-            const fromPot = POT_SPECIES.includes(row.pet.species);
+            const fromPot = row.pet.species !== null && POT_SPECIES.includes(row.pet.species);
             const suggestion = row.history ? bodyConditionSuggestion(row.history, now) : null;
             const share = shareByPet.get(row.pet.id);
             return (
               <li key={row.pet.id} className="admin-list__item--record">
                 <div>
                   <strong>{row.pet.name}</strong>
-                  <span className="t-data">{t.speciesNoun(row.pet.species, row.pet.sex)}</span>
+                  {/* Noun only when species and sex are both known; never a guessed gender. */}
+                  <span className="t-data">
+                    {t.petFacts({ species: row.pet.species, sex: row.pet.sex, breed: '', size: null, ageMonths: null })}
+                  </span>
                   <span>{result === null ? t.food.measurementsFailed : t.rationSummary(result)}</span>
                   {suggestion && <span className="auth__hint">{t.bodyConditionSuggestionText(suggestion)}</span>}
                   {!fromPot && <span className="auth__hint">{t.food.notFromPot}</span>}

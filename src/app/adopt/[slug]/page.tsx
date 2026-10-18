@@ -17,8 +17,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const pet = await getPetBySlug(slug);
   if (!pet) return {};
 
-  const noun = t.speciesNoun(pet.species, pet.sex);
-  const description = `${noun} · ${pet.breed} · ${t.formatAge(pet.ageMonths)}. Conoce a ${pet.name} en ${SHELTER.name}.`;
+  // Known facts only. A pet publishes with a name and a photo (owner decision
+  // 2026-10-18), so species, sex, breed and age can all be missing here — and
+  // `speciesNoun(null, …)` used to throw, which 500'd the whole page.
+  const facts = t.petFacts(pet);
+  const description = `${facts ? `${facts}. ` : ''}Conoce a ${pet.name} en ${SHELTER.name}.`;
 
   return {
     title: pet.name,
@@ -50,6 +53,8 @@ export default async function PetPage({ params }: Props) {
   const pet = await getPetBySlug(slug);
   if (!pet) notFound();
 
+  const facts = t.petFacts(pet);
+
   return (
     <article className="dossier">
       <div className="container dossier__grid">
@@ -63,20 +68,14 @@ export default async function PetPage({ params }: Props) {
           <h1 className="t-name dossier__name">{pet.name}</h1>
           {pet.formerNames.length > 0 && (
             <p className="dossier__former-names">
-              Antes {t.pastParticiple('conocid', pet.sex)} como {pet.formerNames.join(', ')}
+              {t.formerNamesNote(pet.sex, pet.formerNames)}
             </p>
           )}
-          <p className="t-data dossier__meta">
-            {t.speciesNoun(pet.species, pet.sex)} · {pet.breed} · {t.formatAge(pet.ageMonths)} ·{' '}
-            {t.sizeLabel(pet.size, pet.sex)}
-          </p>
+          {facts && <p className="t-data dossier__meta">{facts}</p>}
 
           {pet.hasMicrochip && (
             <p className="dossier__chip-note">
-              <span aria-hidden="true">🔒</span> Está {t.pastParticiple('identificad', pet.sex)} con
-              microchip. Si {t.article(pet.sex)} encuentras{' '}
-              {t.pastParticiple('perdid', pet.sex)}, cualquier veterinaria puede leerlo y
-              avisarnos.
+              <span aria-hidden="true">🔒</span> {t.microchipFinderNote(pet.name, pet.sex)}
             </p>
           )}
 

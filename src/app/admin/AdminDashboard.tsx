@@ -235,7 +235,7 @@ export function AdminDashboard() {
                 <Link href={`/admin/pets/${pet.id}`}>
                   <strong>{pet.name}</strong>
                   <span className="t-data">
-                    {t.statusLabel(pet.status)} · {t.formatMeta(pet)}
+                    {[t.statusLabel(pet.status), t.formatMeta(pet)].filter(Boolean).join(' · ')}
                     {shouldHaveOpenPlacement(pet.status) && !placed.has(pet.id) && (
                       <> · <span className="admin-list__flag">sin área</span></>
                     )}

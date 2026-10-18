@@ -133,7 +133,7 @@ export type FactorResult =
  * stage. The midpoint of an estimate is a guess, and a factor chosen from it
  * would present the guess as a standard.
  */
-export function energyFactorFor(species: Species, age: AgeInput): FactorResult {
+export function energyFactorFor(species: Species | null, age: AgeInput): FactorResult {
   if (species !== 'dog' && species !== 'cat') return { kind: 'not-applicable' };
 
   const valid = (n: number | null | undefined): n is number =>
@@ -209,14 +209,15 @@ export function bodyConditionSuggestion(
 export const GROWING_WEIGHT_STALE_DAYS = 30;
 
 export interface RationPetInput extends AgeInput {
-  species: Species;
+  /** Null on a pet published without it; no factor is chosen then. */
+  species: Species | null;
   /** Pet.weightKgMin/Max — the PHOTO ESTIMATE. Shown for context, never computed with. */
   estimatedKgMin?: number | null;
   estimatedKgMax?: number | null;
 }
 
 export type RationResult =
-  | { kind: 'not-applicable'; species: Species }
+  | { kind: 'not-applicable'; species: Species | null }
   /**
    * No measured weight. The photo estimate travels along ONLY so the UI can
    * say "the photos estimated 18–26 kg, which is not used" — see the decision

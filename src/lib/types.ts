@@ -69,7 +69,13 @@ export interface Pet {
   id: string;
   slug: string;
 
-  species: Species;
+  /**
+   * Null when nobody has recorded it. Since 2026-10-18 a pet publishes with a
+   * name and a photo only (owner decision), so every reader of `species`,
+   * `sex` and `size` must render a missing value as an omission — never as
+   * "undefined", never as a default, and never as a guessed gender.
+   */
+  species: Species | null;
 
   /** The name the pet answers to now. */
   name: string;
@@ -116,8 +122,10 @@ export interface Pet {
   /** Set only when genuinely known, e.g. from a vaccination card. */
   birthdateApprox: Timestamp | null;
 
-  sex: PetSex;
-  size: PetSize;
+  /** Null when unknown. Unknown sex means NO gendered word, not a masculine one. */
+  sex: PetSex | null;
+  /** Null when unknown; omitted from every rendering. */
+  size: PetSize | null;
 
   /**
    * A PROJECTION, not a description — and that is the only thing to know.

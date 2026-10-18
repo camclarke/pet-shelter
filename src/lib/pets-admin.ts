@@ -45,17 +45,14 @@ import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from 'firebas
 import { stripAndResize } from './image-strip';
 import type { FieldValue } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
-import {
-  coverPhotoFrom,
-  isPrivatePhotoPath,
-  mediaTierFor,
-  storagePathFor,
-} from './types';
-import type { Pet, PetPhotoSlot } from './types';
+import { isPrivatePhotoPath, storagePathFor } from './types';
+import type { PetPhotoSlot } from './types';
+import { buildPublishDocuments } from './publish-documents';
+import { t } from '@/i18n';
 
 import { getFirebase } from './firebase-client';
-import { normalizeMicrochipCode, validateMicrochip } from './microchip';
-import { disambiguateSlug, toAgeMonths, type DraftMedia, type PetDraft } from './intake';
+import { normalizeMicrochipCode } from './microchip';
+import { disambiguateSlug, publishSlugBase, type DraftMedia, type PetDraft } from './intake';
 import {
   custodyKindForStatus,
   planReadmission,
@@ -68,27 +65,9 @@ import {
 } from './readmission';
 import { SHELTER } from '@/config/shelter';
 
-/**
- * The exact shape written to `pets/{petId}`.
- *
- * WARNING: this type is the ONLY thing tying `Pet` to the code that writes
- * it. Before it existed the write was an untyped object literal, so a field
- * added to `Pet` produced a green typecheck and a document without it. Keep
- * the write annotated — an inline literal silently opts out of the check.
- *
- * `id` is the document id, not a field. The timestamps are FieldValue
- * sentinels going in and Timestamps coming out, which is why this cannot
- * simply be `Pet`.
- */
-type PetDocumentWrite = Omit<
-  Pet,
-  'id' | 'createdAt' | 'updatedAt' | 'extractedAt'
-> & {
-  createdAt: FieldValue;
-  updatedAt: FieldValue;
-  /** A sentinel on the way in, a Timestamp on the way out. */
-  extractedAt: FieldValue | null;
-};
+// `PetDocumentWrite` — the exact shape written to `pets/{petId}` — lives in
+// publish-documents.ts now, generic over the timestamp sentinel, so the
+// wizard and the bulk publish script cannot drift apart.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drafts
@@ -434,136 +413,39 @@ export interface PublishResult {
 export async function publishDraft(draft: PetDraft, user: User): Promise<PublishResult> {
   const { db } = getFirebase();
 
-  const slug = await resolveSlug(draft.slug);
-  const batch = writeBatch(db);
-  const petRef = doc(db, 'pets', draft.id);
+  // Never empty: an empty prefix in `takenSlugs` matches every slug, and a
+  // draft whose slug is blank or malformed is no longer a publish blocker
+  // (owner decision 2026-10-18) — `publishSlugBase` derives one instead.
+  const slug = await resolveSlug(publishSlugBase(draft));
 
-  // ── public tier ──────────────────────────────────────────────────────────
-  const ageMonths = toAgeMonths(draft.ageYears, draft.ageMonthsPart, draft.ageUnknown);
-
-  const publicTier: PetDocumentWrite = {
+  // The shape is decided in ONE place, shared with
+  // `scripts/publish-ready-drafts.mjs` — see publish-documents.ts.
+  const docs = buildPublishDocuments<FieldValue>({
+    draft,
     slug,
-    species: draft.species!,
-    name: draft.name.trim(),
-    // Empty on a first intake. It fills in when an animal is renamed later —
-    // and the dossier reads `.length` unguarded, so it must be an array now.
-    formerNames: [],
-    breed: draft.breed.trim(),
-    ageMonths,
-    ageMonthsMin: draft.ageMonthsMin,
-    ageMonthsMax: draft.ageMonthsMax,
-    // A shelter almost never knows a birthdate, so any age it holds is an
-    // estimate. Only a vaccination card giving `birthdateApprox` would make
-    // this false, and nothing writes that yet. Presenting "18 meses" as
-    // though it were measured is exactly what this flag exists to prevent.
-    ageIsEstimate: ageMonths !== null,
-    birthdateApprox: null,
-    sex: draft.sex!,
-    size: draft.size!,
-    // No `!`: null is a legitimate answer and is NOT a publish blocker. Four
-    // of the imported residents already cannot publish until someone types a
-    // slug, and a second blocker on that cohort is the gate-stricter-than-
-    // reality failure plan §3 warns gets worked around.
-    expectedAdultWeightBand: draft.expectedAdultWeightBand ?? null,
-    colorPattern: draft.colorPattern.trim() || null,
-    coatType: draft.coatType.trim() || null,
-    weightKgMin: draft.weightKgMin,
-    weightKgMax: draft.weightKgMax,
-    // True whenever there is a range, because these fields only ever hold the
-    // photograph's estimate. Weighing the animal writes a dated record to
-    // `measurements` and leaves this untouched — see `Pet.weightKgMin`.
-    weightIsEstimate: draft.weightKgMin !== null || draft.weightKgMax !== null,
     status: draft.status,
-    hasMicrochip: draft.hasMicrochip,
-    // Derived from the first PUBLISHABLE photo, never typed, and never from
-    // media[0] — media is in capture order and a genital shot can legitimately
-    // be first, which would have put it on the public wall. See coverPhotoFrom.
-    coverPhoto: coverPhotoFrom(draft.media),
-    // The paper register's row number, so the link survives publish. Null for
-    // an animal nobody wrote in the register — the ordinary intake.
-    registerNo: draft.register?.no ?? null,
-    // Provenance: which fields a vision model influenced, if any. Empty for a
-    // hand-typed animal. This records INFLUENCE, not unreviewed writing — an
-    // admin accepted every value that reached here.
-    suggestedFields: draft.suggestedFields,
-    extractedByModel: draft.suggestedByModel,
-    extractedAt: draft.suggestedByModel ? serverTimestamp() : null,
-    // Required by getWall(), which orders by it. A document missing the
-    // ordered field is dropped from the query silently — it looks exactly
-    // like "no data", which is this repo’s most-repeated failure shape.
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-
-  batch.set(petRef, publicTier);
-
-  // ── authenticated tier ───────────────────────────────────────────────────
-  batch.set(doc(petRef, 'detail', 'main'), {
-    story: draft.story.trim(),
-    temperament: draft.temperament,
-    healthNotes: draft.healthNotes.trim(),
-    photos: [],
-    commitments: draft.commitments,
-    sterilized: draft.sterilized,
-    goodWithChildren: draft.goodWithChildren,
-    goodWithOtherPets: draft.goodWithOtherPets,
+    uid: user.uid,
+    now: serverTimestamp(),
+    defaultAlt: t.defaultPhotoAlt,
   });
 
-  // ── media ────────────────────────────────────────────────────────────────
-  draft.media.forEach((media, index) => {
-    batch.set(doc(petRef, 'media', media.id), {
-      kind: 'photo',
-      // The cover is public because it appears on the wall; the rest are
-      // gated, matching the "public teaser, gated detail" decision. An
-      // unauthenticated client MUST query with where('tier','==','public') or
-      // the whole query is rejected rather than filtered — see types.ts.
-      //
-      // ⚠️ The slot check is NOT redundant with the index check. A teeth or
-      // genital photo must never be public even if it somehow ends up first —
-      // and it can, because slots are filled in whatever order the animal
-      // tolerates being handled. Ordering is a UI concern; this is a
-      // disclosure decision, so it is made from the slot rather than from
-      // position.
-      tier: mediaTierFor(media.slot, index),
-      slot: media.slot,
-      path: media.path,
-      derivatives: {},
-      width: media.width,
-      height: media.height,
-      durationSeconds: null,
-      alt: media.alt.trim(),
-      order: index,
-      uploadedAt: serverTimestamp(),
-      uploadedBy: user.uid,
-    });
-  });
+  const batch = writeBatch(db);
+  const petRef = doc(db, 'pets', docs.petId);
 
-  // ── restricted tier: the chip number ─────────────────────────────────────
-  if (draft.hasMicrochip && draft.microchipCode.trim()) {
-    const validation = validateMicrochip(draft.microchipCode, draft.microchipStandard);
-    // The form blocks an invalid code, so reaching here with one means the
-    // draft was edited elsewhere. Publishing the animal without its chip
-    // record is better than refusing the whole intake — but it must not be
-    // silent, because `hasMicrochip` would then claim a record that is absent.
-    if (validation.valid && validation.parsed) {
-      batch.set(doc(petRef, 'identity', 'microchip'), {
-        code: validation.parsed.code,
-        standard: draft.microchipStandard,
-        prefix: validation.parsed.prefix,
-        nationalId: validation.parsed.nationalId,
-        implantedAt: null,
-        implantedBy: null,
-        implantSite: null,
-        externalRegistry: null,
-        externalRegistryId: null,
-        updatedAt: serverTimestamp(),
-        updatedBy: user.uid,
-      });
-    } else {
-      console.error('[pets-admin] publishing without an identity document: invalid chip code');
-    }
+  // One `writeBatch`, so a half-published animal is not a state that exists.
+  batch.set(petRef, docs.pet);
+  batch.set(doc(petRef, 'detail', 'main'), docs.detail);
+  for (const media of docs.media) batch.set(doc(petRef, 'media', media.id), media.data);
+  if (docs.identity) batch.set(doc(petRef, 'identity', 'microchip'), docs.identity);
+  if (docs.invalidChip) {
+    // The form flags an invalid code live, so reaching here with one means the
+    // draft was edited elsewhere. Publishing without the chip record beats
+    // refusing the intake — but never silently.
+    console.error('[pets-admin] publishing without an identity document: invalid chip code');
   }
 
+  // The draft delete is in the same batch: if the publish fails the draft is
+  // still there, and if it succeeds there is no orphan to clean up.
   batch.delete(doc(db, 'petDrafts', draft.id));
 
   await batch.commit();
@@ -626,10 +508,10 @@ export async function findPetByMicrochipAdmin(rawCode: string): Promise<ChipVerd
         formerNames: data.formerNames ?? [],
         status: data.status,
         coverPhoto: data.coverPhoto ?? null,
-        species: data.species,
-        sex: data.sex,
-        size: data.size,
-        breed: data.breed,
+        species: data.species ?? null,
+        sex: data.sex ?? null,
+        size: data.size ?? null,
+        breed: data.breed ?? '',
         ageMonths: data.ageMonths ?? null,
       } as ChipMatch;
     }),

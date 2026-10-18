@@ -111,7 +111,7 @@ export interface ArrivalAnnouncement {
   recordUrl: string;
 }
 
-const SPECIES_EMOJI: Record<Pet['species'], string> = {
+const SPECIES_EMOJI: Record<NonNullable<Pet['species']>, string> = {
   dog: '🐕',
   cat: '🐈',
   rabbit: '🐇',
@@ -128,7 +128,7 @@ export function arrivalAnnouncementText(a: ArrivalAnnouncement): string {
   );
 
   return t.arrivalAnnouncement({
-    emoji: SPECIES_EMOJI[a.pet.species],
+    emoji: SPECIES_EMOJI[a.pet.species ?? 'other'],
     descriptors,
     origin: a.origin?.trim() || null,
     recordUrl: a.recordUrl,

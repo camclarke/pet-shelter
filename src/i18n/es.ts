@@ -1388,13 +1388,59 @@ export const es: Messages = {
   sexLabel: (sex) => SEX[sex],
 
   sizeLabel(size, sex) {
+    // Unknown sex: agree with "tamaño" (masculine noun), not with the animal,
+    // so "tamaño mediano" claims nothing about a sex nobody recorded.
+    if (sex !== 'male' && sex !== 'female') {
+      return size === 'large' ? 'tamaño grande' : `tamaño ${SIZE_STEMS[size]}o`;
+    }
     if (size === 'large') return 'grande';
     return SIZE_STEMS[size] + (sex === 'female' ? 'a' : 'o');
   },
 
-  speciesNoun: (species, sex) => SPECIES_NOUN[species][sex],
+  // `?? 'other'`: an unknown species must never throw — it used to, as
+  // `SPECIES_NOUN[null]`, which would 500 a public page.
+  speciesNoun: (species, sex) => SPECIES_NOUN[species ?? 'other'][sex],
 
-  speciesPlural: (species) => SPECIES_PLURAL[species],
+  speciesPlural: (species) => SPECIES_PLURAL[species ?? 'other'],
+
+  petFacts(pet, options = {}) {
+    const parts: string[] = [];
+    // The noun only when BOTH are known. An unknown species with a known sex
+    // would add only "animalita", which says nothing; a known species with an
+    // unknown sex has no gender-free singular ("perro" claims male).
+    if (pet.species !== null && pet.species !== undefined && (pet.sex === 'male' || pet.sex === 'female')) {
+      parts.push(SPECIES_NOUN[pet.species][pet.sex]);
+    } else if (pet.sex === 'male' || pet.sex === 'female') {
+      parts.push(SEX[pet.sex]);
+    }
+    const breed = (pet.breed ?? '').trim();
+    if (breed !== '') parts.push(breed);
+    if (options.age !== false && pet.ageMonths !== null && pet.ageMonths !== undefined) {
+      parts.push(this.formatAge(pet.ageMonths));
+    }
+    if (pet.size === 'small' || pet.size === 'medium' || pet.size === 'large') {
+      parts.push(this.sizeLabel(pet.size, pet.sex));
+    }
+    return parts.join(' · ');
+  },
+
+  formerNamesNote(sex, names) {
+    const list = names.join(', ');
+    if (sex === 'male' || sex === 'female') {
+      return `Antes ${this.pastParticiple('conocid', sex)} como ${list}`;
+    }
+    return `Antes se llamaba ${list}`;
+  },
+
+  microchipFinderNote(name, sex) {
+    if (sex === 'male' || sex === 'female') {
+      return `Está ${this.pastParticiple('identificad', sex)} con microchip. Si ${this.article(sex)} encuentras ${this.pastParticiple('perdid', sex)}, cualquier veterinaria puede leerlo y avisarnos.`;
+    }
+    // Gender-free: every word here agrees with "microchip" or with nobody.
+    return `Tiene microchip. Si te encuentras con ${name} en la calle, cualquier veterinaria puede leerlo y avisarnos.`;
+  },
+
+  defaultPhotoAlt: (name) => `Foto de ${name.trim()}`,
 
   article: (sex) => (sex === 'female' ? 'la' : 'el'),
 
@@ -1458,13 +1504,20 @@ export const es: Messages = {
   },
 
   formatMeta(pet) {
-    return [this.formatAge(pet.ageMonths), SEX[pet.sex], this.sizeLabel(pet.size, pet.sex)].join(
-      ' · ',
-    );
+    // Known parts only. This used to print "edad desconocida ·  · undefinedo"
+    // for a pet with no sex or size, which became reachable on 2026-10-18 when
+    // publishing stopped requiring them.
+    const parts: string[] = [];
+    if (pet.ageMonths !== null && pet.ageMonths !== undefined) parts.push(this.formatAge(pet.ageMonths));
+    if (pet.sex === 'male' || pet.sex === 'female') parts.push(SEX[pet.sex]);
+    if (pet.size === 'small' || pet.size === 'medium' || pet.size === 'large') {
+      parts.push(this.sizeLabel(pet.size, pet.sex));
+    }
+    return parts.join(' · ');
   },
 
   formatBreedLine(breed) {
-    const text = breed.trim().replace(/\s+/g, ' ');
+    const text = (breed ?? '').trim().replace(/\s+/g, ' ');
     if (text === '') return null;
     if (text.length <= BREED_LINE_MAX_CHARS) return text;
 
@@ -1632,9 +1685,31 @@ export const es: Messages = {
     writeToShelter: 'Escríbenos por WhatsApp',
     genericTitle: 'Placa de identificación',
 
-    lostBanner: (name, sex) => `¡${name} está ${sex === 'female' ? 'perdida' : 'perdido'}!`,
+    lostBanner: (name, sex) =>
+      sex === 'male' || sex === 'female'
+        ? `¡${name} está ${sex === 'female' ? 'perdida' : 'perdido'}!`
+        : `¡Estamos buscando a ${name}!`,
 
     situation(tone, name, sex, shelterName) {
+      // Unknown sex: every gendered pronoun and adjective is rephrased away,
+      // never defaulted to the masculine. A pet publishes with a name and a
+      // photo only since 2026-10-18, so this branch reaches the street.
+      if (sex !== 'male' && sex !== 'female') {
+        switch (tone) {
+          case 'lost':
+            return `Su familia busca a ${name}. Escríbenos y les avisamos enseguida.`;
+          case 'adopted':
+            return `${name} ya tiene familia. Si te encontraste con ${name} en la calle, algo pasó: escríbenos y les avisamos.`;
+          case 'available':
+            return `${name} está en adopción con ${shelterName}. Si te encontraste con ${name} en la calle, se nos escapó: escríbenos y vamos enseguida.`;
+          case 'in-care':
+            return `${name} está al cuidado de ${shelterName}. Si te encontraste con ${name} en la calle, se nos escapó: escríbenos y vamos enseguida.`;
+          default: {
+            const unhandled: never = tone;
+            return String(unhandled);
+          }
+        }
+      }
       const pronoun = sex === 'female' ? 'la' : 'lo';
       switch (tone) {
         case 'lost':
@@ -1653,13 +1728,16 @@ export const es: Messages = {
     },
 
     microchipHint: (sex) =>
-      `Tiene microchip. Si puedes, ${sex === 'female' ? 'llévala' : 'llévalo'} a una veterinaria: lo pueden leer ahí mismo y confirmar quién es.`,
+      sex === 'male' || sex === 'female'
+        ? `Tiene microchip. Si puedes, ${sex === 'female' ? 'llévala' : 'llévalo'} a una veterinaria: lo pueden leer ahí mismo y confirmar quién es.`
+        : 'Tiene microchip. Si puedes, acércate con este animalito a una veterinaria: lo pueden leer ahí mismo y confirmar quién es.',
 
     finderMessage({ name, sex, formattedToken, tone }) {
       const base = `Hola, encontré a ${name}. Su placa dice ${formattedToken}.`;
-      return tone === 'lost'
+      if (tone !== 'lost') return base;
+      return sex === 'male' || sex === 'female'
         ? `${base} La página dice que está ${sex === 'female' ? 'perdida' : 'perdido'}.`
-        : base;
+        : `${base} La página dice que se perdió.`;
     },
 
     meetLink: (name) => `Conoce a ${name} →`,
@@ -2213,7 +2291,9 @@ export const es: Messages = {
   rationSummary(result) {
     switch (result.kind) {
       case 'not-applicable':
-        return 'El cálculo de energía no aplica a esta especie.';
+        return result.species === null
+          ? 'Falta anotar la especie: sin ella no se calcula la ración.'
+          : 'El cálculo de energía no aplica a esta especie.';
       case 'no-weight':
         // Never a kilocalorie figure here — see the note in messages.ts.
         return result.estimate

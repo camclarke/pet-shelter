@@ -131,16 +131,19 @@ export interface TagMessages {
   /** Tab title when the page does not name an animal. */
   readonly genericTitle: string;
   /** The loud first line for a lost animal. */
-  lostBanner(name: string, sex: PetSex): string;
-  /** One sentence under the name, by tone. Gender-agreeing. */
-  situation(tone: TagTone, name: string, sex: PetSex, shelterName: string): string;
+  lostBanner(name: string, sex: PetSex | null): string;
+  /**
+   * One sentence under the name, by tone. Gender-agreeing — and gender-free,
+   * not masculine, when the sex is unknown.
+   */
+  situation(tone: TagTone, name: string, sex: PetSex | null, shelterName: string): string;
   /** Shown only when the pet document says it is chipped. */
-  microchipHint(sex: PetSex): string;
+  microchipHint(sex: PetSex | null): string;
   /**
    * The pre-filled WhatsApp body. Carries the PRINTED code, so the shelter can
    * look the tag up even if the name on the message is wrong or blank.
    */
-  finderMessage(input: { name: string; sex: PetSex; formattedToken: string; tone: TagTone }): string;
+  finderMessage(input: { name: string; sex: PetSex | null; formattedToken: string; tone: TagTone }): string;
   /** Secondary link to the dossier, for an animal in adoption only. */
   meetLink(name: string): string;
   /** "WhatsApp 77903553" — the number as a fallback for a phone that cannot follow a link. */
@@ -789,14 +792,68 @@ export interface Messages {
   /** "macho" / "hembra". */
   sexLabel(sex: PetSex): string;
 
-  /** Gender-agreeing size adjective: "pequeña", "mediano", "grande". */
-  sizeLabel(size: PetSize, sex: PetSex): string;
+  /**
+   * Gender-agreeing size adjective: "pequeña", "mediano", "grande".
+   *
+   * With an UNKNOWN sex it agrees with the word "tamaño" instead of with the
+   * animal — "tamaño mediano" — so no gender is claimed for an animal nobody
+   * has sexed. Since 2026-10-18 a pet publishes with a name and a photo only,
+   * so this case reaches public pages.
+   */
+  sizeLabel(size: PetSize, sex: PetSex | null): string;
 
-  /** The gendered noun: perro/perra, gato/gata, conejo/coneja. */
-  speciesNoun(species: Species, sex: PetSex): string;
+  /**
+   * The gendered noun: perro/perra, gato/gata, conejo/coneja. An unknown
+   * species reads "animalito"/"animalita" and never throws.
+   *
+   * `sex` stays REQUIRED: there is no gender-free singular for "perro", so a
+   * caller that does not know the sex must leave the noun out — see
+   * `petFacts`, which does exactly that.
+   */
+  speciesNoun(species: Species | null, sex: PetSex): string;
 
-  /** Plural for headings: "perritos", "gatitos". */
-  speciesPlural(species: Species): string;
+  /** Plural for headings: "perritos", "gatitos". Unknown species: "animalitos". */
+  speciesPlural(species: Species | null): string;
+
+  /**
+   * The facts line under a pet's name on a public page — "perra · mestiza ·
+   * 2 años · mediana" — built from KNOWN facts only.
+   *
+   * Every unknown part is omitted rather than rendered: no "undefined", no
+   * "edad desconocida", no doubled separator, and no gendered word when the
+   * sex is unknown (the species noun is dropped then, because "perro" would
+   * claim a sex). `age: false` leaves age out even when known, for the tag
+   * page, which deliberately does not show it. Returns '' when nothing is
+   * known, so the caller omits the element.
+   */
+  petFacts(
+    pet: {
+      species: Species | null;
+      sex: PetSex | null;
+      breed: string | null | undefined;
+      size: PetSize | null;
+      ageMonths: number | null;
+    },
+    options?: { age?: boolean },
+  ): string;
+
+  /**
+   * "Antes conocida como Luna" — or, with an unknown sex, the gender-free
+   * "Antes se llamaba Luna".
+   */
+  formerNamesNote(sex: PetSex | null, names: readonly string[]): string;
+
+  /**
+   * The finder note under the facts on the dossier. Gender-agreeing when the
+   * sex is known; gender-free otherwise.
+   */
+  microchipFinderNote(name: string, sex: PetSex | null): string;
+
+  /**
+   * Alt text for a published photo nobody described: "Foto de Luna". Built
+   * from the NAME only — never a colour, a breed or a pose nobody wrote down.
+   */
+  defaultPhotoAlt(name: string): string;
 
   /** Definite article, for sentences like "conoce a la gata". */
   article(sex: PetSex): string;
@@ -869,8 +926,15 @@ export interface Messages {
    */
   formatAgeRange(minMonths: number, maxMonths: number): string;
 
-  /** The uppercase data line under a name: "3 MESES · MACHO · MEDIANO". */
-  formatMeta(pet: { ageMonths: number | null; sex: PetSex; size: PetSize }): string;
+  /**
+   * The uppercase data line under a name: "3 MESES · MACHO · MEDIANO".
+   *
+   * Unknown parts are OMITTED, never rendered as a placeholder, and the
+   * separator joins only what is left: an animal with only its sex recorded
+   * reads "HEMBRA". Returns '' when nothing is known, so a caller omits the
+   * element instead of printing an empty line.
+   */
+  formatMeta(pet: { ageMonths: number | null; sex: PetSex | null; size: PetSize | null }): string;
 
   /**
    * The breed, trimmed to what fits on an adoption-wall card.
@@ -888,7 +952,7 @@ export interface Messages {
    * "MESTIZA CON RASGOS DE HUSKY…" reads as a list that continues. The budget
    * is measured, not guessed — see the implementation.
    */
-  formatBreedLine(breed: string): string | null;
+  formatBreedLine(breed: string | null | undefined): string | null;
 
   /** Short label for the status chip on a poster. */
   statusLabel(status: PetStatus): string;

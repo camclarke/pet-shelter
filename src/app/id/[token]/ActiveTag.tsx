@@ -22,6 +22,8 @@ export function ActiveTag({ view }: { view: ActiveView }) {
   const { pet, tone } = view;
   const code = formatQrToken(view.token);
   const message = t.tag.finderMessage({ name: pet.name, sex: pet.sex, formattedToken: code, tone });
+  // No age on a tag, by design — see PUBLIC_TAG_PET_FIELDS.
+  const facts = t.petFacts({ ...pet, ageMonths: null }, { age: false });
 
   return (
     <article className={`tag-page tag-page--${tone}`}>
@@ -40,9 +42,9 @@ export function ActiveTag({ view }: { view: ActiveView }) {
           )}
           <div className="tag-page__identity">
             <h1 className="t-name tag-page__name">{pet.name}</h1>
-            <p className="t-data tag-page__meta">
-              {t.speciesNoun(pet.species, pet.sex)} · {pet.breed} · {t.sizeLabel(pet.size, pet.sex)}
-            </p>
+            {/* Known facts only: species, sex, breed and size may all be
+                missing since a pet publishes with a name and a photo. */}
+            {facts && <p className="t-data tag-page__meta">{facts}</p>}
             {pet.colorPattern && <p className="tag-page__color">{pet.colorPattern}</p>}
           </div>
         </div>
