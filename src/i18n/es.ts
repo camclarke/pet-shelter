@@ -273,17 +273,17 @@ const APPLICATION_HOME_ERROR: Record<ApplicationHomeError, string> = {
 };
 
 const APPLICATION_COPY: ApplicationCopy = {
-  applyLink: 'Postular en línea →',
+  adoptButton: (petName) => `Quiero adoptar a ${petName}`,
 
   pageTitle: (petName) => `Postular para adoptar a ${petName}`,
   intro: (petName) =>
-    `Esta solicitud es opcional. Si prefieres, escríbenos por WhatsApp: es el camino más rápido para conocer a ${petName}.`,
-  whatsappInstead: 'Escribir por WhatsApp',
+    `Crea tu cuenta, llena la solicitud y el equipo te escribe para conocerte y presentarte a ${petName}.`,
+  whatsappQuestions: '¿Tienes dudas? Escríbenos por WhatsApp',
   privacy: (shelterName) =>
     `Tus respuestas solo las ve el equipo de ${shelterName}. Nunca se publican.`,
   signInPrompt:
-    'Para postular en línea necesitas una cuenta. Entra o crea una y vuelves directo a este formulario.',
-  signInButton: 'Entrar o crear cuenta',
+    'Para postular necesitas una cuenta. Crea una o entra, y vuelves directo a este formulario.',
+  signInButton: 'Crear cuenta o entrar',
   returnNotice: 'Cuando entres, vuelves directo al formulario de adopción.',
   continueApplication: 'Volver al formulario de adopción',
   loading: 'Cargando…',

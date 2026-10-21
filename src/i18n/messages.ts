@@ -260,13 +260,18 @@ import type {
  */
 export interface ApplicationCopy {
   // ── the dossier ──────────────────────────────────────────────────────────
-  /** The SECONDARY text link under the WhatsApp button. Never a button. */
-  readonly applyLink: string;
+  /**
+   * The PRIMARY button on a dossier whose animal can be applied for (owner
+   * decision 2026-10-21). It leads to the account and then the application.
+   * No gendered word: the sex may be unknown.
+   */
+  adoptButton(petName: string): string;
 
   // ── the public form ─────────────────────────────────────────────────────
   pageTitle(petName: string): string;
   intro(petName: string): string;
-  readonly whatsappInstead: string;
+  /** The SECONDARY text link to WhatsApp (dossier and apply page). Never a button. */
+  readonly whatsappQuestions: string;
   privacy(shelterName: string): string;
   readonly signInPrompt: string;
   readonly signInButton: string;

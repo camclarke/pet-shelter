@@ -96,7 +96,10 @@ export interface ShelterConfig {
 
   /**
    * The optional online adoption application. See `ApplicationConfig`.
-   * WhatsApp stays the primary way to adopt whatever this says.
+   * While this is on, the dossier's adopt button leads to an account and then
+   * the application, and WhatsApp is a small secondary link (owner decision
+   * 2026-10-21, reversing "WhatsApp primary"). While it is off, or for an
+   * animal not on the wall, WhatsApp stays the primary button.
    */
   adoptionApplications: ApplicationConfig;
 

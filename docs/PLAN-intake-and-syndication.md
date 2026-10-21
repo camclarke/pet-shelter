@@ -904,6 +904,15 @@ at the cost of the conversion rate.
 button.** If measurement later shows the online path performing better, that is
 a decision to revisit with data — not an assumption to build in now.
 
+> **Reversed 2026-10-21 by the owner.** For an animal that is `available`, while
+> `adoptionApplications.enabled` is on, the dossier's primary button ("Quiero
+> adoptar a {name}") now leads to the apply page: the account first (a sign-in
+> that returns to the form), then the application. WhatsApp is a small secondary
+> link ("¿Tienes dudas? Escríbenos por WhatsApp") on the dossier and the apply
+> page. WhatsApp stays the PRIMARY button wherever no form applies (switch off,
+> or an animal not on the wall). The paragraphs above record the earlier
+> decision and are kept as history.
+
 ### The flow
 
 1. Visitor reads the expediente (public tier).

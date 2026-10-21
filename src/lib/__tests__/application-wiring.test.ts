@@ -6,8 +6,8 @@
  * ships OFF. So reading the source is the only check available on the two
  * properties that matter most and that a refactor could silently break:
  *
- *   1. the WhatsApp button on the dossier stays PRIMARY and in front — plan §6's
- *      design rule, that the account requirement never moves before it;
+ *   1. the dossier's adopt button leads to the application (account first) with
+ *      WhatsApp as a secondary link — the owner's 2026-10-21 decision, plan §6;
  *   2. the approval screen commits what the tested builder returns, in one batch.
  *
  * Deliberately crude, and honest about it: these assert that code EXISTS in a
@@ -30,36 +30,46 @@ function source(...segments: string[]): string {
 const DOSSIER = source('app', 'adopt', '[slug]', 'page.tsx');
 const APPLY = source('app', 'adopt', '[slug]', 'apply', 'page.tsx');
 
-test('the dossier WhatsApp CTA is intact and unchanged', () => {
-  // The exact markup the conversion runs through. If this test has to change,
+test('the dossier adopt button leads to the application, with WhatsApp as a small link after it', () => {
+  // Owner decision 2026-10-21 (reversing "WhatsApp primary"): choosing to adopt
+  // leads to an account and then the form. If this test has to change again,
   // the change is to the primary objective and needs saying out loud.
-  assert.ok(DOSSIER.includes('href={whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name))}'));
-  assert.ok(DOSSIER.includes('className="btn btn--action dossier__cta"'));
-  assert.ok(DOSSIER.includes('Adóptame ↗'));
+  const primary = DOSSIER.indexOf('<Link href={`/adopt/${pet.slug}/apply`} className="btn btn--action dossier__cta">');
+  const label = DOSSIER.indexOf('t.applications.adoptButton(pet.name)');
+  const secondary = DOSSIER.indexOf('<a href={whatsapp}>{t.applications.whatsappQuestions}</a>');
+  assert.ok(primary > 0, 'the primary button no longer links to the apply page');
+  assert.ok(label > primary, 'the primary button lost its label');
+  assert.ok(secondary > label, 'the WhatsApp link is missing or has moved in front of the primary button');
+  assert.ok(DOSSIER.includes('const whatsapp = whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name));'));
 });
 
-test('the application link comes AFTER the WhatsApp button, never before it', () => {
-  const cta = DOSSIER.indexOf('dossier__cta');
-  const apply = DOSSIER.indexOf('/apply`}');
-  assert.ok(cta > 0, 'no WhatsApp CTA on the dossier');
-  assert.ok(apply > 0, 'no application link on the dossier');
-  assert.ok(apply > cta, 'the application link has moved in front of the WhatsApp button');
+test('the dossier WhatsApp link is a quiet text link, not a second button', () => {
+  const at = DOSSIER.indexOf('dossier__apply');
+  const block = DOSSIER.slice(at, DOSSIER.indexOf('</p>', at));
+  assert.ok(block.includes('whatsappQuestions'));
+  assert.ok(!/className="btn/.test(block), 'the secondary link is styled as a button');
 });
 
-test('the application link is a quiet text link, not a second button', () => {
-  const block = DOSSIER.slice(DOSSIER.indexOf('dossier__apply'), DOSSIER.indexOf('</p>', DOSSIER.indexOf('dossier__apply')));
-  assert.ok(block.includes('className="auth__link"'), 'the link lost its text-link class');
-  assert.ok(!/className="btn/.test(block), 'the application link is styled as a button');
+test('the dossier only leads to the form when it is switched on and the animal is on the wall', () => {
+  assert.ok(DOSSIER.includes("const canApply = SHELTER.adoptionApplications.enabled && pet.status === 'available';"));
 });
 
-test('the dossier only links to the form when it is switched on and the animal is on the wall', () => {
-  assert.ok(DOSSIER.includes("SHELTER.adoptionApplications.enabled && pet.status === 'available'"));
+test('everywhere no form applies, WhatsApp is still the PRIMARY button', () => {
+  const fallback = DOSSIER.slice(DOSSIER.indexOf(') : ('), DOSSIER.indexOf('Adóptame ↗'));
+  assert.ok(fallback.includes('href={whatsapp}') && fallback.includes('className="btn btn--action dossier__cta"'));
+  assert.ok(!fallback.includes('/apply'), 'the fallback branch leads to the form');
 });
 
-test('the apply page renders WhatsApp before the form, 404s while switched off, and is noindex', () => {
+test('the dossier sign-in button returns to the application when one applies', () => {
+  assert.ok(DOSSIER.includes("href={canApply ? signInHrefReturningTo(`/adopt/${pet.slug}/apply`) : '/account'}"));
+});
+
+test('the apply page puts the gate or form first, WhatsApp as a secondary link after, 404s while switched off, and is noindex', () => {
   const whatsapp = APPLY.indexOf('whatsappLink(');
   const form = APPLY.indexOf('<ApplicationForm');
-  assert.ok(whatsapp > 0 && form > 0 && whatsapp < form, 'WhatsApp is no longer ahead of the form');
+  assert.ok(whatsapp > 0 && form > 0 && form < whatsapp, 'WhatsApp is ahead of the form again');
+  assert.ok(APPLY.includes('{copy.whatsappQuestions}'));
+  assert.ok(!/className="btn/.test(APPLY.slice(whatsapp - 60, whatsapp + 200)), 'the WhatsApp link became a button');
   assert.ok(/if \(!config\.enabled\) notFound\(\);/.test(APPLY), 'the page no longer 404s while switched off');
   assert.ok(APPLY.includes('index: false'), 'the apply page can be indexed');
 });
