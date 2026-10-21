@@ -487,7 +487,7 @@ const APPLICATION_STEPS_COPY: ApplicationStepsCopy = {
   contractLead:
     'Este es el compromiso de adopción. Léelo con calma antes de seguir. En el paso siguiente te pedimos una foto de tu carnet.',
   acceptanceNote:
-    'Al marcar la casilla y enviar tu solicitud, aceptas este compromiso. Tu aceptación tiene validez legal: no necesitas firmar nada en papel.',
+    'Al marcar la casilla y enviar tu solicitud, aceptas este compromiso.',
   blankName: '(tu nombre)',
   blankCi: '(tu número de carnet)',
   contractLabel: 'Texto del compromiso',
