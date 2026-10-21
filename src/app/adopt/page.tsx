@@ -7,10 +7,11 @@ export const metadata: Metadata = {
   description: `Animalitos rescatados en ${SHELTER.city}, listos para encontrar una familia para toda la vida.`,
 };
 
-// Firestore reads cost money past the free tier; a 5-minute revalidation
-// window means a burst of visitors shares one read instead of paying for one
-// each, while a newly published pet still appears within minutes.
-export const revalidate = 300;
+// Per-request render: the CI build has no Firestore access, so a prerender
+// bakes the wall's error state into the HTML. The 5-minute CDN cache that
+// bounds Firestore reads is set in next.config.ts (s-maxage=300); a test pins
+// both halves.
+export const dynamic = 'force-dynamic';
 
 export default function AdoptPage() {
   return (

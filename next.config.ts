@@ -21,6 +21,9 @@ const LEGACY_SPANISH_ROUTES = [
   { source: '/cuenta', destination: '/account' },
 ];
 
+export const CDN_CACHED_PATHS = ['/', '/adopt', '/events', '/sitemap.xml'];
+export const CDN_CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=60';
+
 /**
  * output: 'standalone' bundles only the files a request actually needs into
  * .next/standalone, which is what the Dockerfile copies into the Cloud Run
@@ -33,6 +36,17 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return LEGACY_SPANISH_ROUTES.map((route) => ({ ...route, permanent: true }));
+  },
+
+  async headers() {
+    // Pages that read Firestore render per request (dynamic = 'force-dynamic'),
+    // which Next marks `private, no-store`. Firebase Hosting honours the
+    // origin's Cache-Control, so give exactly these four paths a 5-minute CDN
+    // cache. Exact sources: /adopt/:slug stays private.
+    return CDN_CACHED_PATHS.map((source) => ({
+      source,
+      headers: [{ key: 'Cache-Control', value: CDN_CACHE_CONTROL }],
+    }));
   },
 
   images: {

@@ -25,13 +25,12 @@ export const metadata: Metadata = {
 };
 
 /**
- * MANDATORY. Without it Next prerenders this page at build time — where the
- * build has no Firestore credentials, so what would be frozen is the ERROR
- * state — and Firebase Hosting then caches that HTML for a year
- * (`s-maxage=31536000`), past any deploy. 300 s bounds the reads to one query
- * per regeneration, whatever the traffic. A test fails if this line goes.
+ * MANDATORY. The CI build has no Firestore credentials, so a prerender would
+ * freeze the ERROR state into the HTML. The page renders per request, and
+ * next.config.ts gives it a 5-minute CDN cache (s-maxage=300) so Firestore
+ * reads stay bounded. A test fails if either half goes.
  */
-export const revalidate = 300;
+export const dynamic = 'force-dynamic';
 
 /**
  * Upcoming adoption fairs and events. Past events are OFF the list (owner,
