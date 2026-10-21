@@ -204,7 +204,7 @@ export function ApplicationStepperView(props: ApplicationStepperViewProps) {
         <>
           <p className="auth__prose apply-step__lead">{copy.contractLead}</p>
           <ContractText contract={contract} mode="blank" />
-          <aside className="apply-paper-note">{copy.paperNote}</aside>
+          <aside className="apply-acceptance-note">{copy.acceptanceNote}</aside>
         </>
       )}
 

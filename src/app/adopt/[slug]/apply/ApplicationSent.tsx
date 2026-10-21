@@ -1,7 +1,7 @@
 /**
  * The confirmation, once the application AND the carnet photo have arrived.
  * Every line of it is true — see `confirmationSteps` in the es catalogue, plus
- * the two lines portion 4c-2 adds: the paper is signed at handover, and only
+ * the two lines portion 4c-2 adds: the acceptance is recorded, and only
  * the shelter team sees the carnet photo. No line promises a retention period
  * (that copy arrives with /privacy in 4f).
  *
@@ -29,7 +29,7 @@ export function ApplicationSent({
   petName: string;
   shelterName: string;
   slug: string;
-  /** The two 4c-2 lines: signed on paper at handover; the carnet seen by the team only. */
+  /** The two 4c-2 lines: the acceptance is recorded; the carnet seen by the team only. */
   withCarnetLines?: boolean;
 }) {
   const copy = t.applications;
@@ -40,7 +40,7 @@ export function ApplicationSent({
   }, []);
   const lines = [
     ...copy.confirmationSteps(petName, shelterName),
-    ...(withCarnetLines ? [steps.confirmationPaper, steps.confirmationCarnet] : []),
+    ...(withCarnetLines ? [steps.confirmationAccepted, steps.confirmationCarnet] : []),
   ];
   return (
     <div className="apply-sent" role="status">

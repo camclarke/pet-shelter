@@ -24,12 +24,12 @@
  *     text is shown;
  *   - the bold clause is a presentation flag (`emphasizedClauses`), not markup;
  *   - the signature line (FIRMA ADOPTANTE ……… FIRMA RESCATISTA) is NOT part of
- *     the online text: the contract is signed in ink at handover (owner
- *     decision D11), and signature lines beside a checkbox would read as an
- *     electronic signature, which this is not.
+ *     the online text: the checkbox plus «Enviar» is the signature (owner
+ *     decision, 2026-10-21, reversing D11), backed by the hashed
+ *     "VALIDEZ DEL CONSENTIMIENTO ELECTRÓNICO" clause, so no line is drawn.
  *
- * What the online "acepto" means (owner decision, 2026-10-16): "I apply under
- * this contract". The contract itself is signed on paper at handover.
+ * What the online "acepto" means (owner decision, 2026-10-21): the applicant
+ * accepts this contract; no paper signature is needed.
  *
  * ═══ CHANGING IT ═══════════════════════════════════════════════════════════
  * 1. Paste the owner's text verbatim into `opening`, `clauses` and `closing`.
@@ -184,8 +184,8 @@ export function contractCanonicalText(
  * additional clause, ticking this box and pressing «Enviar» IS the electronic
  * consent, so its audit trail is recorded: `termsAcceptedAt` on the
  * application, and `private/acceptance` (time, IP, account), written by the
- * acceptance route. The contract is ALSO signed in ink at handover (owner
- * decision, 2026-10-17), as a second record.
+ * acceptance route. No ink signature is asked at handover (owner decision,
+ * 2026-10-21, reversing 2026-10-17).
  *
  * `{mascota}`, the animal's name, may appear in a label; the owner's sentence
  * does not use it.

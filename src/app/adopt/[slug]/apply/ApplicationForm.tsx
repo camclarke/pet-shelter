@@ -146,7 +146,7 @@ export function ApplicationForm({
 }
 
 /**
- * Signed out: what this is (a request, completed in person, signed on paper),
+ * Signed out: what this is (a request, completed in person; accepting online is the signature),
  * why an account is needed, a sign-in link that RETURNS here, and the
  * commitments to read BEFORE creating an account (D13). Presentational.
  */

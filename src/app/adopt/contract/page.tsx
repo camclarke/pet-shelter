@@ -35,7 +35,7 @@ export const metadata: Metadata = {
  * nothing empty ever is.
  *
  * The text is `ADOPTION_CONTRACT`, verbatim, with its two blanks left blank,
- * and the note that it is signed on paper at handover (D11) — never signature
+ * and the note that accepting online is the signature — never signature
  * lines. A static route: it takes precedence over `/adopt/[slug]`, so a pet
  * whose slug were "contract" would be unreachable (none is; slugs are names).
  */
@@ -54,7 +54,7 @@ export default function ContractPage() {
         <h1 className="t-title">{copy.contractPageTitle}</h1>
         <p className="auth__prose">{copy.contractPageIntro(SHELTER.name)}</p>
         <ContractText contract={ADOPTION_CONTRACT} mode="blank" headingLevel="h2" />
-        <aside className="apply-paper-note">{copy.paperNote}</aside>
+        <aside className="apply-acceptance-note">{copy.acceptanceNote}</aside>
       </div>
     </div>
   );
