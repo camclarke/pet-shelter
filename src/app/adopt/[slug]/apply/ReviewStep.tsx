@@ -6,7 +6,7 @@
  *   2. DATOS DEL PELUDITO ADOPTADO — the paper's section 4, filled from the
  *      PUBLIC pet document, read-only, never stored (D16);
  *   3. the contract, FILLED IN with the name and C.I. typed in step 4, and the
- *      note that it is signed on paper at handover (D11);
+ *      note that accepting online is the signature;
  *   4. the acceptance box — unticked by default, never pre-ticked — with the
  *      draft marker while the owner and the lawyer have not approved the words;
  *   5. "Enviar no es la adopción…", then the one action, "Enviar solicitud".
@@ -128,7 +128,7 @@ export function ReviewStep({
 
       <p className="auth__prose apply-step__lead">{copy.contractFilledLead}</p>
       <ContractText contract={contract} mode="filled" name={fill.name} ci={fill.ci} />
-      <aside className="apply-paper-note">{copy.paperNote}</aside>
+      <aside className="apply-acceptance-note">{copy.acceptanceNote}</aside>
 
       <div className={`apply-accept${acceptanceError ? ' apply-accept--invalid' : ''}`}>
         <label className="apply-accept__box" htmlFor={ACCEPTANCE_DOM_ID}>

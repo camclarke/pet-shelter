@@ -481,13 +481,13 @@ const APPLICATION_STEPS_COPY: ApplicationStepsCopy = {
   fixStep: 'Revisa lo marcado antes de seguir.',
 
   gateIntro:
-    'Esto es una solicitud: el equipo la revisa y te escribe por WhatsApp. La adopción se completa en persona el día de la entrega, cuando firmas el compromiso en papel. Te toma unos 10 minutos. Ten a mano tu carnet de identidad.',
+    'Esto es una solicitud: el equipo la revisa y te escribe por WhatsApp. La adopción se completa en persona el día de la entrega. Te toma unos 10 minutos. Ten a mano tu carnet de identidad.',
   readContract: 'Leer el compromiso',
 
   contractLead:
-    'Este es el mismo compromiso que se firma en papel el día de la entrega. Léelo con calma antes de seguir. En el paso siguiente te pedimos una foto de tu carnet.',
-  paperNote:
-    'Este compromiso no se firma aquí. Lo firman en papel tú, como adoptante, y la persona rescatista, el día de la entrega.',
+    'Este es el compromiso de adopción. Léelo con calma antes de seguir. En el paso siguiente te pedimos una foto de tu carnet.',
+  acceptanceNote:
+    'Al marcar la casilla y enviar tu solicitud, aceptas este compromiso. Tu aceptación tiene validez legal: no necesitas firmar nada en papel.',
   blankName: '(tu nombre)',
   blankCi: '(tu número de carnet)',
   contractLabel: 'Texto del compromiso',
@@ -535,7 +535,7 @@ const APPLICATION_STEPS_COPY: ApplicationStepsCopy = {
   uploadProblem: (problem) => ID_UPLOAD_PROBLEM[problem],
   retryUpload: 'Reintentar',
   uploadLater: 'También puedes subirla después desde «Mis solicitudes».',
-  confirmationPaper: 'El compromiso se firma en papel el día de la entrega.',
+  confirmationAccepted: 'Tu aceptación del compromiso quedó registrada con la fecha y la hora.',
   confirmationCarnet: 'La foto de tu carnet solo la ve el equipo del refugio.',
 
   leaveTitle: '¿Salir sin enviar tu solicitud?',
@@ -555,7 +555,7 @@ const APPLICATION_STEPS_COPY: ApplicationStepsCopy = {
 
   contractPageTitle: 'El compromiso de adopción',
   contractPageIntro: (shelterName) =>
-    `Esto es lo que se compromete a cumplir quien adopta un animalito de ${shelterName}. Es el mismo texto que se firma en papel el día de la entrega.`,
+    `Esto es lo que se compromete a cumplir quien adopta un animalito de ${shelterName}.`,
   contractPageBack: '← Ver los animalitos en adopción',
 };
 

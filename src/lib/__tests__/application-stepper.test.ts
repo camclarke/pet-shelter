@@ -131,7 +131,7 @@ test('the FILLED contract shows the name and the C.I. in bold, and otherwise the
   assert.equal(count(empty, 'contract__filled'), 0);
 });
 
-test('exactly the 48-hour clause is bold, as on paper (D10), and no signature line is drawn (D11)', () => {
+test('exactly the 48-hour clause is bold, as on paper (D10), and no signature line is drawn', () => {
   const html = renderToStaticMarkup(createElement(ContractText, { contract: CONTRACT, mode: 'blank' }));
   const items = [...html.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]!);
   assert.equal(items.length, 9);
@@ -207,12 +207,12 @@ test('every step has exactly ONE .btn--action — Continuar, or Enviar on the re
   assert.ok(view('carnet').includes('>Atrás</button>'));
 });
 
-test('step 1 is the contract with blanks and the paper note OUTSIDE the contract block', () => {
+test('step 1 is the contract with blanks and the acceptance note OUTSIDE the contract block', () => {
   const html = view('contract');
   assert.equal(count(html, 'contract__blank'), 2);
-  const note = html.indexOf('apply-paper-note');
-  assert.ok(note > html.indexOf('</section>'), 'the paper note sits inside the contract block');
-  assert.ok(decode(html).includes(es.applicationSteps.paperNote));
+  const note = html.indexOf('apply-acceptance-note');
+  assert.ok(note > html.indexOf('</section>'), 'the acceptance note sits inside the contract block');
+  assert.ok(decode(html).includes(es.applicationSteps.acceptanceNote));
 });
 
 test('step 2: two visually-hidden file inputs inside labels — never `hidden` — one with the camera', () => {
@@ -287,6 +287,8 @@ test('the review: a summary with «Cambiar», the pet facts, the contract FILLED
   assert.ok(box, 'no acceptance box');
   assert.ok(!/\schecked/.test(box[0]), 'the box is pre-ticked');
   assert.ok(html.includes(ADOPTION_ACCEPTANCE.label.replace('{mascota}', 'Luna')));
+  assert.ok(html.includes(es.applicationSteps.acceptanceNote), 'the acceptance note is missing from the review');
+  assert.ok(raw.indexOf('apply-acceptance-note') < raw.indexOf('id="apply-acceptance"'), 'the note must come before the box');
   // The button is never disabled for an unticked box: the error goes beside it.
   assert.ok(/<button type="button" class="btn btn--action apply-step__primary">Enviar solicitud<\/button>/.test(raw));
   const refused = decode(view('review', { errors: { ...NO_ERRORS, step: 'acceptance-required' } }));

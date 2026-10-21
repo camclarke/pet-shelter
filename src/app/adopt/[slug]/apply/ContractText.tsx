@@ -17,8 +17,8 @@
  * string substitution: nothing is HTML-injected, and a name that itself
  * contains `{ci}` stays literal text.
  *
- * ⚠️ No signature lines (owner decision D11): this is not an electronic
- * signature. The paper note beside it is the caller's, and sits OUTSIDE this
+ * ⚠️ No signature lines: the checkbox is the signature (owner, 2026-10-21).
+ * The acceptance note beside it is the caller's, and sits OUTSIDE this
  * block on purpose.
  */
 

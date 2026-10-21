@@ -1026,7 +1026,7 @@ export interface AdoptionApplication {
   /**
    * The contract version the applicant applied under — a date, from
    * `src/config/adoption-contract.ts`. The online "acepto" means "I apply
-   * under this contract"; the contract itself is signed on paper at handover.
+   * under this contract"; the box and «Enviar» are the signature (owner, 2026-10-21).
    */
   contractVersion: string;
   /**

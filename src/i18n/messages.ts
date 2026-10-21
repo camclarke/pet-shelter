@@ -447,8 +447,8 @@ export interface ApplicationStepsCopy {
 
   // ── 1. the contract ──────────────────────────────────────────────────────
   readonly contractLead: string;
-  /** The aside in place of the paper's signature lines (D11). Never inside the contract block. */
-  readonly paperNote: string;
+  /** The aside saying the online acceptance is the signature. Never inside the contract block. */
+  readonly acceptanceNote: string;
   /** Read aloud inside the blank for the name (screen readers only). */
   readonly blankName: string;
   readonly blankCi: string;
@@ -503,7 +503,7 @@ export interface ApplicationStepsCopy {
   uploadProblem(problem: IdUploadProblem): string;
   readonly retryUpload: string;
   readonly uploadLater: string;
-  readonly confirmationPaper: string;
+  readonly confirmationAccepted: string;
   readonly confirmationCarnet: string;
 
   // ── leaving with something unsent (an in-app link, the back gesture) ─────

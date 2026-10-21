@@ -3996,9 +3996,9 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-/* In place of the paper's signature lines (D11). An aside, never inside the
+/* Says the online acceptance is the signature. An aside, never inside the
    contract block, so it cannot be read as part of what was hashed. */
-.apply-paper-note {
+.apply-acceptance-note {
   padding: 10px 12px;
   border-left: 3px solid var(--jade);
   font-size: 14px;

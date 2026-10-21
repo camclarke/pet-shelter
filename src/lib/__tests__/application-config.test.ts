@@ -626,9 +626,9 @@ test('every contract and paper-form string is NFC, one line, single-spaced and t
 });
 
 test('no online text carries the paper signature line', () => {
-  // Owner decision D11: signed in ink at handover, never online. Upper-case,
-  // as the paper prints "FIRMA ADOPTANTE … FIRMA RESCATISTA"; the acceptance
-  // legitimately says the contract "se firma en papel".
+  // The paper prints "FIRMA ADOPTANTE … FIRMA RESCATISTA" (upper-case); the
+  // online text draws no signature line: the checkbox is the signature
+  // (owner, 2026-10-21, reversing D11).
   assert.ok(ADOPTION_CONTRACT);
   for (const text of [...contractStrings(ADOPTION_CONTRACT), ...paperFormStrings(), ADOPTION_ACCEPTANCE.label]) {
     assert.ok(!/FIRMA|ADOPTANTE|RESCATISTA/.test(text), text);
