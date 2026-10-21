@@ -50,7 +50,7 @@ test('no source in the apply flow, the contract page or the catalogue says it ei
 test('the acceptance note is the owner-approved sentence, exactly', () => {
   assert.equal(
     es.applicationSteps.acceptanceNote,
-    'Al marcar la casilla y enviar tu solicitud, aceptas este compromiso. Tu aceptación tiene validez legal: no necesitas firmar nada en papel.',
+    'Al marcar la casilla y enviar tu solicitud, aceptas este compromiso.',
   );
   assert.equal(
     es.applicationSteps.confirmationAccepted,
