@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getPetBySlug } from '@/lib/pets-server';
 import { whatsappLink } from '@/lib/pets';
+import { signInHrefReturningTo } from '@/lib/return-path';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
 
@@ -54,6 +56,8 @@ export default async function PetPage({ params }: Props) {
   if (!pet) notFound();
 
   const facts = t.petFacts(pet);
+  const whatsapp = whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name));
+  const canApply = SHELTER.adoptionApplications.enabled && pet.status === 'available';
 
   return (
     <article className="dossier">
@@ -79,25 +83,28 @@ export default async function PetPage({ params }: Props) {
             </p>
           )}
 
-          <a
-            href={whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name))}
-            className="btn btn--action dossier__cta"
-          >
-            Adóptame ↗
-          </a>
-
-          {/* The optional online application — plan §6. A SECONDARY TEXT LINK,
-              after the WhatsApp button, never a button beside it and never in
-              front of it: the account it needs must not stand between a
-              stranger and the conversation. Rendered only when the shelter has
-              switched the form on and the animal is on the wall; the rules
-              refuse any other application anyway. */}
-          {SHELTER.adoptionApplications.enabled && pet.status === 'available' && (
-            <p className="dossier__apply">
-              <a href={`/adopt/${pet.slug}/apply`} className="auth__link">
-                {t.applications.applyLink}
-              </a>
-            </p>
+          {/* The adopt button. Owner decision 2026-10-21, REVERSING the earlier
+              "WhatsApp is primary, no account in front of it": when the online
+              application is switched on and the animal is on the wall, choosing
+              to adopt leads to an account and then the application. The page is
+              static (ISR), so it cannot know who is signed in; the apply page's
+              own gate handles both cases (form, or sign-in that returns there).
+              WhatsApp stays as a small secondary link for doubts.
+              Everywhere no form exists (switch off, or the animal is not on the
+              wall: shelter, foster, lost) WhatsApp is still the primary button. */}
+          {canApply ? (
+            <>
+              <Link href={`/adopt/${pet.slug}/apply`} className="btn btn--action dossier__cta">
+                {t.applications.adoptButton(pet.name)}
+              </Link>
+              <p className="dossier__apply">
+                <a href={whatsapp}>{t.applications.whatsappQuestions}</a>
+              </p>
+            </>
+          ) : (
+            <a href={whatsapp} className="btn btn--action dossier__cta">
+              Adóptame ↗
+            </a>
           )}
 
           {/* ⚠️ Deliberately phrased in the FUTURE tense. Sign-in works as of
@@ -111,7 +118,10 @@ export default async function PetPage({ params }: Props) {
               Crea tu cuenta para seguir a {pet.name}. Pronto encontrarás aquí su historia
               completa, sus fotos, su historial médico y su plan de alimentación.
             </p>
-            <a href="/account" className="btn btn--muted">
+            <a
+              href={canApply ? signInHrefReturningTo(`/adopt/${pet.slug}/apply`) : '/account'}
+              className="btn btn--muted"
+            >
               Crear cuenta o entrar
             </a>
           </div>

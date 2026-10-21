@@ -648,7 +648,7 @@ test('the signed-out gate: what this is, then sign-in that returns here, then th
   assert.match(code(FORM), /if \(!user\) return <SignInGate slug=\{slug\} \/>;/);
   const raw = renderToStaticMarkup(createElement(SignInGate, { slug: 'luna' }));
   const html = decode(raw);
-  assert.ok(html.indexOf(es.applicationSteps.gateIntro) < html.indexOf('Entrar o crear cuenta'));
+  assert.ok(html.indexOf(es.applicationSteps.gateIntro) < html.indexOf('Crear cuenta o entrar'));
   assert.match(raw, /href="\/account\?next=%2Fadopt%2Fluna%2Fapply"/);
   assert.match(raw, /<a class="auth__link" href="\/adopt\/contract">Leer el compromiso<\/a>/);
   assert.equal(count(raw, 'btn--action'), 1);

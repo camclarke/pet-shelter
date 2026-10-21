@@ -3060,9 +3060,9 @@ textarea {
 }
 
 /* ── online adoption applications — plan §6, build-order step 14 ────────────
-   Secondary by design. On the dossier the application is a TEXT LINK under the
-   WhatsApp button and must stay visually quieter than it; nothing here may
-   compete with `.dossier__cta`. Sized for a phone first: every target is at
+   Since 2026-10-21 the adopt button leads here and WhatsApp is the SECONDARY
+   text link (`.dossier__apply`, `.apply-whatsapp`): it must stay visually
+   quieter than `.dossier__cta`. Sized for a phone first: every target is at
    least 44px tall, measured at 360px against this stylesheet. */
 
 .dossier__apply {
@@ -3072,6 +3072,7 @@ textarea {
 /* An inline text link is ~20px tall. The min-height makes the tap target 44px
    without making it look like a second button. */
 .dossier__apply a,
+.apply-whatsapp a,
 .apply-back,
 .queue-group__record,
 .register-match__record,

@@ -24,7 +24,7 @@ interface Props {
 /**
  * ⚠️ `noindex` on every branch, including the 404. An application form
  * competing in search results with the dossier it belongs to would pull
- * strangers past the WhatsApp button — the exact inversion plan §6 forbids.
+ * strangers past the dossier's adopt button, which already leads here.
  */
 const ROBOTS = { index: false, follow: false } as const;
 
@@ -42,16 +42,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  * The optional online adoption application for one animal.
  *
  * ── Order on the page is the design ───────────────────────────────────────
- * The WhatsApp button renders FIRST and unconditionally — signed in or out,
- * accepting applications or not. The account requirement lives inside
- * `ApplicationForm`, below it. So nobody reaches this page and finds the
- * conversation with the shelter behind a sign-in.
+ * The account gate (signed out) or the form (signed in) comes FIRST; WhatsApp
+ * is a small secondary link BELOW it, for doubts. Owner decision 2026-10-21,
+ * reversing the earlier "WhatsApp first, no account in front of it": a
+ * visitor who chose to adopt is led to an account and then the application.
  *
  * ── When it exists at all ─────────────────────────────────────────────────
  * - `adoptionApplications.enabled` false → 404. The switch ships off, because
  *   the screening questions are a draft the shelter did not write.
- * - the pet is not `available` → the page explains and offers WhatsApp. The
- *   rules refuse the create regardless; this just says so before anyone types.
+ * - the pet is not `available` → the page explains, and the WhatsApp link
+ *   below is the way forward. The rules refuse the create regardless; this
+ *   just says so before anyone types.
  *
  * Only the PUBLIC `pets/{id}` document is read here, through the Admin SDK,
  * exactly as the dossier does. Nothing about any application is server-rendered.
@@ -87,15 +88,6 @@ export default async function ApplyPage({ params }: Props) {
         <h1 className="t-title">{copy.pageTitle(pet.name)}</h1>
         <p className="auth__prose">{copy.intro(pet.name)}</p>
 
-        <p className="apply-whatsapp">
-          <a
-            href={whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name))}
-            className="btn btn--brand"
-          >
-            {copy.whatsappInstead} ↗
-          </a>
-        </p>
-
         {accepting ? (
           <ApplicationForm
             petId={pet.id}
@@ -111,6 +103,15 @@ export default async function ApplyPage({ params }: Props) {
             {copy.notAccepting(pet.name)}
           </p>
         )}
+
+        {/* SECONDARY, and after the gate or form on purpose: owner decision
+            2026-10-21. A visitor who chose to adopt meets the account and the
+            application first; WhatsApp is for doubts. */}
+        <p className="apply-whatsapp">
+          <a href={whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name))} className="auth__link">
+            {copy.whatsappQuestions}
+          </a>
+        </p>
       </div>
     </div>
   );
