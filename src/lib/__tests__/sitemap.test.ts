@@ -69,9 +69,9 @@ test('only the passed pets appear, with slug encoded and lastModified when known
   assert.equal(pets[1]!.lastModified, undefined);
 });
 
-test('app/sitemap.ts exports revalidate = 3600', () => {
+test('app/sitemap.ts renders per request (CDN cache is set in next.config.ts)', () => {
   const src = readFileSync(new URL('../../app/sitemap.ts', import.meta.url), 'utf8');
-  assert.match(src, /export const revalidate = 3600;/);
+  assert.match(src, /export const dynamic = 'force-dynamic';/);
 });
 
 test('getSitemapPets filters on exactly available+lost and avoids getAllSlugs', () => {

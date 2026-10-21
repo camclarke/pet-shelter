@@ -6,22 +6,17 @@ import { SHELTER } from '@/config/shelter';
 /**
  * REQUIRED — do not remove.
  *
- * This page renders <AdoptionWall>, which reads Firestore. Without a
- * `revalidate`, Next.js prerenders it once at BUILD time and serves that HTML
- * forever. The build runs in Cloud Build with no access to Firestore, so what
- * gets frozen is the wall's *error* state — a permanently empty wall on the
- * one page that matters most, with nothing in the logs to suggest anything is
- * wrong.
+ * This page renders <AdoptionWall>, which reads Firestore. The Docker/CI build
+ * has no Firestore access (deliberately), so a prerendered page bakes the
+ * wall's ERROR state ("No pudimos cargar los animalitos") into static HTML —
+ * measured in the CI deploy log, 2026-10-21. A `revalidate` does not help: the
+ * first HTML served is still the baked one.
  *
- * That is exactly what happened on the first deploy (2026-08-12): /adopt and
- * /adopt/[slug] both carried `revalidate = 300` and recovered on their own;
- * this page did not, and stayed broken until this line was added.
- *
- * 300s rather than `dynamic = 'force-dynamic'` on purpose: a fully dynamic
- * homepage costs one Firestore query per visitor, while ISR bounds it to ~12
- * per hour regardless of traffic. See the project log § "The cost principle".
+ * So the page renders per request, and `next.config.ts` gives it a 5-minute
+ * CDN cache (`s-maxage=300`), which bounds the Firestore reads to about one
+ * refresh per edge per five minutes whatever the traffic. A test pins both.
  */
-export const revalidate = 300;
+export const dynamic = 'force-dynamic';
 
 /**
  * How adoption works, in four steps. Visitor-facing copy, kept beside the

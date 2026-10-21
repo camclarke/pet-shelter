@@ -5,9 +5,10 @@ import { getSitemapEvents } from '@/lib/events-server';
 import type { SitemapEventRow } from '@/lib/events-public';
 import { buildSitemap } from '@/lib/sitemap';
 
-// Mandatory: without an explicit revalidate, Firebase Hosting caches a
-// prerendered route for a year.
-export const revalidate = 3600;
+// Per-request render (the CI build has no Firestore access, so a prerender
+// would bake the static-only list); next.config.ts caches it 5 minutes at the
+// CDN. A test pins both.
+export const dynamic = 'force-dynamic';
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let pets: SitemapPetRow[] = [];

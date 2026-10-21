@@ -32,12 +32,11 @@ function body(src: string, signature: string): string {
   return src.slice(start, end === -1 ? undefined : end);
 }
 
-test('every new events route exports revalidate = 300', () => {
-  for (const file of [LIST_PAGE, DETAIL_PAGE]) {
-    assert.match(read(file), /^export const revalidate = 300;$/m, file);
-  }
-  // The homepage that now hosts the card keeps its own.
-  assert.match(read('src/app/page.tsx'), /^export const revalidate = 300;$/m);
+test('the events detail page exports revalidate = 300; the list renders per request', () => {
+  assert.match(read(DETAIL_PAGE), /^export const revalidate = 300;$/m, DETAIL_PAGE);
+  // The list and the homepage moved to per-request rendering (wall-dynamic.test.ts).
+  assert.match(read(LIST_PAGE), /^export const dynamic = 'force-dynamic';$/m);
+  assert.match(read('src/app/page.tsx'), /^export const dynamic = 'force-dynamic';$/m);
 });
 
 test('the reader is server-only and goes through the Admin SDK', () => {
