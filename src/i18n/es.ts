@@ -1503,6 +1503,24 @@ export const es: Messages = {
     return `entre ${this.formatAge(minMonths)} y ${this.formatAge(maxMonths)}`;
   },
 
+  colorCoatLine(color, coat) {
+    const parts: string[] = [];
+    const c = (color ?? '').trim();
+    const k = (coat ?? '').trim();
+    if (c !== '') parts.push(`Color: ${c}`);
+    if (k !== '') parts.push(`Pelaje: ${k}`);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  },
+
+  sterilizedStatus(sterilized, sex) {
+    // Only a recorded "yes" is shown publicly. `false` often means "nobody
+    // wrote it down" (legacy value, pending migration), and `null` is that
+    // outright, so stating "unaltered" would publish an unrecorded fact.
+    if (sterilized !== true) return null;
+    if (sex === 'male' || sex === 'female') return sex === 'female' ? 'Esterilizada' : 'Esterilizado';
+    return 'Esterilización realizada';
+  },
+
   formatMeta(pet) {
     // Known parts only. This used to print "edad desconocida ·  · undefinedo"
     // for a pet with no sex or size, which became reachable on 2026-10-18 when

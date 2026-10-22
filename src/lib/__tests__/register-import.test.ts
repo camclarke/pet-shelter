@@ -428,7 +428,7 @@ test('an "other" event is never imported: it encodes an exit, not a treatment', 
   assert.equal(result.skipped[0]!.what, 'otra anotación');
   assert.match(result.skipped[0]!.why, /salida o un fallecimiento/);
   // And the raw text still reaches the person who will read the record.
-  assert.match(result.drafts[0]!.data.healthNotes, /MURIO 03\/05\/25/);
+  assert.equal(result.skipped[0]!.raw, 'MURIO 03/05/25');
 });
 
 test('an unconfirmed event is skipped and says so', () => {
@@ -436,10 +436,9 @@ test('an unconfirmed event is skipped and says so', () => {
     medical: { animals: [animal(1, [event({ status: 'needs-human', raw: '10/06/25' })])] },
   });
   assert.equal(result.medical.length, 0);
-  assert.equal(
-    result.drafts[0]!.data.healthNotes,
-    'Registro n.º 1, desparasitación «10/06/25»: sin confirmar con el refugio.'
-  );
+  assert.deepEqual(result.skipped, [
+    { no: 1, what: 'desparasitación', why: 'sin confirmar con el refugio', raw: '10/06/25' },
+  ]);
 });
 
 test('an event dated after today is skipped, with its raw text preserved', () => {
@@ -456,10 +455,6 @@ test('an event dated after today is skipped, with its raw text preserved', () =>
   assert.equal(result.medical.length, 0);
   // Both reasons, in the order a person would say them. A note that mentioned
   // only one sends whoever chases it looking for the wrong thing.
-  assert.equal(
-    result.drafts[0]!.data.healthNotes,
-    'Registro n.º 1, desparasitación «02/12/26»: fecha futura, sin confirmar con el refugio.'
-  );
   assert.deepEqual(result.skipped, [
     { no: 1, what: 'desparasitación', why: 'fecha futura, sin confirmar con el refugio', raw: '02/12/26' },
   ]);
@@ -492,8 +487,8 @@ test('an impossible day is skipped and named as impossible', () => {
     },
   });
   assert.equal(result.medical.length, 0);
-  assert.match(result.drafts[0]!.data.healthNotes, /fecha imposible en el calendario/);
-  assert.match(result.drafts[0]!.data.healthNotes, /«31\/04\/26»/);
+  assert.match(result.skipped[0]!.why, /fecha imposible en el calendario/);
+  assert.equal(result.skipped[0]!.raw, '31/04/26');
 });
 
 test('medical records are planned only for animals that get a draft', () => {
@@ -611,10 +606,6 @@ test('a year-only sterilization sets the flag, writes a note, and creates NO rec
 
   assert.equal(result.medical.length, 0, 'there is no approximate-date field to put this in');
   assert.equal(result.drafts[0]!.data.sterilized, true, 'the register does assert the fact');
-  assert.equal(
-    result.drafts[0]!.data.healthNotes,
-    'Registro n.º 1, esterilización «EN 2023»: en 2023, según el registro, sin fecha exacta.'
-  );
   assert.deepEqual(result.skipped, [
     { no: 1, what: 'esterilización', why: 'sin fecha exacta', raw: 'EN 2023' },
   ]);
@@ -640,10 +631,6 @@ test('a sterilization with no date at all still sets the flag and keeps its word
 
   assert.equal(result.medical.length, 0);
   assert.equal(result.drafts[0]!.data.sterilized, true);
-  assert.equal(
-    result.drafts[0]!.data.healthNotes,
-    'Registro n.º 1, esterilización «ENTRO ESTERELIZADA»: según el registro, sin fecha exacta.'
-  );
 });
 
 test('a dated sterilization does become a record', () => {
@@ -659,14 +646,14 @@ test('a dated sterilization does become a record', () => {
   assert.equal(result.medical.length, 1);
   assert.equal(result.medical[0]!.data.kind, 'sterilization');
   assert.equal(result.drafts[0]!.data.sterilized, true);
-  assert.equal(result.drafts[0]!.data.healthNotes, '', 'nothing was skipped, so nothing is noted');
+  assert.equal(result.skipped.length, 0);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Rule 8 — nothing the register wrote is ever lost
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('every skipped event keeps its raw text on the draft, one line each', () => {
+test('every skipped event keeps its raw text and row number in the skipped list', () => {
   const result = plan({
     medical: {
       animals: [
@@ -679,22 +666,21 @@ test('every skipped event keeps its raw text on the draft, one line each', () =>
     },
   });
 
-  const lines = result.drafts[0]!.data.healthNotes.split('\n');
-  assert.equal(lines.length, 3);
   assert.equal(result.skipped.length, 3);
   // Every raw cell survives somewhere a person will read it.
   for (const raw of ['02/12/26', '20/10/26', 'SE LO LLEVARON']) {
     assert.ok(
-      lines.some((line) => line.includes(raw)),
-      `raw ${raw} must survive on the draft`
+      result.skipped.some((item) => item.raw === raw),
+      `raw ${raw} must survive in the skipped list`
     );
   }
-  // And every line names the register row, so the paper can be found again.
-  for (const line of lines) assert.match(line, /^Registro n\.º 1, /);
+  // And every item names the register row, so the paper can be found again.
+  for (const item of result.skipped) assert.equal(item.no, 1);
 });
 
-test('an animal with nothing skipped gets no health notes at all', () => {
-  assert.equal(plan().drafts[0]!.data.healthNotes, '');
+test('the importer no longer writes health notes onto a draft', () => {
+  const data = plan().drafts[0]!.data as unknown as Record<string, unknown>;
+  assert.equal('healthNotes' in data, false);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -837,7 +823,6 @@ test('the tripwire reaches drafts, medical records and skipped items too', () =>
     },
   });
   assert.ok(viaDraft.blockers.length >= 1);
-  assert.ok(viaDraft.blockers.some((b) => /draft 1/.test(b.why)));
   assert.ok(viaDraft.blockers.some((b) => /skipped 1/.test(b.why)));
 
   const viaRecord = plan({

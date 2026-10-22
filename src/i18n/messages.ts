@@ -932,6 +932,20 @@ export interface Messages {
   formatAgeRange(minMonths: number, maxMonths: number): string;
 
   /**
+   * The dossier's colour-and-coat line: "Color: café con blanco · Pelaje: corto".
+   * Either part may be missing; null when both are, so the caller omits it.
+   */
+  colorCoatLine(color: string | null | undefined, coat: string | null | undefined): string | null;
+
+  /**
+   * The dossier's sterilization line. Shown ONLY when recorded as done (true);
+   * false and null both return null, because false often means "nobody wrote
+   * it down" and must not be published as "unaltered".
+   * Gender-agrees when the sex is known, and is gender-free otherwise.
+   */
+  sterilizedStatus(sterilized: boolean | null | undefined, sex: PetSex | null): string | null;
+
+  /**
    * The uppercase data line under a name: "3 MESES · MACHO · MEDIANO".
    *
    * Unknown parts are OMITTED, never rendered as a placeholder, and the

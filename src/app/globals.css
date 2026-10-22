@@ -996,6 +996,18 @@ textarea {
 .dossier__cta {
   margin-top: var(--space-3);
 }
+.dossier__story {
+  margin-top: var(--space-3);
+  max-width: 54ch;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.dossier__story p {
+  white-space: pre-line;
+}
+.dossier__story p + p {
+  margin-top: var(--space-2);
+}
 .dossier__chip-note {
   margin-top: var(--space-2);
   padding: 11px 14px;

@@ -188,6 +188,13 @@ export interface Pet {
   coverPhoto: string | null;
 
   /**
+   * The animal's story, in plain text. Public by owner decision 2026-10-22:
+   * it is shown on the dossier to anyone, so it must carry no names or
+   * addresses of people. Empty string when nobody has written one.
+   */
+  story: string;
+
+  /**
    * The row this animal occupies in the shelter's own paper intake register,
    * or null for an animal that was never written there.
    *
@@ -236,28 +243,12 @@ export interface Pet {
 // pets/{petId}/detail/main — AUTHENTICATED READ
 // ─────────────────────────────────────────────────────────────────────────────
 export interface PetDetail {
-  story: string;
-  temperament: string[];
-  healthNotes: string;
-  /**
-   * @deprecated Superseded by the `media` subcollection below, which carries
-   * video as well and does not rewrite the whole document on every upload.
-   * Nothing reads this field today; it stays only so an existing document that
-   * carries it still type-checks during the migration.
-   */
-  photos: string[];
-
-  /** What the shelter commits to, e.g. free castration at 6–7 months. */
-  commitments: string[];
-
   /**
    * THREE-STATE. `null` means nobody has recorded it — see
    * src/lib/sterilization.ts for why that must not collapse into `false`, and
    * for the ASV §7.2 statements that depend on the distinction.
    */
   sterilized: boolean | null;
-  goodWithChildren: boolean | null;
-  goodWithOtherPets: boolean | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

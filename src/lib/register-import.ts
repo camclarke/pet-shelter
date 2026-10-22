@@ -518,37 +518,6 @@ function skipReasons(event: RegisterEvent, performedAtMs: number | null, todayMs
 }
 
 /**
- * One Spanish line for a note that was not imported, naming the row, the
- * column, the cell verbatim and the reason.
- *
- * ⚠️ The raw text is the load-bearing part. A skipped event is not a discarded
- * event: the paper still says it happened, and the only way the shelter can
- * ever resolve "02/12/26" is by being shown "02/12/26" beside the animal it
- * was written against. A note that said only "se omitió una desparasitación"
- * would destroy the very thing a human needs to fix it.
- */
-function skipNote(no: number, event: RegisterEvent, reasons: string[]): string {
-  return `Registro n.º ${no}, ${EVENT_LABEL_ES[event.type]} «${event.raw}»: ${reasons.join(', ')}.`;
-}
-
-/**
- * The line for a sterilization the register dates only by year, or not at all.
- *
- * `sterilized` is still set on the draft, because "this animal is sterilized"
- * is a fact the register does assert — it is only the DAY that is missing, and
- * `MedicalRecord.performedAt` is not nullable. Inventing a day so the record
- * can exist would put a fabricated date into a medical history and, through
- * `nextDueAt` arithmetic later, into a reminder.
- */
-function approximateSterilizationNote(no: number, event: RegisterEvent): string {
-  const year = event.precision === 'year' && event.date ? event.date.slice(0, 4) : null;
-  const reason = year
-    ? `en ${year}, según el registro, sin fecha exacta`
-    : 'según el registro, sin fecha exacta';
-  return skipNote(no, event, [reason]);
-}
-
-/**
  * `reg{no}-{column}-{YYYYMMDD}`, with `-2`, `-3` on a collision within the same
  * animal.
  *
@@ -784,7 +753,6 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
     }
 
     const events = eventsByNo.get(no) ?? [];
-    const healthNotes: string[] = [];
     const takenIds = new Set<string>();
     const plannedForThisAnimal: PlannedMedical[] = [];
     let sterilizedByEvent = false;
@@ -797,14 +765,9 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
       const reasons = skipReasons(event, performedAtMs, todayMs);
 
       if (reasons.length > 0) {
-        // A sterilization the register dates only by year gets its own wording:
-        // the fact survives on the draft even though the record cannot.
-        const note =
-          event.type === 'sterilization' && event.precision !== 'day' && event.status === 'confirmed'
-            ? approximateSterilizationNote(no, event)
-            : skipNote(no, event, reasons);
-
-        healthNotes.push(note);
+        // Nothing is written to the draft: the cell travels in `skipped` with its
+        // row number and raw text, which is where a person resolves it. A
+        // sterilization dated only by year still sets `sterilized` below.
         skipped.push({
           no,
           what: EVENT_LABEL_ES[event.type],
@@ -949,7 +912,6 @@ export function buildImportPlan(input: ImportPlanInput): ImportPlan {
       // run of this importer wrote `false` for both, which is why 15 of the
       // 42 animals in the shelter carry a claim nobody made.
       sterilized: entry.sterilizedPerRegister || sterilizedByEvent ? true : null,
-      healthNotes: healthNotes.join('\n'),
       register,
 
       // ⚠️ `species`, `breed`, `size`, `colorPattern`, `coatType` and every age

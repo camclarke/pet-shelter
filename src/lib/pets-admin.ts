@@ -52,6 +52,7 @@ import { t } from '@/i18n';
 
 import { getFirebase } from './firebase-client';
 import { normalizeMicrochipCode } from './microchip';
+import { checkStory } from './pet-story';
 import { disambiguateSlug, publishSlugBase, type DraftMedia, type PetDraft } from './intake';
 import {
   custodyKindForStatus,
@@ -99,6 +100,28 @@ export async function loadDraft(id: string): Promise<PetDraft | null> {
   // Firestore. Same reason `placements.ts` works in epoch milliseconds.
   delete data.updatedAt;
   return data as PetDraft;
+}
+
+/**
+ * Change a PUBLISHED animal's story. Returns the text that was written.
+ *
+ * ⚠️ A merge write, never a plain `set()`: a plain set would drop every field
+ * this call does not mention, including `createdAt`, which `getWall()` orders
+ * by — the animal would look as if it had vanished from the wall.
+ *
+ * `firestore.rules` already lets an admin write `pets/{petId}`; nothing is
+ * validated there, so the length bound lives in `checkStory`.
+ */
+export async function updatePetStory(petId: string, raw: string): Promise<string> {
+  const { story, error } = checkStory(raw);
+  if (error) throw new Error(`story-${error}`);
+  const { db } = getFirebase();
+  await setDoc(
+    doc(db, 'pets', petId),
+    { story, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  return story;
 }
 
 /**

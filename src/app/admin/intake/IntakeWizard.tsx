@@ -301,14 +301,6 @@ function fromTristate(value: string): boolean | null {
   return null;
 }
 
-/** "tranquila, juguetona" -> ['tranquila', 'juguetona'] */
-function toList(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 export function IntakeWizard() {
   const { user } = useAuth();
   const router = useRouter();
@@ -2124,8 +2116,8 @@ export function IntakeWizard() {
       {step === 'story' && (
         <section className="admin-form">
           <p className="admin__sub">
-            Todo esto es opcional: se puede publicar sin llenarlo y completarlo después. Solo lo
-            ve quien tiene cuenta.
+            Todo esto es opcional: se puede publicar sin llenarlo y completarlo después. La
+            historia es pública: no pongas nombres ni direcciones de personas.
           </p>
 
           <label className="auth__field">
@@ -2135,39 +2127,6 @@ export function IntakeWizard() {
               value={draft.story}
               disabled={busy}
               onChange={(e) => update({ story: e.target.value })}
-            />
-          </label>
-
-          <label className="auth__field">
-            <span className="t-label">Carácter</span>
-            <input
-              type="text"
-              value={draft.temperament.join(', ')}
-              placeholder="tranquila, juguetona, buena con niños"
-              disabled={busy}
-              onChange={(e) => update({ temperament: toList(e.target.value) })}
-            />
-            <small className="auth__hint">Separa con comas.</small>
-          </label>
-
-          <label className="auth__field">
-            <span className="t-label">Notas de salud</span>
-            <textarea
-              rows={3}
-              value={draft.healthNotes}
-              disabled={busy}
-              onChange={(e) => update({ healthNotes: e.target.value })}
-            />
-          </label>
-
-          <label className="auth__field">
-            <span className="t-label">Compromisos del refugio</span>
-            <input
-              type="text"
-              value={draft.commitments.join(', ')}
-              placeholder="castración gratuita a los 6 meses"
-              disabled={busy}
-              onChange={(e) => update({ commitments: toList(e.target.value) })}
             />
           </label>
 
@@ -2227,37 +2186,6 @@ export function IntakeWizard() {
               ))}
             </select>
           </label>
-
-          <div className="admin-form__row">
-            <label className="auth__field">
-              <span className="t-label">¿Se lleva bien con niños?</span>
-              <select
-                value={toTristate(draft.goodWithChildren)}
-                disabled={busy}
-                onChange={(e) => update({ goodWithChildren: fromTristate(e.target.value) })}
-              >
-                {TRISTATE.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="auth__field">
-              <span className="t-label">¿Con otros animales?</span>
-              <select
-                value={toTristate(draft.goodWithOtherPets)}
-                disabled={busy}
-                onChange={(e) => update({ goodWithOtherPets: fromTristate(e.target.value) })}
-              >
-                {TRISTATE.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
         </section>
       )}
 

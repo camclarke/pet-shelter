@@ -49,14 +49,7 @@ export type PetDocumentWrite<TS> = Omit<Pet, 'id' | 'createdAt' | 'updatedAt' | 
 };
 
 export interface DetailDocumentWrite {
-  story: string;
-  temperament: string[];
-  healthNotes: string;
-  photos: string[];
-  commitments: string[];
   sterilized: boolean | null;
-  goodWithChildren: boolean | null;
-  goodWithOtherPets: boolean | null;
 }
 
 export interface MediaDocumentWrite<TS> {
@@ -181,6 +174,8 @@ export function buildPublishDocuments<TS>(input: PublishDocumentsInput<TS>): Pub
     // Derived from the first PUBLISHABLE photo, never typed, and never from
     // media[0] — a genital shot can legitimately be first. See coverPhotoFrom.
     coverPhoto: coverPhotoFrom(draft.media),
+    // Public by owner decision 2026-10-22; lives here, not in `detail`.
+    story: draft.story.trim(),
     // The paper register's row number, so the link survives publish.
     registerNo: draft.register?.no ?? null,
     // Provenance: which fields a vision model influenced, if any.
@@ -194,14 +189,7 @@ export function buildPublishDocuments<TS>(input: PublishDocumentsInput<TS>): Pub
   };
 
   const detail: DetailDocumentWrite = {
-    story: draft.story.trim(),
-    temperament: draft.temperament,
-    healthNotes: draft.healthNotes.trim(),
-    photos: [],
-    commitments: draft.commitments,
     sterilized: draft.sterilized ?? null,
-    goodWithChildren: draft.goodWithChildren,
-    goodWithOtherPets: draft.goodWithOtherPets,
   };
 
   const media = draft.media.map((m, index) => ({
