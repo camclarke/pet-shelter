@@ -26,7 +26,7 @@ export default async function AdminPetQrPage({ params }: { params: Promise<{ pet
   const { petId } = await params;
   return (
     <div className="container qr-print" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="pets">
         <PetQrPrint petId={petId} />
       </AdminGate>
     </div>

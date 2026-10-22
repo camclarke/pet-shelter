@@ -29,7 +29,7 @@ export const revalidate = 300;
 export default function AdminQrSheetPage() {
   return (
     <div className="container qr-print" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="qr">
         <QrSheetBuilder />
       </AdminGate>
     </div>

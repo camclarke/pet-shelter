@@ -82,7 +82,7 @@ test('the admin page is noindex, gated, and carries revalidate = 300', () => {
   const page = read('src/app/admin/events/page.tsx');
   assert.match(page, /^export const revalidate = 300;$/m);
   assert.match(page, /robots: \{ index: false, follow: false \}/);
-  assert.match(page, /<AdminGate>/);
+  assert.match(page, /<AdminGate section="events">/);
 });
 
 test('the screen converts times only through zoned-time, never with new Date(input)', () => {

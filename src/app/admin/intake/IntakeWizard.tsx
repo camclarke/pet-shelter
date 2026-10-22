@@ -51,6 +51,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useAuth } from '@/components/AuthProvider';
+import { isCoordinatorPlus } from '@/config/roles';
 import {
   applyPhotoPrefill,
   blockersForField,
@@ -78,6 +79,7 @@ import {
   discardDraft,
   findPetByMicrochipAdmin,
   mintPetId,
+  newDraft,
   PhotoUnreadableError,
   publishDraft,
   readPhotoBlob,
@@ -302,7 +304,21 @@ function fromTristate(value: string): boolean | null {
 }
 
 export function IntakeWizard() {
-  const { user } = useAuth();
+  const { user, roles } = useAuth();
+  /**
+   * Coordination or higher publishes, runs the chip lookup and re-admits. A
+   * rescuer (plan §3) does none of the three: they register the animal and
+   * mark the draft «Lista para revisar», and a coordinator takes it from
+   * there. The rules refuse all three to a rescuer regardless; hiding them is
+   * so the screen never offers something that can only fail.
+   */
+  const coordinator = isCoordinatorPlus(roles);
+  const uid = user?.uid ?? null;
+  /** A new draft, stamped with its author when there is one (always, behind AdminGate). */
+  const freshDraft = useCallback(
+    () => (uid ? newDraft(uid) : draftDefaults(mintPetId())),
+    [uid],
+  );
   const router = useRouter();
   const params = useSearchParams();
   const resumeId = params.get('draft');
@@ -453,15 +469,22 @@ export function IntakeWizard() {
         setNotice('Esa ficha ya no existe. Empezamos una nueva.');
         router.replace('/admin/intake');
       }
-      if (!cancelled) setDraft(draftDefaults(mintPetId()));
+      if (!cancelled) setDraft(freshDraft());
     })().catch((caught) => {
       console.error('[intake] could not open draft', caught);
-      if (!cancelled) setError('No pudimos abrir la ficha. Revisa tu conexión e intenta de nuevo.');
+      if (cancelled) return;
+      // A rescuer opening a draft someone else started is refused by the
+      // rules, by design. Say that, not "revisa tu conexión".
+      if ((caught as { code?: string })?.code === 'permission-denied') {
+        setError('No puedes abrir esa ficha: solo puedes continuar las que empezaste tú.');
+        return;
+      }
+      setError('No pudimos abrir la ficha. Revisa tu conexión e intenta de nuevo.');
     });
     return () => {
       cancelled = true;
     };
-  }, [resumeId, router]);
+  }, [resumeId, router, freshDraft]);
 
   const update = useCallback((patch: Partial<PetDraft>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -484,7 +507,10 @@ export function IntakeWizard() {
   })();
 
   useEffect(() => {
-    if (!chipLookupCode) {
+    // A rescuer types the number into the draft and nothing more: the lookup
+    // reads the restricted `identity` collection group, and it runs when a
+    // coordinator opens the draft to publish it.
+    if (!chipLookupCode || !coordinator) {
       setLookup({ state: 'idle' });
       return;
     }
@@ -509,7 +535,7 @@ export function IntakeWizard() {
     return () => {
       cancelled = true;
     };
-  }, [chipLookupCode]);
+  }, [chipLookupCode, coordinator]);
 
   // Scroll to the field a blocker points at, once it exists. Re-runs when the
   // step, the open editor or the "Más datos" section change, because each of
@@ -651,6 +677,27 @@ export function IntakeWizard() {
       return;
     }
     setError('No pudimos guardar. Revisa tu conexión e intenta de nuevo.');
+  }
+
+  /**
+   * «Lista para revisar» — set or clear the flag and save in the same tap, so
+   * the coordinator's list never shows a flag on a draft whose last edits
+   * were not saved.
+   */
+  async function markReadyForReview(ready: boolean) {
+    const next: PetDraft = { ...draft!, readyForReview: ready };
+    setDraft(next);
+    setBusy(true);
+    setError(null);
+    try {
+      await saveDraft(next);
+      setDirty(false);
+      setNotice(ready ? 'Lista para revisar: Coordinación ya la ve en su panel.' : 'Ficha guardada.');
+    } catch (caught) {
+      report(caught);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function goToStep(next: IntakeStep) {
@@ -1094,7 +1141,7 @@ export function IntakeWizard() {
     setPublishTapped(false);
     setPublishListOpen(null);
     setScrollTarget(null);
-    setDraft(draftDefaults(mintPetId()));
+    setDraft(freshDraft());
     // Only when a stale `?draft=` is still in the URL; otherwise the effect
     // does not re-run and would leave the resumed id in the address bar.
     if (resumeId) router.replace('/admin/intake');
@@ -2029,6 +2076,12 @@ export function IntakeWizard() {
                   </div>
                 )}
 
+                {!coordinator && chipLookupCode && (
+                  <p className="auth__notice" role="status">
+                    Anotado. Coordinación revisa si ese chip ya está registrado antes de publicar.
+                  </p>
+                )}
+
                 <small className="auth__hint">
                   El número no se publica nunca. Se guarda aparte, y solo lo ven el refugio y
                   quien adopte al animalito.
@@ -2221,9 +2274,21 @@ export function IntakeWizard() {
       )}
 
       <footer className="admin__footer admin__footer--intake">
-        {/* Always visible, whatever is missing: publishing with a status other
-            than «Disponible» is allowed (owner decision 2026-10-15), so the
-            screen says plainly that the page will exist off the wall. */}
+        {/* Always visible to whoever can publish, whatever is missing:
+            publishing with a status other than «Disponible» is allowed (owner
+            decision 2026-10-15), so the screen says plainly that the page will
+            exist off the wall. A rescuer does not publish, so for them the
+            space says where the draft stands instead. */}
+        {!coordinator && (
+          <div className="intake-publish-status" data-wall="false">
+            <p className="intake-publish-status__text" role="status">
+              {draft.readyForReview
+                ? 'Marcaste esta ficha como lista para revisar. Coordinación la revisa y la publica; puedes seguir corrigiéndola mientras tanto.'
+                : 'Cuando termines, márcala como lista para revisar. Coordinación revisa la ficha y la publica.'}
+            </p>
+          </div>
+        )}
+        {coordinator && (
         <div className="intake-publish-status" data-wall={onWall ? 'true' : 'false'}>
           <p className="intake-publish-status__text" id={PUBLISH_STATUS_ID}>
             {onWall ? (
@@ -2247,6 +2312,7 @@ export function IntakeWizard() {
             </button>
           )}
         </div>
+        )}
 
         <div className="admin__footer-left">
           <button
@@ -2282,6 +2348,21 @@ export function IntakeWizard() {
           )}
         </div>
 
+        {!coordinator && (
+          <div className="admin__footer-right">
+            {/* A rescuer's last step (plan D6). It saves the draft with the flag,
+                so the coordinator's list shows it; it publishes nothing. */}
+            <button
+              type="button"
+              className={draft.readyForReview ? 'btn btn--muted' : 'btn btn--action'}
+              onClick={() => void markReadyForReview(!draft.readyForReview)}
+              disabled={busy || !user}
+            >
+              {draft.readyForReview ? 'Quitar «Lista para revisar»' : 'Lista para revisar'}
+            </button>
+          </div>
+        )}
+        {coordinator && (
         <div className="admin__footer-right">
           {/* `aria-disabled`, not `disabled`, while something is missing: the
               tap has to land, because it is what shows the person why. Real
@@ -2300,6 +2381,7 @@ export function IntakeWizard() {
             {t.intakeForm.publishAction(publishFace)}
           </button>
         </div>
+        )}
       </footer>
     </div>
   );

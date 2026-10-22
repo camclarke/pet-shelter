@@ -27,7 +27,7 @@ export default async function AdminPetHealthCardPage({ params }: { params: Promi
   const { petId } = await params;
   return (
     <div className="container health-card-print" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="pets">
         <HealthCardPrint petId={petId} />
       </AdminGate>
     </div>

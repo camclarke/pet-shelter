@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 
 import { verifyAdminIdToken } from '@/lib/firebase-admin';
-import { requireAdmin } from '@/lib/require-admin';
+import { requireRole } from '@/lib/require-admin';
+import { COORDINATOR_PLUS } from '@/config/roles';
 import { aiIsConfigured } from '@/lib/ai/google';
 import { suggestFromPhoto, type SlottedPhoto } from '@/lib/ai/intake-suggest';
 
@@ -89,8 +90,11 @@ function fail(error: string, status: number): NextResponse {
 
 export async function POST(request: Request): Promise<Response> {
   // ── 1. authenticate, before anything else — `require-admin.ts` verifies the
-  //       token with checkRevoked and requires the admin claim ────────────────
-  const auth = await requireAdmin(request, verifyAdminIdToken);
+  //       token with checkRevoked and requires coordination or a rescuer:
+  //       rescuers photograph intakes too, and AI is opt-in (plan D7). It
+  //       shares the free Flash quota, so more rescuers can mean an earlier
+  //       fall to Flash-Lite, never a bill. ───────────────────────────────────
+  const auth = await requireRole(request, verifyAdminIdToken, [...COORDINATOR_PLUS, 'rescuer']);
   if (!auth.ok) return fail(auth.error, auth.status);
 
   // ── 2. is the feature even available ──────────────────────────────────────

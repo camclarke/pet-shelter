@@ -115,6 +115,23 @@ test('an admin account is refused, so the shelter cannot lose its last admin fro
   assert.deepEqual(deletes(calls), []);
 });
 
+test('ANY staff role is refused, not only admin — each role alone', async () => {
+  for (const role of ['su', 'owner', 'admin', 'rescuer', 'events'] as const) {
+    const { d, calls } = deps({ uid: `staff-${role}`, [role]: true, auth_time: NOW_S });
+    const res = await handleAccountDelete(request(), d);
+    assert.equal(res.status, 403, role);
+    assert.equal(res.headers.get(ACCOUNT_FAILURE_HEADER), 'admin-account', role);
+    assert.deepEqual(deletes(calls), [], role);
+  }
+});
+
+test('a role claim that is not exactly true does not make an account staff', async () => {
+  const { d, calls } = deps({ uid: 'u1', rescuer: 'true', events: 1, auth_time: NOW_S });
+  const res = await handleAccountDelete(request(), d);
+  assert.equal(res.status, 200);
+  assert.deepEqual(deletes(calls), ['avatars:u1', 'profile:u1', 'auth:u1']);
+});
+
 test('a sign-in older than five minutes is refused; exactly five minutes passes', async () => {
   const stale = deps({ uid: 'u1', auth_time: NOW_S - 301 });
   const res = await handleAccountDelete(request(), stale.d);

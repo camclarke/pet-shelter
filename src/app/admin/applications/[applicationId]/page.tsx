@@ -27,7 +27,7 @@ export default async function ApplicationPage({
 
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="applications">
         <ApplicationReview applicationId={decodeURIComponent(applicationId)} />
       </AdminGate>
     </div>

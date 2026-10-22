@@ -32,23 +32,34 @@
  * ⚠️ Do not "simplify" this to `getIdTokenResult(true)` in the effect below.
  * It looks equivalent and is not — the trade is a per-visit request on the
  * homepage against a one-time request on `/admin`.
+ *
+ * ── Roles ──────────────────────────────────────────────────────────────────
+ * Since 2026-10-22 there are five role claims (`src/config/roles.ts`), read
+ * the same way and at the same two moments. `roles` carries all five;
+ * `isAdmin` is kept, and now means coordination or higher — `admin`,
+ * `owner` or `su` — which is exactly what the rules' `isAdmin()` means, so
+ * every screen that asked `isAdmin` before still asks the right question.
+ * `roles.ts` imports nothing, so reading it here costs the homepage nothing.
  */
 
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
+import { NO_ROLES, isCoordinatorPlus, rolesFromClaims, type Roles } from '@/config/roles';
 
 interface AuthState {
   user: User | null;
   /** True until Firebase has restored (or ruled out) a persisted session. */
   loading: boolean;
   /**
-   * Whether the signed-in user carries the `admin` custom claim. Read from
+   * Coordination or higher: the `admin`, `owner` or `su` claim. Read from
    * the cached ID token, so it can lag a fresh grant by up to an hour —
    * call `refreshClaims()` before trusting a false.
    */
   isAdmin: boolean;
+  /** Every role claim, each exactly `true` or false. Same cache caveat as `isAdmin`. */
+  roles: Roles;
   /** Re-reads the current user from Firebase, after e.g. email verification. */
   refresh: () => Promise<void>;
   /**
@@ -62,6 +73,7 @@ const AuthContext = createContext<AuthState>({
   user: null,
   loading: true,
   isAdmin: false,
+  roles: NO_ROLES,
   refresh: async () => {},
   refreshClaims: async () => {},
 });
@@ -69,7 +81,8 @@ const AuthContext = createContext<AuthState>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [roles, setRoles] = useState<Roles>(NO_ROLES);
+  const isAdmin = isCoordinatorPlus(roles);
   // `user.reload()` mutates the existing object rather than returning a new
   // one, so React sees an unchanged reference and does not re-render. Bumping
   // this is what makes a freshly-verified `emailVerified` visible. Cloning the
@@ -93,20 +106,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
 
         if (!next) {
-          setIsAdmin(false);
+          setRoles(NO_ROLES);
           return;
         }
         // Cached token — see the note at the top of this file.
         next
           .getIdTokenResult()
           .then((result) => {
-            if (!cancelled) setIsAdmin(result.claims.admin === true);
+            if (!cancelled) setRoles(rolesFromClaims(result.claims));
           })
           .catch((error) => {
             // A failure here is not a reason to grant access, and not a reason
             // to break sign-in either. Fail closed and say so.
             console.error('[auth] could not read custom claims', error);
-            if (!cancelled) setIsAdmin(false);
+            if (!cancelled) setRoles(NO_ROLES);
           });
       });
     })().catch((error) => {
@@ -135,17 +148,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { getFirebase } = await import('@/lib/firebase-client');
     const current = getFirebase().auth.currentUser;
     if (!current) {
-      setIsAdmin(false);
+      setRoles(NO_ROLES);
       return;
     }
     // `true` forces a round-trip to Firebase for a newly-minted token rather
     // than returning the cached one. This is the whole point of the function.
     const result = await current.getIdTokenResult(true);
-    setIsAdmin(result.claims.admin === true);
+    setRoles(rolesFromClaims(result.claims));
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, isAdmin, refresh, refreshClaims }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, roles, refresh, refreshClaims }}>
       {children}
     </AuthContext.Provider>
   );

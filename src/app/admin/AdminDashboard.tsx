@@ -8,6 +8,13 @@
  * It is also what makes the admin claim load-bearing instead of decorative:
  * if the claim is missing, the drafts query fails, and that failure is the
  * authorization working.
+ *
+ * ── By role (2026-10-22) ───────────────────────────────────────────────────
+ * Coordination sees everything below. A rescuer sees their OWN drafts — the
+ * query is `where('createdBy', '==', uid)`, the only list the rules allow
+ * them — each opening straight into the wizard, because the animal's record
+ * at `/admin/pets/{id}` is coordination's. Event staff see the events link.
+ * Each header link is shown only when `canAccess()` opens its section.
  */
 
 'use client';
@@ -16,7 +23,9 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import { draftProgress, type PetDraft } from '@/lib/intake';
-import { listDrafts } from '@/lib/pets-admin';
+import { listDrafts, listOwnDrafts } from '@/lib/pets-admin';
+import { useAuth } from '@/components/AuthProvider';
+import { canAccess, isCoordinatorPlus, roleLabels } from '@/config/roles';
 import { getOccupancyForAreas, listAreas } from '@/lib/areas-admin';
 import { countRegisterEntries } from '@/lib/register-admin';
 import { shouldHaveOpenPlacement } from '@/lib/arrival';
@@ -24,6 +33,10 @@ import { t } from '@/i18n';
 import type { Pet } from '@/lib/types';
 
 export function AdminDashboard() {
+  const { user, roles } = useAuth();
+  const coordinator = isCoordinatorPlus(roles);
+  const intake = canAccess('intake', roles);
+  const uid = user?.uid ?? null;
   const [drafts, setDrafts] = useState<PetDraft[] | null>(null);
   const [pets, setPets] = useState<Pet[] | null>(null);
   /**
@@ -42,6 +55,24 @@ export function AdminDashboard() {
 
   const load = useCallback(async () => {
     setError(null);
+    if (!coordinator) {
+      // Nothing else on this screen is readable without coordination: the
+      // areas and the register are refused, and published animals have their
+      // own screens. One query, and only the one the rules allow.
+      setPets([]);
+      if (!intake || !uid) {
+        setDrafts([]);
+        return;
+      }
+      try {
+        setDrafts(await listOwnDrafts(uid));
+      } catch (caught) {
+        console.error('[admin] could not load own drafts', caught);
+        setError('No pudimos cargar tus fichas. Revisa tu conexión e intenta de nuevo.');
+        setDrafts([]);
+      }
+      return;
+    }
     try {
       const [{ collection, getDocs, limit, orderBy, query }, { getFirebase }] = await Promise.all([
         import('firebase/firestore'),
@@ -71,7 +102,7 @@ export function AdminDashboard() {
       setDrafts([]);
       setPets([]);
     }
-  }, []);
+  }, [coordinator, intake, uid]);
 
   useEffect(() => {
     void load();
@@ -87,6 +118,7 @@ export function AdminDashboard() {
    * instead of 43 documents.
    */
   useEffect(() => {
+    if (!coordinator) return;
     let cancelled = false;
     countRegisterEntries('in-shelter')
       .then((count) => {
@@ -98,36 +130,59 @@ export function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [coordinator]);
+
+  const labels = roleLabels(roles);
 
   return (
     <div className="admin">
       <header className="admin__header">
         <div>
           <h1 className="t-title">Panel del refugio</h1>
-          <p className="admin__sub">Registra un animalito nuevo o continúa una ficha a medias.</p>
+          <p className="admin__sub">
+            {intake
+              ? 'Registra un animalito nuevo o continúa una ficha a medias.'
+              : 'Organiza las ferias y los eventos del refugio.'}
+          </p>
+          {labels.length > 0 && (
+            <p className="t-data">
+              {labels.length === 1 ? 'Tu rol' : 'Tus roles'}: {labels.join(' · ')}
+            </p>
+          )}
         </div>
         <div className="admin__header-actions">
-          <Link href="/admin/areas" className="btn btn--muted">
-            Áreas
-          </Link>
+          {canAccess('areas', roles) && (
+            <Link href="/admin/areas" className="btn btn--muted">
+              Áreas
+            </Link>
+          )}
           {/* The batch tag sheet starts HERE because this is the list of every
               animal — see src/app/admin/qr/page.tsx. */}
-          <Link href="/admin/qr" className="btn btn--muted">
-            {t.tag.sheetLink}
-          </Link>
-          <Link href="/admin/applications" className="btn btn--muted">
-            {t.applications.queueLink}
-          </Link>
-          <Link href="/admin/food" className="btn btn--muted">
-            {t.food.navLabel}
-          </Link>
-          <Link href="/admin/events" className="btn btn--muted">
-            {t.events.navLabel}
-          </Link>
-          <Link href="/admin/intake" className="btn btn--action">
-            + Nuevo ingreso
-          </Link>
+          {canAccess('qr', roles) && (
+            <Link href="/admin/qr" className="btn btn--muted">
+              {t.tag.sheetLink}
+            </Link>
+          )}
+          {canAccess('applications', roles) && (
+            <Link href="/admin/applications" className="btn btn--muted">
+              {t.applications.queueLink}
+            </Link>
+          )}
+          {canAccess('food', roles) && (
+            <Link href="/admin/food" className="btn btn--muted">
+              {t.food.navLabel}
+            </Link>
+          )}
+          {canAccess('events', roles) && (
+            <Link href="/admin/events" className="btn btn--muted">
+              {t.events.navLabel}
+            </Link>
+          )}
+          {intake && (
+            <Link href="/admin/intake" className="btn btn--action">
+              + Nuevo ingreso
+            </Link>
+          )}
         </div>
       </header>
 
@@ -141,6 +196,7 @@ export function AdminDashboard() {
           path: the animal in front of the volunteer is almost certainly one of
           the 43 the paper register already knows about, and starting from
           "+ Nuevo ingreso" instead is what produces a second record for it. */}
+      {canAccess('register', roles) && (
       <section className="admin-list">
         <h2 className="t-label">Registro en papel</h2>
         <ul className="admin-list__items">
@@ -159,15 +215,16 @@ export function AdminDashboard() {
           </li>
         </ul>
       </section>
+      )}
 
+      {intake && (
       <section className="admin-list">
-        <h2 className="t-label">Fichas sin publicar</h2>
+        <h2 className="t-label">{coordinator ? 'Fichas sin publicar' : 'Tus fichas sin publicar'}</h2>
         {drafts === null && <p className="admin__sub">Cargando…</p>}
         {drafts?.length === 0 && <p className="admin__sub">No hay fichas a medias.</p>}
         {drafts && drafts.length > 0 && (
           <ul className="admin-list__items">
             {drafts.map((draft) => {
-              const progress = draftProgress(draft);
               return (
                 <li key={draft.id} className="admin-list__item">
                   {/* The RECORD, not the wizard — the same destination the
@@ -181,43 +238,26 @@ export function AdminDashboard() {
                       screen also names the animal and warns that the imported
                       records came off a handwritten sheet, which is worth
                       reading BEFORE photographing rather than after. */}
-                  <Link href={`/admin/pets/${draft.id}`}>
-                    {/* Unfinished drafts are usually unnamed — a shelter photographs
-                        the animal first and names it later — so a list of "Sin
-                        nombre" rows is unusable without the photo. Reported from a
-                        phone showing three identical rows, 2026-08-30.
-                        Plain <img>: these are already resized to a 1600px long edge
-                        by stripAndResize, and next/image would add a proxy hop for
-                        an admin-only thumbnail nobody crawls. */}
-                    {draft.media[0] ? (
-                      <img
-                        className="admin-list__thumb"
-                        src={draft.media[0].url}
-                        alt={draft.media[0].alt || ''}
-                        loading="lazy"
-                      />
-                    ) : (
-                      <span className="admin-list__thumb admin-list__thumb--empty" aria-hidden="true">
-                        🐾
-                      </span>
-                    )}
-                    <span className="admin-list__text">
-                    <strong>{draft.name.trim() || 'Sin nombre'}</strong>
-                    <span className="t-data">
-                      {progress.done} de {progress.total} pasos
-                      {draft.media.length > 0 && ` · ${draft.media.length} foto${
-                        draft.media.length === 1 ? '' : 's'
-                      }`}
-                    </span>
-                    </span>
-                  </Link>
+                  {/* A rescuer opens the wizard: the record screen is
+                      coordination's, and AdminGate would turn them away. */}
+                  {coordinator ? (
+                    <Link href={`/admin/pets/${draft.id}`}>
+                      <DraftRow draft={draft} />
+                    </Link>
+                  ) : (
+                    <Link href={`/admin/intake?draft=${draft.id}`}>
+                      <DraftRow draft={draft} />
+                    </Link>
+                  )}
                 </li>
               );
             })}
           </ul>
         )}
       </section>
+      )}
 
+      {coordinator && (
       <section className="admin-list">
         <h2 className="t-label">Publicados</h2>
         {pets === null && <p className="admin__sub">Cargando…</p>}
@@ -246,6 +286,47 @@ export function AdminDashboard() {
           </ul>
         )}
       </section>
+      )}
     </div>
+  );
+}
+
+/** One unpublished draft: its first photo, its name, and how far along it is. */
+function DraftRow({ draft }: { draft: PetDraft }) {
+  const progress = draftProgress(draft);
+  return (
+    <>
+      {/* Unfinished drafts are usually unnamed — a shelter photographs
+          the animal first and names it later — so a list of "Sin
+          nombre" rows is unusable without the photo. Reported from a
+          phone showing three identical rows, 2026-08-30.
+          Plain <img>: these are already resized to a 1600px long edge
+          by stripAndResize, and next/image would add a proxy hop for
+          an admin-only thumbnail nobody crawls. */}
+      {draft.media[0] ? (
+        <img
+          className="admin-list__thumb"
+          src={draft.media[0].url}
+          alt={draft.media[0].alt || ''}
+          loading="lazy"
+        />
+      ) : (
+        <span className="admin-list__thumb admin-list__thumb--empty" aria-hidden="true">
+          🐾
+        </span>
+      )}
+      <span className="admin-list__text">
+      <strong>{draft.name.trim() || 'Sin nombre'}</strong>
+      <span className="t-data">
+        {progress.done} de {progress.total} pasos
+        {draft.media.length > 0 && ` · ${draft.media.length} foto${
+          draft.media.length === 1 ? '' : 's'
+        }`}
+        {draft.readyForReview === true && (
+          <> · <span className="admin-list__flag">Lista para revisar</span></>
+        )}
+      </span>
+      </span>
+    </>
   );
 }
