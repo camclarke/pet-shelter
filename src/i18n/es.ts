@@ -1513,10 +1513,10 @@ export const es: Messages = {
   },
 
   sterilizedStatus(sterilized, sex) {
-    // Null is "nobody wrote it down", which is not the claim "unaltered".
-    if (sterilized !== true && sterilized !== false) return null;
-    // "Sin esterilizar" is an infinitive and agrees with nobody.
-    if (sterilized === false) return 'Sin esterilizar';
+    // Only a recorded "yes" is shown publicly. `false` often means "nobody
+    // wrote it down" (legacy value, pending migration), and `null` is that
+    // outright, so stating "unaltered" would publish an unrecorded fact.
+    if (sterilized !== true) return null;
     if (sex === 'male' || sex === 'female') return sex === 'female' ? 'Esterilizada' : 'Esterilizado';
     return 'Esterilización realizada';
   },

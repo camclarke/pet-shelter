@@ -20,9 +20,9 @@ const base = {
   ageIsEstimate: true,
 };
 
-// ─── sterilization: three-state ──────────────────────────────────────────────
+// ─── sterilization: shown only when recorded as done ─────────────────────────
 
-test('sterilized: null shows NOTHING, never "sin esterilizar"', () => {
+test('sterilized: null shows NOTHING', () => {
   assert.equal(t.sterilizedStatus(null, 'female'), null);
   assert.equal(t.sterilizedStatus(undefined, 'male'), null);
   assert.equal(t.sterilizedStatus(null, null), null);
@@ -34,9 +34,9 @@ test('sterilized: true agrees with the sex, and is gender-free when it is unknow
   assert.equal(t.sterilizedStatus(true, null), 'Esterilización realizada');
 });
 
-test('sterilized: false is the gender-free "Sin esterilizar"', () => {
+test('sterilized: false shows NOTHING (it often means "nobody wrote it down")', () => {
   for (const sex of ['male', 'female', null] as const) {
-    assert.equal(t.sterilizedStatus(false, sex), 'Sin esterilizar');
+    assert.equal(t.sterilizedStatus(false, sex), null);
   }
 });
 

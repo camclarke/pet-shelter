@@ -35,6 +35,9 @@ export function dossierFacts(pet: Parameters<typeof t.petFacts>[0] & Partial<Age
   return [base, range].filter((part): part is string => !!part).join(' · ');
 }
 
+// Sterilization (`t.sterilizedStatus`) is shown only when `true`: `false` often
+// means "nobody wrote it down" (pending migration), so it renders nothing.
+
 /**
  * The story as paragraphs, split on blank lines. Plain text only: the page
  * renders each as a text node (React escapes it) with `white-space: pre-line`
