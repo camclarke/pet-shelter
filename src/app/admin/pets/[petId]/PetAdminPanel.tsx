@@ -30,6 +30,7 @@ import { formatDate, parseDateInput, todayInputValue } from '@/lib/date-input';
 import MedicalPanel from './MedicalPanel';
 import MeasurementPanel from './MeasurementPanel';
 import { QrTagPanel } from './QrTagPanel';
+import { StoryPanel } from './StoryPanel';
 import {
   placementWarnings,
   summarizeArea,
@@ -259,6 +260,16 @@ export function PetAdminPanel({ petId }: { petId: string }) {
         <p className="auth__error" role="alert">
           {error}
         </p>
+      )}
+
+      {/* ── the story: public, so it is editable after publishing ────────── */}
+      {pet && (
+        <StoryPanel
+          petId={petId}
+          // `?? ''`: a pet published before this field existed has it
+          // undefined at runtime, whatever the `Pet` type claims.
+          initialStory={pet.story ?? ''}
+        />
       )}
 
       {/* ── where it is ──────────────────────────────────────────────────── */}

@@ -201,6 +201,7 @@ function pet(over: Partial<Pet> = {}): Pet {
     status: 'shelter',
     hasMicrochip: true,
     coverPhoto: 'https://firebasestorage.googleapis.com/v0/b/x/o/pets%2Fpet-1%2Fcover.jpg',
+    story: '',
     registerNo: null,
     suggestedFields: ['species'],
     extractedByModel: 'flash',

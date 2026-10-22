@@ -65,6 +65,25 @@ export async function getPetDetail(petId: string): Promise<PetDetail | null> {
   return snap.exists ? (snap.data() as PetDetail) : null;
 }
 
+/**
+ * Whether the animal is sterilized, for the public dossier. THREE-STATE: null
+ * is "nobody wrote it down" and also what a failed or missing read returns —
+ * the page then simply omits the line, never claims either answer.
+ *
+ * Only this one field leaves the signed-in tier, and by owner decision: it is
+ * the one `detail` fact an adopter needs before applying.
+ */
+export async function getPetSterilized(petId: string): Promise<boolean | null> {
+  try {
+    const detail = await getPetDetail(petId);
+    const value = detail?.sterilized;
+    return value === true || value === false ? value : null;
+  } catch (caught) {
+    console.error('[pets-server] could not read sterilized', caught);
+    return null;
+  }
+}
+
 /** Confirmed sightings of a lost pet, most recent first. Public data either way. */
 export async function getSightings(petId: string): Promise<Sighting[]> {
   const db = getAdminDb();

@@ -694,9 +694,6 @@ function buildReport(plan, options) {
     }
     if (draft.data.sterilized) push('      esterilizado: sí, según el registro');
     if (entry?.data.responsible) push(`      responsable : ${entry.data.responsible}`);
-    if (draft.data.healthNotes) {
-      for (const note of draft.data.healthNotes.split('\n')) push(`      nota        : ${note}`);
-    }
     push();
   }
 

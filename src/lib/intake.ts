@@ -143,9 +143,6 @@ export interface PetDraft {
 
   // ── step 3: story ─────────────────────────────────────────────────────────
   story: string;
-  temperament: string[];
-  healthNotes: string;
-  commitments: string[];
   /**
    * THREE-STATE, like the two fields under it. `null` is "nobody wrote it
    * down", which is not the same claim as `false`, "this animal is unaltered"
@@ -163,8 +160,6 @@ export interface PetDraft {
    * Three-state; see `AdultWeightBand` in types.ts.
    */
   expectedAdultWeightBand: AdultWeightBand | null;
-  goodWithChildren: boolean | null;
-  goodWithOtherPets: boolean | null;
 
   /** Derived from `name`, editable, and checked for collisions before publish. */
   slug: string;
@@ -285,15 +280,10 @@ export function draftDefaults(id: string): PetDraft {
     chipConflict: null,
     media: [],
     story: '',
-    temperament: [],
-    healthNotes: '',
-    commitments: [],
     // Unknown, not "no". A fresh draft has been told nothing about this animal.
     sterilized: null,
     // Unknown, not a guess — and never derived from `size` or the photo range.
     expectedAdultWeightBand: null,
-    goodWithChildren: null,
-    goodWithOtherPets: null,
     slug: '',
     // Null for an ordinary intake. The importer sets it, and the roster sets
     // it when a volunteer links a returning animal to its old register row.

@@ -266,7 +266,7 @@ test('an empty story does NOT block publishing', () => {
   // Plan section 3: a rescue arriving at 22:00 needs to be on the wall, not
   // blocked on a temperament checklist. If this test ever fails because
   // someone tightened the gate, read that paragraph before "fixing" it.
-  const draft = completeDraft({ story: '', temperament: [], healthNotes: '' });
+  const draft = completeDraft({ story: '' });
   assert.equal(canPublish(draft), true);
 });
 

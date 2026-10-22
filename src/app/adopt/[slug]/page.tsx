@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getPetBySlug } from '@/lib/pets-server';
+import { getPetBySlug, getPetSterilized } from '@/lib/pets-server';
+import { dossierFacts, storyParagraphs } from '@/lib/dossier';
 import { whatsappLink } from '@/lib/pets';
 import { signInHrefReturningTo } from '@/lib/return-path';
 import { SHELTER } from '@/config/shelter';
@@ -47,15 +48,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
  * by which ownership gets asserted, and publishing it would let anyone claim
  * the animal.
  *
- * The gated story, medical history, and feeding plan land here once auth is
- * wired up; the prompt below is a placeholder, not a working gate.
+ * Shown here: the story (public by owner decision 2026-10-22), colour and coat,
+ * the age as a range when it is an estimate, and the sterilization line, which
+ * is the one fact read from the signed-in `detail` tier. Medical history and
+ * the feeding plan are NOT shown on this page.
  */
 export default async function PetPage({ params }: Props) {
   const { slug } = await params;
   const pet = await getPetBySlug(slug);
   if (!pet) notFound();
 
-  const facts = t.petFacts(pet);
+  const facts = dossierFacts(pet);
+  const colorCoat = t.colorCoatLine(pet.colorPattern, pet.coatType);
+  const story = storyParagraphs(pet.story);
+  const sterilized = t.sterilizedStatus(await getPetSterilized(pet.id), pet.sex);
   const whatsapp = whatsappLink(SHELTER.whatsapp, t.adoptionInquiry(pet.name));
   const canApply = SHELTER.adoptionApplications.enabled && pet.status === 'available';
 
@@ -76,6 +82,16 @@ export default async function PetPage({ params }: Props) {
             </p>
           )}
           {facts && <p className="t-data dossier__meta">{facts}</p>}
+          {colorCoat && <p className="t-data dossier__meta">{colorCoat}</p>}
+          {sterilized && <p className="t-data dossier__meta">{sterilized}</p>}
+
+          {story.length > 0 && (
+            <div className="dossier__story">
+              {story.map((paragraph, i) => (
+                <p key={i}>{paragraph}</p>
+              ))}
+            </div>
+          )}
 
           {pet.hasMicrochip && (
             <p className="dossier__chip-note">
@@ -107,16 +123,12 @@ export default async function PetPage({ params }: Props) {
             </a>
           )}
 
-          {/* ⚠️ Deliberately phrased in the FUTURE tense. Sign-in works as of
-              2026-08-23, but nothing reads the `detail`, `medical` or
-              `care/feeding` tiers yet — so "están disponibles al iniciar
-              sesión" would be a promise the site cannot keep the moment the
-              first pet is seeded. Switch it to the present tense in the same
-              commit that actually renders those tiers, not before. */}
+          {/* Present tense, promising only what exists: an account lets a person
+              follow the animal or apply. No medical history or feeding plan is
+              shown anywhere on this page, so none is mentioned. */}
           <div className="dossier__gated">
             <p>
-              Crea tu cuenta para seguir a {pet.name}. Pronto encontrarás aquí su historia
-              completa, sus fotos, su historial médico y su plan de alimentación.
+              Crea tu cuenta para seguir a {pet.name}{canApply ? ' y poder adoptar' : ''}.
             </p>
             <a
               href={canApply ? signInHrefReturningTo(`/adopt/${pet.slug}/apply`) : '/account'}
