@@ -10,12 +10,59 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // ── roles ──────────────────────────────────────────────────────────────
+    // The same claims and the same meaning as firestore.rules: one boolean
+    // per role, set only by scripts/grant-role.mjs; the table is
+    // src/config/roles.ts. `get(r, false)`: a missing claim reads false.
+    function hasRole(role) {
+      return request.auth != null && request.auth.token.get(role, false) == true;
+    }
+
+    function isSuper() {
+      return hasRole('su');
+    }
+
+    function isShelterOwner() {
+      return hasRole('owner');
+    }
+
+    function isRescuer() {
+      return hasRole('rescuer');
+    }
+
+    // COORDINATION OR HIGHER — the name is kept from before roles existed,
+    // when it meant `token.admin == true`. See firestore.rules.
     function isAdmin() {
-      return request.auth != null && request.auth.token.admin == true;
+      return request.auth != null && (hasRole('admin') || isSuper() || isShelterOwner());
     }
 
     function isImage() {
       return request.resource.contentType.matches('image/(jpeg|png|webp|avif)');
+    }
+
+    // ── Rescatista on pet photos (plan §3) ─────────────────────────────────
+    // A rescuer photographs the animals they add, so they may CREATE a photo —
+    // never overwrite one (no `update`) — stamped with their own uid in the
+    // object's custom metadata. They may delete only their OWN upload, and only
+    // within 24 hours: long enough to fix a bad shot during an intake, short
+    // enough that a photo already on a published animal is not theirs to pull.
+    //
+    // No Firestore read: the draft's `createdBy` cannot be checked from here
+    // without a cross-service call and a new IAM grant. Accepted residue
+    // (plan §5): a rescuer could add an unreferenced image to any pet's
+    // folder. It stays image-only and size-capped, overwrites nothing, and
+    // nothing links to it.
+    function rescuerUploadsOwn() {
+      return isRescuer()
+        && isImage()
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.metadata.uploadedBy == request.auth.uid;
+    }
+
+    function rescuerDeletesOwnRecent() {
+      return isRescuer()
+        && resource.metadata.uploadedBy == request.auth.uid
+        && resource.timeCreated > request.time - duration.value(24, 'h');
     }
 
     // ── pet photos ─────────────────────────────────────────────────────────
@@ -37,6 +84,8 @@ service firebase.storage {
       allow read: if true;
       allow create, update: if isAdmin() && isImage() && request.resource.size < 8 * 1024 * 1024;
       allow delete: if isAdmin();
+      allow create: if rescuerUploadsOwn();
+      allow delete: if rescuerDeletesOwnRecent();
     }
 
     // ── intimate + clinical pet photos ─────────────────────────────────────
@@ -87,6 +136,8 @@ service firebase.storage {
       allow read: if request.auth != null;
       allow create, update: if isAdmin() && isImage() && request.resource.size < 8 * 1024 * 1024;
       allow delete: if isAdmin();
+      allow create: if rescuerUploadsOwn();
+      allow delete: if rescuerDeletesOwnRecent();
     }
 
     // ── sighting photos ────────────────────────────────────────────────────

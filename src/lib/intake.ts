@@ -175,6 +175,25 @@ export interface PetDraft {
    * provenance.
    */
   register: RegisterRef | null;
+
+  /**
+   * The uid of whoever started this draft, stamped ONCE when the wizard mints
+   * it and never changed afterwards. It is what lets a rescuer reach their own
+   * drafts and nobody else's: `firestore.rules` compares it with the caller and
+   * refuses any write that moves it.
+   *
+   * Optional because drafts written before roles (2026-10-22) do not carry it,
+   * and neither do the register importer's. Those stay coordination's. Never
+   * set it to `undefined` explicitly: Firestore refuses an undefined field.
+   */
+  createdBy?: string;
+
+  /**
+   * A rescuer's «Lista para revisar»: they have done what they can, and a
+   * coordinator should look, finish and publish. A flag, not a status — the
+   * draft is still a draft, and anyone with access can keep editing it.
+   */
+  readyForReview?: boolean;
 }
 
 /**

@@ -20,7 +20,7 @@ export const revalidate = 300;
 export default function FoodPage() {
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="food">
         <FoodPanel />
       </AdminGate>
     </div>

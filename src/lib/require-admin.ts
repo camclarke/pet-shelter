@@ -20,6 +20,13 @@
  * Bearer parsing and the `checkRevoked` verification are shared, so there is
  * still one copy of each.
  *
+ * `requireRole` (added 2026-10-22, with staff roles)
+ * is the general form: the caller must hold at least one of the listed roles.
+ * `requireAdmin` is `requireRole` with coordination or higher —
+ * `admin`, `owner`, `su` — and answers exactly as it did before roles,
+ * without the roles on its result, so no route that used it changed shape.
+ * The role keys and their meaning live in `src/config/roles.ts`.
+ *
  * Pure: the verifier is injected, so every branch is tested without
  * firebase-admin. Routes pass `verifyIdToken` from `firebase-admin.ts`.
  *
@@ -29,11 +36,17 @@
  * edge's.
  */
 
+import { COORDINATOR_PLUS, hasAnyRole, rolesFromClaims, type RoleKey, type Roles } from '@/config/roles';
+
 /** The fields of a verified ID token this check reads. */
 export interface VerifiedIdToken {
   uid: string;
   email?: string | null;
   admin?: unknown;
+  su?: unknown;
+  owner?: unknown;
+  rescuer?: unknown;
+  events?: unknown;
   /** Seconds since the epoch of the sign-in this token descends from. */
   auth_time?: number;
 }
@@ -45,6 +58,17 @@ export type AdminCheck =
   | { ok: false; error: 'unauthenticated'; status: 401 }
   | { ok: false; error: 'forbidden'; status: 403 };
 
+export type RoleCheck =
+  | {
+      ok: true;
+      uid: string;
+      email: string | null;
+      /** Every role the token carries, each exactly `true` or false. */
+      roles: Roles;
+    }
+  | { ok: false; error: 'unauthenticated'; status: 401 }
+  | { ok: false; error: 'forbidden'; status: 403 };
+
 export type UserCheck =
   | {
       ok: true;
@@ -52,13 +76,15 @@ export type UserCheck =
       email: string | null;
       /** Whether the token carries the admin claim, exactly `true`. */
       admin: boolean;
+      /** Every role the token carries. A staff account is refused things an adopter is not. */
+      roles: Roles;
       /** When the person last actually signed in, or null if the token does not say. */
       authTimeS: number | null;
     }
   | { ok: false; error: 'unauthenticated'; status: 401 };
 
 const UNAUTHENTICATED = { ok: false, error: 'unauthenticated', status: 401 } as const;
-const FORBIDDEN: AdminCheck = { ok: false, error: 'forbidden', status: 403 };
+const FORBIDDEN = { ok: false, error: 'forbidden', status: 403 } as const;
 
 /** The token from `Authorization: Bearer <token>`, or '' when there is none. */
 function bearerToken(request: Request): string {
@@ -84,19 +110,41 @@ async function verifiedToken(request: Request, verifyIdToken: VerifyIdToken): Pr
 }
 
 /**
- * @returns `ok: true` with the caller's uid, and email when it has a usable
- *   one — callers attribute a write to `email ?? uid`. Otherwise the error and
- *   status the route should answer with.
+ * The caller must hold at least one of `allowed`.
+ *
+ * @returns `ok: true` with the caller's uid, email when it has a usable one —
+ *   callers attribute a write to `email ?? uid` — and every role it holds, so
+ *   a route open to several roles can still tell them apart. Otherwise the
+ *   error and status the route should answer with.
  */
-export async function requireAdmin(request: Request, verifyIdToken: VerifyIdToken): Promise<AdminCheck> {
+export async function requireRole(
+  request: Request,
+  verifyIdToken: VerifyIdToken,
+  allowed: readonly RoleKey[],
+): Promise<RoleCheck> {
   const decoded = await verifiedToken(request, verifyIdToken);
   if (!decoded) return UNAUTHENTICATED;
 
-  // `=== true`, never truthiness: "true" or 1 is not the claim that
-  // `scripts/grant-admin.mjs` writes.
-  if (decoded.admin !== true) return FORBIDDEN;
+  // `=== true` per claim, never truthiness: "true" or 1 is not the claim
+  // `scripts/grant-role.mjs` writes. rolesFromClaims() is where that lives.
+  const roles = rolesFromClaims(decoded);
+  if (!hasAnyRole(roles, allowed)) return FORBIDDEN;
 
-  return { ok: true, uid: decoded.uid, email: decoded.email?.trim() || null };
+  return { ok: true, uid: decoded.uid, email: decoded.email?.trim() || null, roles };
+}
+
+/**
+ * Coordination or higher: `admin`, `owner` or `su`.
+ *
+ * @returns `ok: true` with the caller's uid, and email when it has a usable
+ *   one — callers attribute a write to `email ?? uid`. Otherwise the error and
+ *   status the route should answer with. The same shape as before roles
+ *   existed: the roles are deliberately not on it.
+ */
+export async function requireAdmin(request: Request, verifyIdToken: VerifyIdToken): Promise<AdminCheck> {
+  const check = await requireRole(request, verifyIdToken, COORDINATOR_PLUS);
+  if (!check.ok) return check;
+  return { ok: true, uid: check.uid, email: check.email };
 }
 
 /**
@@ -114,6 +162,7 @@ export async function requireUser(request: Request, verifyIdToken: VerifyIdToken
     uid: decoded.uid,
     email: decoded.email?.trim() || null,
     admin: decoded.admin === true,
+    roles: rolesFromClaims(decoded),
     authTimeS: typeof authTime === 'number' && Number.isFinite(authTime) ? authTime : null,
   };
 }

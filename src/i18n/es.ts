@@ -926,7 +926,13 @@ const ACCOUNT_COPY: AccountCopy = {
   deleteSubmit: 'Borrar mi cuenta',
   deleted: 'Borramos tu cuenta. Gracias por acompañar a los animalitos.',
   adminCannotDelete:
-    'Esta es una cuenta del equipo del refugio, así que no se borra desde aquí. Pide que primero le quiten el acceso de administración.',
+    'Esta es una cuenta del equipo del refugio, así que no se borra desde aquí. Pide que primero le quiten su rol en el equipo.',
+  roleLine(labels) {
+    if (labels.length === 0) return null;
+    if (labels.length === 1) return `Tu rol: ${labels[0]}.`;
+    const last = labels[labels.length - 1];
+    return `Tus roles: ${labels.slice(0, -1).join(', ')} y ${last}.`;
+  },
   deleteError(failure) {
     switch (failure) {
       case 'requires-recent-login':

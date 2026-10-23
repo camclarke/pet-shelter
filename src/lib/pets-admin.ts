@@ -53,7 +53,7 @@ import { t } from '@/i18n';
 import { getFirebase } from './firebase-client';
 import { normalizeMicrochipCode } from './microchip';
 import { checkStory } from './pet-story';
-import { disambiguateSlug, publishSlugBase, type DraftMedia, type PetDraft } from './intake';
+import { disambiguateSlug, draftDefaults, publishSlugBase, type DraftMedia, type PetDraft } from './intake';
 import {
   custodyKindForStatus,
   planReadmission,
@@ -80,6 +80,24 @@ export function mintPetId(): string {
   return doc(collection(db, 'pets')).id;
 }
 
+/**
+ * A new, unsaved draft, owned by `uid`.
+ *
+ * This is where `createdBy` is stamped, and the ONLY place: a draft is new
+ * exactly once. `saveDraft` then writes it with every later save, and never
+ * invents one for a draft that lacks it — a draft from before roles, resumed
+ * by a coordinator, must not become theirs by being saved. The rules refuse a
+ * rescuer any write that changes it.
+ */
+export function newDraft(uid: string): PetDraft {
+  return { ...draftDefaults(mintPetId()), createdBy: uid };
+}
+
+/**
+ * Write the whole draft. `createdBy` travels inside it — stamped on new drafts
+ * by `newDraft`, carried unchanged on resumed ones — because `setDoc`
+ * replaces the document and a missing field would be a removed one.
+ */
 export async function saveDraft(draft: PetDraft): Promise<void> {
   const { db } = getFirebase();
   await setDoc(doc(db, 'petDrafts', draft.id), {
@@ -174,6 +192,30 @@ export async function listDrafts(max = 500): Promise<PetDraft[]> {
       // The document id rather than `data.id`: they are the same by
       // construction, but one of them is a cast from a stored field and the
       // other is the key we just read it under.
+      return { id: d.id, updatedAt, draft: data as PetDraft };
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
+    .map((row) => row.draft);
+}
+
+/**
+ * The drafts `uid` started — what a rescuer's dashboard lists.
+ *
+ * ⚠️ The `where` is not a filter for convenience: it is what makes the query
+ * legal for a rescuer at all. Rules are not filters, and a rescuer may read
+ * only drafts whose `createdBy` is theirs — so a list the rules cannot prove
+ * returns only those is refused whole. Sorted in memory like `listDrafts`.
+ */
+export async function listOwnDrafts(uid: string, max = 500): Promise<PetDraft[]> {
+  const { db } = getFirebase();
+  const snap = await getDocs(
+    query(collection(db, 'petDrafts'), where('createdBy', '==', uid), limit(max)),
+  );
+  return snap.docs
+    .map((d) => {
+      const data = d.data();
+      const updatedAt = data.updatedAt?.toMillis?.() ?? 0;
+      delete data.updatedAt;
       return { id: d.id, updatedAt, draft: data as PetDraft };
     })
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
@@ -304,15 +346,22 @@ export async function uploadProcessedPhoto(
   processed: Blob,
   slot: PetPhotoSlot = 'other',
 ): Promise<DraftMedia> {
-  const { storage } = getFirebase();
+  const { storage, auth } = getFirebase();
 
   const dimensions = await readDimensions(processed);
 
   const id = crypto.randomUUID();
   const path = storagePathFor(petId, id, slot);
 
+  // `uploadedBy` is what storage.rules reads to let a rescuer upload at all,
+  // and to delete their OWN photo within 24 hours. Coordination does not need
+  // it, but stamping every upload keeps "who took this" answerable either way.
+  const uploader = auth.currentUser?.uid;
   const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, processed, { contentType: 'image/jpeg' });
+  await uploadBytes(storageRef, processed, {
+    contentType: 'image/jpeg',
+    ...(uploader ? { customMetadata: { uploadedBy: uploader } } : {}),
+  });
 
   // ⚠️ getDownloadURL() returns a permanent Firebase download token, and a
   // token BYPASSES storage.rules — measured 2026-09-03 against an admin-only

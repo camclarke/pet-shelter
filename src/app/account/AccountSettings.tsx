@@ -63,6 +63,7 @@ import {
   validateDisplayName,
 } from '@/lib/profile';
 import { SHELTER } from '@/config/shelter';
+import { isStaff, roleLabels } from '@/config/roles';
 import { t } from '@/i18n';
 import { MyApplications } from './MyApplications';
 
@@ -81,7 +82,11 @@ interface AccountSettingsProps {
 }
 
 export function AccountSettings({ user, returnTo, onSignedOut, initialPanel = null }: AccountSettingsProps) {
-  const { isAdmin, refresh } = useAuth();
+  const { roles, refresh } = useAuth();
+  // Any staff role: the panel link, the role line, and the refusal to delete
+  // the account from here (account-delete.ts refuses every staff role).
+  const staff = isStaff(roles);
+  const roleLine = t.account.roleLine(roleLabels(roles));
   const copy = t.account;
 
   const [panel, setPanel] = useState<SettingsPanel | null>(initialPanel);
@@ -574,13 +579,14 @@ export function AccountSettings({ user, returnTo, onSignedOut, initialPanel = nu
       <MyApplications user={user} />
 
       <div className="auth__actions">
-        {/* Only shown to admins, and only as a shortcut — /admin gates itself,
+        {/* Only shown to the team, and only as a shortcut — /admin gates itself,
             and firestore.rules gates everything behind it. Hiding the link is
-            tidiness, not access control. `isAdmin` comes from the cached ID
-            token here, so a just-promoted admin may not see it until the
+            tidiness, not access control. `roles` come from the cached ID
+            token here, so a just-promoted member may not see it until the
             token rotates; navigating to /admin directly still works, because
             AdminGate forces a refresh on mount. */}
-        {isAdmin && (
+        {roleLine && <p className="auth__prose">{roleLine}</p>}
+        {staff && (
           <Link href="/admin" className="btn btn--action">
             {copy.adminPanel}
           </Link>
@@ -610,7 +616,7 @@ export function AccountSettings({ user, returnTo, onSignedOut, initialPanel = nu
           {copy.deleteTitle}
         </h2>
 
-        {isAdmin ? (
+        {staff ? (
           <p className="auth__prose">{copy.adminCannotDelete}</p>
         ) : panel === 'delete' ? (
           <form className="account__form" onSubmit={submitDelete} noValidate>

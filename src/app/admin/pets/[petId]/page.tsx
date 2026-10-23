@@ -37,7 +37,7 @@ export default async function AdminPetPage({ params }: { params: Promise<{ petId
 
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="pets">
         <PetAdminPanel petId={petId} />
       </AdminGate>
     </div>

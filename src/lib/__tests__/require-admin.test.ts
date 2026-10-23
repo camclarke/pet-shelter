@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
-import { requireAdmin, type VerifiedIdToken } from '../require-admin';
+import { requireAdmin, requireRole, type VerifiedIdToken } from '../require-admin';
+import { COORDINATOR_PLUS, NO_ROLES, type RoleKey } from '@/config/roles';
 
 // ─── the check itself ────────────────────────────────────────────────────────
 
@@ -77,6 +78,81 @@ test('an admin with no usable email passes with email null, so callers fall back
       `email=${JSON.stringify(email)}`
     );
   }
+});
+
+// ─── roles ───────────────────────────────────────────────────────────────────
+
+test('requireAdmin admits each coordination-or-higher role, alone, with the same result shape as before roles', async () => {
+  for (const role of ['admin', 'owner', 'su'] as const) {
+    const { verify } = verifier({ uid: 'uid-r', email: 'r@example.com', [role]: true });
+    assert.deepEqual(
+      await requireAdmin(request('Bearer t'), verify),
+      { ok: true, uid: 'uid-r', email: 'r@example.com' },
+      role,
+    );
+  }
+});
+
+test('requireAdmin refuses a rescuer and event staff, alone or together', async () => {
+  for (const claims of [{ rescuer: true }, { events: true }, { rescuer: true, events: true }]) {
+    const { verify } = verifier({ uid: 'u', ...claims });
+    assert.deepEqual(await requireAdmin(request('Bearer t'), verify), FORBIDDEN, JSON.stringify(claims));
+  }
+});
+
+test('requireRole: a claim must be exactly true — strings, numbers and objects grant nothing', async () => {
+  for (const value of ['true', 1, {}, null, false]) {
+    const { verify } = verifier({ uid: 'u', su: value, owner: value, admin: value, rescuer: value, events: value });
+    assert.deepEqual(
+      await requireRole(request('Bearer t'), verify, ['su', 'owner', 'admin', 'rescuer', 'events']),
+      FORBIDDEN,
+      `value=${JSON.stringify(value)}`,
+    );
+  }
+});
+
+test('requireRole: refuses without calling the verifier when there is no token', async () => {
+  const { verify, calls } = verifier({ uid: 'u', rescuer: true });
+  assert.deepEqual(await requireRole(request(), verify, ['rescuer']), UNAUTHENTICATED);
+  assert.equal(calls.length, 0);
+});
+
+test('requireRole: a revoked or invalid token is 401, and verification always checks revocation', async () => {
+  const failing = verifier(new Error('auth/id-token-revoked'));
+  assert.deepEqual(await requireRole(request('Bearer t'), failing.verify, ['rescuer']), UNAUTHENTICATED);
+  const ok = verifier({ uid: 'u', rescuer: true });
+  await requireRole(request('Bearer  tok '), ok.verify, ['rescuer']);
+  assert.deepEqual(ok.calls, [['tok', true]]);
+});
+
+test('requireRole: admits a caller holding any one allowed role, and returns every role it holds', async () => {
+  const { verify } = verifier({ uid: 'uid-b', email: ' b@example.com ', rescuer: true, events: true });
+  assert.deepEqual(await requireRole(request('Bearer t'), verify, ['admin', 'rescuer']), {
+    ok: true,
+    uid: 'uid-b',
+    email: 'b@example.com',
+    roles: { ...NO_ROLES, rescuer: true, events: true },
+  });
+});
+
+test('requireRole: every role, alone, against every single-role list — exactly the diagonal passes', async () => {
+  const keys: RoleKey[] = ['su', 'owner', 'admin', 'rescuer', 'events'];
+  for (const held of keys) {
+    for (const wanted of keys) {
+      const { verify } = verifier({ uid: 'u', [held]: true });
+      const result = await requireRole(request('Bearer t'), verify, [wanted]);
+      assert.equal(result.ok, held === wanted, `${held} asking for [${wanted}]`);
+    }
+  }
+});
+
+test('requireRole: an empty allow-list admits nobody', async () => {
+  const { verify } = verifier({ uid: 'u', su: true, owner: true, admin: true, rescuer: true, events: true });
+  assert.deepEqual(await requireRole(request('Bearer t'), verify, []), FORBIDDEN);
+});
+
+test('the coordination set is exactly admin, owner and su', () => {
+  assert.deepEqual([...COORDINATOR_PLUS].sort(), ['admin', 'owner', 'su']);
 });
 
 // ─── every API route goes through it ─────────────────────────────────────────
@@ -198,6 +274,31 @@ function code(file: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/**
+ * Routes guarded by `requireRole` with a list wider than coordination, each
+ * with the roles it admits and why. A route here must name exactly these
+ * roles, so widening one is a reviewed change to this table.
+ */
+const ROLE_ROUTES: Record<string, { roles: string; why: string }> = {
+  'src/app/api/intake/suggest/route.ts': {
+    roles: "[...COORDINATOR_PLUS, 'rescuer']",
+    why: 'rescuers photograph intakes and may ask for suggestions (plan D7)',
+  },
+};
+
+/** The guard a staff route calls first: requireAdmin, or requireRole with a named list. */
+function staffGuardAt(route: string, src: string): number {
+  const role = src.indexOf('requireRole(');
+  if (route in ROLE_ROUTES) {
+    assert.ok(role >= 0, `${route} is listed in ROLE_ROUTES and must call requireRole(`);
+    const call = src.slice(role, src.indexOf(')', src.indexOf(']', role)) + 1);
+    assert.ok(call.includes(ROLE_ROUTES[route]!.roles), `${route} must admit exactly ${ROLE_ROUTES[route]!.roles}, found: ${call}`);
+    return role;
+  }
+  assert.ok(role < 0, `${route} calls requireRole( but is not listed in ROLE_ROUTES`);
+  return src.indexOf('requireAdmin(');
+}
+
 test('every API route authenticates through requireAdmin before it touches the request or checks configuration', () => {
   const routes = routeFiles();
   assert.ok(routes.length >= 5, `found only ${routes.length} routes — is the walk broken?`);
@@ -217,9 +318,9 @@ test('every API route authenticates through requireAdmin before it touches the r
 
     const file = handler ?? route;
     const src = code(file);
-    const guard =
-      route in USER_ROUTES || route in USER_UPLOAD_ROUTES || route in USER_RECEIPT_ROUTES ? 'requireUser(' : 'requireAdmin(';
-    const auth = src.indexOf(guard);
+    const userRoute = route in USER_ROUTES || route in USER_UPLOAD_ROUTES || route in USER_RECEIPT_ROUTES;
+    const guard = userRoute ? 'requireUser(' : route in ROLE_ROUTES ? 'requireRole(' : 'requireAdmin(';
+    const auth = userRoute ? src.indexOf(guard) : staffGuardAt(route, src);
     assert.ok(
       auth >= 0,
       `${file} must call ${guard}) — a route handler sits outside firestore.rules, so that check is its entire boundary`
@@ -245,6 +346,7 @@ test('every exemption names a route that exists, so a stale one cannot hide a ne
     ...Object.keys(USER_ROUTES),
     ...Object.keys(USER_UPLOAD_ROUTES),
     ...Object.keys(USER_RECEIPT_ROUTES),
+    ...Object.keys(ROLE_ROUTES),
   ]) {
     assert.ok(routes.includes(file), `${file} is listed as an exemption but does not exist`);
   }

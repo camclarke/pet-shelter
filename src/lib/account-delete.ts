@@ -23,9 +23,14 @@
  *
  * ═══ THE CHECKS, IN ORDER ═══════════════════════════════════════════════════
  *   1. a verified token (`checkRevoked`)          → 401 unauthenticated
- *   2. not an admin account                       → 403 admin-account
+ *   2. not a staff account (any role)             → 403 admin-account
  *      An admin deleting themselves from a phone could leave the shelter with
  *      no one able to enter an animal. Revoke the claim first, by script.
+ *      Since roles (2026-10-22) this covers EVERY staff role, not only
+ *      `admin`: a rescuer's or event staffer's uid is the `createdBy` on
+ *      drafts and events, and deleting the account would leave those pointing
+ *      at nobody. The failure keeps its old name, `admin-account`, because
+ *      the browser and its copy key on it.
  *   3. a sign-in from the last five minutes       → 403 requires-recent-login
  *      A borrowed, still-signed-in phone must not be enough to erase someone.
  *   4. no animal in this person's custody          → 409 custody-active
@@ -39,6 +44,7 @@
  */
 
 import { requireUser, type VerifyIdToken } from './require-admin';
+import { isStaff } from '@/config/roles';
 import { RECENT_SIGN_IN_MAX_AGE_S } from './profile';
 
 export const ACCOUNT_DELETE_PATH = '/api/account/delete';
@@ -88,7 +94,7 @@ export async function handleAccountDelete(request: Request, deps: AccountDeleteD
   const caller = await requireUser(request, deps.verifyIdToken);
   if (!caller.ok) return failure('unauthenticated', 401);
 
-  if (caller.admin) return failure('admin-account', 403);
+  if (isStaff(caller.roles)) return failure('admin-account', 403);
 
   // A token with no auth_time, or one older than the window, is refused. A
   // slightly FUTURE auth_time (clock skew) is a negative age and passes.

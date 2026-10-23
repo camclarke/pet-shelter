@@ -23,6 +23,16 @@
  * forces a refresh, and only then decides. The refresh is why a person who
  * was granted the claim thirty seconds ago does not have to sign out and back
  * in.
+ *
+ * ── Sections ───────────────────────────────────────────────────────────────
+ * Since roles (2026-10-22) every page names its `section`, and the gate asks
+ * `canAccess()` in `src/config/roles.ts` whether the signed-in roles open
+ * it: a rescuer reaches the dashboard and intake, event staff the dashboard
+ * and events, coordination everything. The prop is REQUIRED, so a new admin
+ * page cannot forget to say which section it is; `admin-sections.test.ts`
+ * also checks every page under `src/app/admin` passes the right one. The
+ * same caveat as above applies: this is the difference between a clear
+ * message and a wall of permission errors, not the boundary.
  */
 
 'use client';
@@ -31,9 +41,10 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
 import { SHELTER } from '@/config/shelter';
+import { canAccess, isStaff, type AdminSection } from '@/config/roles';
 
-export function AdminGate({ children }: { children: React.ReactNode }) {
-  const { user, loading, isAdmin, refreshClaims } = useAuth();
+export function AdminGate({ section, children }: { section: AdminSection; children: React.ReactNode }) {
+  const { user, loading, roles, refreshClaims } = useAuth();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -75,7 +86,26 @@ export function AdminGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAdmin) {
+  if (isStaff(roles) && !canAccess(section, roles)) {
+    // A member of the team, on a screen their role does not open. Saying so
+    // beats "you have no permissions", which reads as a broken grant.
+    return (
+      <div className="admin-gate">
+        <h1 className="t-title">Panel del refugio</h1>
+        <p className="admin-gate__note">
+          Esta sección no es parte de tu rol. Si la necesitas, pídele a quien administra el sistema
+          que te dé acceso.
+        </p>
+        <div className="admin-gate__actions">
+          <Link href="/admin" className="btn btn--muted">
+            Volver al panel
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canAccess(section, roles)) {
     return (
       <div className="admin-gate">
         <h1 className="t-title">Panel del refugio</h1>

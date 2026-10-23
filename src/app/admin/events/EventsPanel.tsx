@@ -31,6 +31,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
 import { useAuth } from '@/components/AuthProvider';
+import { isCoordinatorPlus } from '@/config/roles';
 import { SHELTER } from '@/config/shelter';
 import { t } from '@/i18n';
 import {
@@ -88,7 +89,14 @@ function whenLabel(event: Pick<EventView, 'startsAt' | 'endsAt' | 'allDay'>): st
 }
 
 export function EventsPanel() {
-  const { user } = useAuth();
+  const { user, roles } = useAuth();
+  /**
+   * Event staff (plan §3) may not edit or delete an event that has ENDED —
+   * the rules refuse it by the end instant, `endsAt < now`. Coordination
+   * may. So for event staff a past row offers only Duplicar, rather than
+   * buttons that can only fail.
+   */
+  const editsPast = isCoordinatorPlus(roles);
 
   const [events, setEvents] = useState<EventView[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -207,6 +215,7 @@ export function EventsPanel() {
   const rowProps = (event: EventView) => ({
     event,
     now,
+    locked: !editsPast && event.endsAt < now,
     busy: busyId === event.id,
     // While the editor is open every row action is off: opening another event
     // or publishing from the list would silently drop the unsaved edits.
@@ -304,6 +313,7 @@ export function EventsPanel() {
 function EventRow({
   event,
   now,
+  locked,
   busy,
   disabled,
   onEdit,
@@ -317,6 +327,8 @@ function EventRow({
 }: {
   event: EventView;
   now: number;
+  /** Ended, and the viewer's role may not change an ended event. */
+  locked: boolean;
   busy: boolean;
   disabled: boolean;
   onEdit: () => void;
@@ -380,6 +392,14 @@ function EventRow({
           {event.address ? ` · ${event.address}` : ''}
         </span>
       </div>
+      {locked ? (
+        <div className="admin-list__actions" aria-busy={busy}>
+          <span className="admin__sub">Ya terminó: solo Coordinación lo corrige.</span>
+          <button type="button" className="auth__link" onClick={onDuplicate} disabled={disabled}>
+            {copy.duplicate}
+          </button>
+        </div>
+      ) : (
       <div className="admin-list__actions" aria-busy={busy}>
         <button
           type="button"
@@ -404,6 +424,7 @@ function EventRow({
           </button>
         )}
       </div>
+      )}
     </li>
   );
 }

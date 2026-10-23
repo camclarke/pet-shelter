@@ -24,8 +24,44 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // ── roles ──────────────────────────────────────────────────────────────
+    // One boolean custom claim per role, set only by scripts/grant-role.mjs
+    // (Admin SDK). The table of what each role may do is src/config/roles.ts;
+    // scripts/rules-test-roles.mjs checks these rules against it.
+    //
+    // `get(r, false)` rather than `token[r]`: a missing claim reads false
+    // instead of erroring, so the `||` below never depends on error handling.
+    // `== true`, never truthiness: the string "true" is not a grant.
+    function hasRole(role) {
+      return signedIn() && request.auth.token.get(role, false) == true;
+    }
+
+    // Administración general: everything operational, plus granting roles.
+    function isSuper() {
+      return hasRole('su');
+    }
+
+    // Responsable del refugio: everything operational, plus donation details.
+    function isShelterOwner() {
+      return hasRole('owner');
+    }
+
+    // Rescatista: their own unpublished intake drafts, and nothing published.
+    function isRescuer() {
+      return hasRole('rescuer');
+    }
+
+    // Equipo de eventos: events that have not ended yet.
+    function isEventStaff() {
+      return hasRole('events');
+    }
+
+    // COORDINATION OR HIGHER. The name is kept from before roles existed, when
+    // it meant `token.admin == true` and nothing else: the `admin` claim is
+    // now Coordinación, and `su` and `owner` include everything it holds. So
+    // every call site below kept its meaning, and nobody's access changed.
     function isAdmin() {
-      return signedIn() && request.auth.token.admin == true;
+      return signedIn() && (hasRole('admin') || isSuper() || isShelterOwner());
     }
 
     // Does the signed-in user own this pet? One document read, and only on the
@@ -805,8 +841,47 @@ service cloud.firestore {
     // The draft id is minted client-side and becomes the petId on publish, so
     // photos uploaded to storage at pets/{petId}/… during the wizard already
     // sit at their final path. No move, no rewrite, no second URL.
+    //
+    // ── Rescuers (plan §3) ──
+    // A rescuer adds animals: they create drafts, edit and delete their OWN,
+    // and never see anyone else's — a draft holds unpublished photos and
+    // possibly a chip number. They cannot publish (that writes `pets`, which
+    // stays isAdmin()) and cannot touch a draft linked to the paper register:
+    // creating one would claim a register row, and deleting one would orphan
+    // the medical history the import wrote under its id (see discardDraft).
+    //
+    // `createdBy` is the ownership key. It is stamped once, when the wizard
+    // mints the draft, and may never change: otherwise a rescuer could hand
+    // a draft to someone else or take one over. Drafts written before roles
+    // existed have no `createdBy`; reading the missing field errors, which
+    // denies — those stay coordination's.
+    //
+    // ⚠️ `list` is allowed only for a query the rules can prove returns the
+    // caller's own drafts: `where('createdBy', '==', uid)`. Any other list by
+    // a rescuer is refused whole. That cannot be shown on the Rules :test API,
+    // which evaluates one hypothetical document, not a query.
     match /petDrafts/{draftId} {
       allow read, write: if isAdmin();
+
+      function ownDraft() {
+        return resource.data.createdBy == request.auth.uid;
+      }
+
+      allow get, list: if isRescuer() && ownDraft();
+
+      allow create: if isRescuer()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.get('register', null) == null;
+
+      allow update: if isRescuer()
+        && ownDraft()
+        && request.resource.data.createdBy == request.auth.uid
+        // A rescuer neither adds a register link nor moves one a coordinator set.
+        && request.resource.data.get('register', null) == resource.data.get('register', null);
+
+      allow delete: if isRescuer()
+        && ownDraft()
+        && resource.data.get('register', null) == null;
     }
 
     // ── registerEntries/{no} ───────────────────────────────────────────────
@@ -1198,6 +1273,56 @@ service cloud.firestore {
       // (another admin got there first) is a no-op rather than a permission
       // error that would read like a lost claim.
       allow delete: if isAdmin() && (resource == null || resource.data.published == false);
+
+      // ── Equipo de eventos (plan §3) ──
+      // The coordination statements above are unchanged; these ADD the event
+      // staff, and every condition the coordinator's write carries is repeated
+      // here plus one: the event has not ended. "Ended" is the end INSTANT,
+      // `endsAt < request.time`. The screen's "Pasados" grouping uses the
+      // start of today in La Paz instead, so on an event's last day the rules
+      // are the more permissive of the two. A past event is the shelter's
+      // public record; only coordination corrects it.
+      //
+      // Reads are not limited by time: the staff need drafts, past ones
+      // included, to duplicate an event. A missing id reads as an empty
+      // snapshot, which createEvent's transaction relies on to pick a free id.
+      allow get, list: if isEventStaff();
+
+      allow create: if isEventStaff()
+        && request.resource.data.endsAt >= request.time
+        && eventId.size() <= 120
+        && eventId.matches('^[a-z0-9]+(-[a-z0-9]+)*$')
+        && validEvent(request.resource.data)
+        && request.resource.data.published == false
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // Both sides: an event that has ended cannot be edited, and an edit
+      // cannot move an event into the past (which would then lock it).
+      allow update: if isEventStaff()
+        && resource.data.endsAt >= request.time
+        && request.resource.data.endsAt >= request.time
+        && validEvent(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy;
+
+      // Only an unpublished event that has not ended. A published event that
+      // will not happen is CANCELLED, not deleted: a deleted public page
+      // leaves dead links in the sitemap and in posts already shared.
+      allow delete: if isEventStaff()
+        && resource != null
+        && resource.data.published == false
+        && resource.data.endsAt >= request.time;
+    }
+
+    // ── roleAudit/{entryId} ────────────────────────────────────────────────
+    // One document per grant or revoke, written by scripts/grant-role.mjs
+    // through the Admin SDK, which bypasses these rules. No client writes it,
+    // ever: a log that the people it logs can edit is not a log. Only
+    // Administración general reads it.
+    match /roleAudit/{entryId} {
+      allow read: if isSuper();
+      allow write: if false;
     }
 
     // ── default deny ───────────────────────────────────────────────────────

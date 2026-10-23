@@ -17,7 +17,7 @@ export const revalidate = 300;
 export default function AdminPage() {
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="dashboard">
         <AdminDashboard />
       </AdminGate>
     </div>

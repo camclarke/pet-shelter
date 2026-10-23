@@ -1533,6 +1533,11 @@ export interface AccountCopy {
   readonly deleteSubmit: string;
   readonly deleted: string;
   readonly adminCannotDelete: string;
+  /**
+   * «Tu rol: Rescatista.», or null with no role. Takes the role NAMES,
+   * already in Spanish (src/config/roles.ts), most powerful first.
+   */
+  roleLine(labels: readonly string[]): string | null;
   deleteError(failure: AccountDeleteFailure | 'unexpected' | 'network'): string;
 
   newPasswordError(error: NewPasswordError, minLength: number): string;

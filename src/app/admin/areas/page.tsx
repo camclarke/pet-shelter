@@ -24,7 +24,7 @@ export const revalidate = 300;
 export default function AreasPage() {
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="areas">
         <AreasPanel />
       </AdminGate>
     </div>

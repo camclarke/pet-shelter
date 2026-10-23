@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { requireAdmin, requireUser, type VerifiedIdToken } from '../require-admin';
+import { NO_ROLES } from '@/config/roles';
 
 function request(authorization?: string): Request {
   const headers = new Headers();
@@ -40,6 +41,7 @@ test('requireUser: verifies with checkRevoked and passes any signed-in account',
     uid: 'u1',
     email: 'a@b.co',
     admin: false,
+    roles: NO_ROLES,
     authTimeS: 1_700_000_000,
   });
   assert.deepEqual(calls, [['tok', true]]);
@@ -56,6 +58,13 @@ test('requireUser: admin is exactly `true`, never truthiness', async () => {
     const result = await requireUser(request('Bearer t'), verify);
     assert.equal(result.ok && result.admin, expected, `admin=${String(claim)}`);
   }
+});
+
+test('requireUser: carries every role, each exactly `true`, so a staff account can be refused', async () => {
+  const { verify } = verifier({ uid: 'u', rescuer: true, events: 'true', su: 1 });
+  const result = await requireUser(request('Bearer t'), verify);
+  assert.ok(result.ok);
+  assert.deepEqual(result.roles, { su: false, owner: false, admin: false, rescuer: true, events: false });
 });
 
 test('requireUser: a missing or non-finite auth_time is null', async () => {

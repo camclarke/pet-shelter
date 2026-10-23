@@ -31,7 +31,7 @@ export const revalidate = 300;
 export default function IntakePage() {
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
-      <AdminGate>
+      <AdminGate section="intake">
         <Suspense
           fallback={
             <div className="admin-gate" aria-busy="true">
