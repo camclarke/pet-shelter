@@ -97,9 +97,28 @@ export function heldRoles(roles: Roles): RoleKey[] {
   return ROLE_KEYS.filter((role) => roles[role] === true);
 }
 
-/** The Spanish names of the roles held, most powerful first. */
+/**
+ * The Spanish names of the roles held, most powerful first — EVERY role,
+ * superuser included. For the grant script's terminal output; a screen uses
+ * `visibleRoleLabels()`.
+ */
 export function roleLabels(roles: Roles): string[] {
   return heldRoles(roles).map((role) => ROLE_LABELS[role]);
+}
+
+/**
+ * Roles never named on any screen. `su` is the account that grants roles and
+ * reads the role audit; showing it would tell anyone looking over a shoulder,
+ * or at a screenshot, which account is worth taking over. The role still
+ * works exactly as before — this only changes what is DISPLAYED.
+ */
+export const HIDDEN_ROLES: readonly RoleKey[] = ['su'];
+
+/** The names a screen may show: the held roles minus `HIDDEN_ROLES`, most powerful first. */
+export function visibleRoleLabels(roles: Roles): string[] {
+  return heldRoles(roles)
+    .filter((role) => !HIDDEN_ROLES.includes(role))
+    .map((role) => ROLE_LABELS[role]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

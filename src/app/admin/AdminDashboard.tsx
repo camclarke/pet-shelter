@@ -25,7 +25,7 @@ import Link from 'next/link';
 import { draftProgress, type PetDraft } from '@/lib/intake';
 import { listDrafts, listOwnDrafts } from '@/lib/pets-admin';
 import { useAuth } from '@/components/AuthProvider';
-import { canAccess, isCoordinatorPlus, roleLabels } from '@/config/roles';
+import { canAccess, isCoordinatorPlus, visibleRoleLabels } from '@/config/roles';
 import { getOccupancyForAreas, listAreas } from '@/lib/areas-admin';
 import { countRegisterEntries } from '@/lib/register-admin';
 import { shouldHaveOpenPlacement } from '@/lib/arrival';
@@ -132,7 +132,7 @@ export function AdminDashboard() {
     };
   }, [coordinator]);
 
-  const labels = roleLabels(roles);
+  const labels = visibleRoleLabels(roles);
 
   return (
     <div className="admin">

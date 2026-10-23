@@ -63,7 +63,7 @@ import {
   validateDisplayName,
 } from '@/lib/profile';
 import { SHELTER } from '@/config/shelter';
-import { isStaff, roleLabels } from '@/config/roles';
+import { isStaff, visibleRoleLabels } from '@/config/roles';
 import { t } from '@/i18n';
 import { MyApplications } from './MyApplications';
 
@@ -86,7 +86,7 @@ export function AccountSettings({ user, returnTo, onSignedOut, initialPanel = nu
   // Any staff role: the panel link, the role line, and the refusal to delete
   // the account from here (account-delete.ts refuses every staff role).
   const staff = isStaff(roles);
-  const roleLine = t.account.roleLine(roleLabels(roles));
+  const roleLine = t.account.roleLine(visibleRoleLabels(roles));
   const copy = t.account;
 
   const [panel, setPanel] = useState<SettingsPanel | null>(initialPanel);

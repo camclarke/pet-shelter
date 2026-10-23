@@ -11,6 +11,10 @@ import {
   claimsBytes,
   nextClaims,
   parseGrantArgs,
+  parseSuEmailFile,
+  SU_EMAIL_FILE,
+  suGrantAllowed,
+  suLockWarnings,
   wouldRemoveLastSuper,
 } from '../role-grants';
 import { ROLE_KEYS } from '@/config/roles';
@@ -144,6 +148,55 @@ test('an audit entry starts as attempted and records who, whom, what and both cl
   ]);
 });
 
+// ─── the su lock ─────────────────────────────────────────────────────────────
+
+test('suGrantAllowed admits only the allowed email, ignoring case and surrounding spaces', () => {
+  assert.equal(suGrantAllowed('boss@example.com', 'boss@example.com'), true);
+  assert.equal(suGrantAllowed('  Boss@Example.COM ', 'boss@example.com'), true);
+  assert.equal(suGrantAllowed('boss@example.com', ' BOSS@example.com\t'), true);
+  assert.equal(suGrantAllowed('other@example.com', 'boss@example.com'), false);
+  assert.equal(suGrantAllowed('boss@example.co', 'boss@example.com'), false);
+  assert.equal(suGrantAllowed('', 'boss@example.com'), false);
+});
+
+test('suGrantAllowed fails CLOSED when the allowed email is absent, empty or garbage', () => {
+  for (const allowed of [null, '', '   ', 'boss', '@example.com', 'boss@', 'a@b@example.com', 'bo ss@example.com']) {
+    assert.equal(suGrantAllowed('boss@example.com', allowed), false, JSON.stringify(allowed));
+    if (allowed !== null) assert.equal(suGrantAllowed(allowed, allowed), false, `${JSON.stringify(allowed)} matching itself`);
+  }
+});
+
+test('parseSuEmailFile reads the first real line: BOM, comments and blanks are skipped', () => {
+  assert.equal(SU_EMAIL_FILE, '_local/su-email');
+  assert.equal(parseSuEmailFile('boss@example.com\n'), 'boss@example.com');
+  assert.equal(parseSuEmailFile('﻿boss@example.com\r\n'), 'boss@example.com');
+  assert.equal(parseSuEmailFile('# the superuser\n\n   boss@example.com   \nother@example.com\n'), 'boss@example.com');
+  assert.equal(parseSuEmailFile(null), null);
+  assert.equal(parseSuEmailFile(''), null);
+  assert.equal(parseSuEmailFile('\n  \n# only a comment\n'), null);
+  assert.equal(parseSuEmailFile('a@b@example.com\n'), null);
+  assert.equal(parseSuEmailFile('not an email\nboss@example.com\n'), null, 'an invalid first line is not skipped');
+});
+
+test('suLockWarnings: a missing file, and every su holder who is not the allowed email', () => {
+  const accounts = [
+    { email: 'boss@example.com', claims: { su: true } },
+    { email: 'intruder@example.com', claims: { su: true, admin: true } },
+    { email: 'staff@example.com', claims: { admin: true } },
+    { email: 'stringy@example.com', claims: { su: 'true' } },
+    { email: null, claims: { su: true } },
+  ];
+  assert.deepEqual(suLockWarnings(accounts, 'BOSS@example.com'), [
+    'intruder@example.com holds su but is not the email in _local/su-email.',
+    '(no email) holds su but is not the email in _local/su-email.',
+  ]);
+  assert.deepEqual(suLockWarnings([accounts[0]!], 'boss@example.com'), []);
+  const missing = suLockWarnings(accounts, null);
+  assert.equal(missing.length, 1);
+  assert.match(missing[0]!, /_local\/su-email is missing or invalid/);
+  for (const line of suLockWarnings(accounts, 'boss@example.com')) assert.ok(!line.includes('boss@'), 'never names the allowed email');
+});
+
 // ─── the scripts' wiring ─────────────────────────────────────────────────────
 
 test('grant-admin.mjs maps its old arguments onto grant-role with the admin role', async () => {
@@ -171,4 +224,24 @@ test('grant-role.mjs revokes refresh tokens, audits before and after, and checks
   assert.ok(at('changesAnything(') < at("collection('roleAudit').add("), 'a no-op writes no audit');
   assert.ok(at('CLAIMS_MAX_BYTES') < at('setCustomUserClaims('));
   assert.equal(/setCustomUserClaims\([^)]*\{/.test(src), false, 'claims are never written as a literal: always nextClaims()');
+});
+
+test('grant-role.mjs runs the su lock before any network call, and reads the file from the repo root', () => {
+  const src = readFileSync(join(process.cwd(), 'scripts', 'grant-role.mjs'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  const at = (needle: string) => {
+    const i = src.indexOf(needle);
+    assert.ok(i >= 0, `grant-role.mjs never mentions ${needle}`);
+    return i;
+  };
+  const lock = at("if (command.mode === 'grant' && command.role === 'su') enforceSuLock(command.email);");
+  assert.ok(lock > at('parseGrantArgs('), 'the lock reads the parsed command');
+  assert.ok(lock < at('initializeApp('), 'the lock runs before the Admin SDK starts');
+  assert.ok(lock < at('getUserByEmail('), 'the lock runs before the account is looked up');
+  assert.ok(lock < at('getAuth()'), 'the lock runs before auth is touched');
+  assert.ok(at('suGrantAllowed(') < lock, 'enforceSuLock decides with suGrantAllowed');
+  assert.match(src, /new URL\(`\.\.\/\$\{SU_EMAIL_FILE\}`, import\.meta\.url\)/, 'the file is resolved from the script, never the cwd');
+  assert.doesNotMatch(src, /process\.cwd\(\)/);
+  assert.equal((src.match(/printSuLockWarnings\(/g) ?? []).length, 3, 'defined once, called by --list and --check');
 });

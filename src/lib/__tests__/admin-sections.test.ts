@@ -167,9 +167,23 @@ test('event staff cannot be offered edits of an ended event', () => {
   assert.match(panel, /\{locked \? \(/);
 });
 
+test('no screen names roles through roleLabels: only visibleRoleLabels, which hides su', () => {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? (e.name === '__tests__' ? [] : walk(join(dir, e.name))) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : [],
+    );
+  const files = [...walk(join(ROOT, 'src', 'app')), ...walk(join(ROOT, 'src', 'components'))];
+  assert.ok(files.length > 50, `the walk found only ${files.length} files`);
+  for (const file of files) {
+    const src = code(relative(ROOT, file));
+    assert.doesNotMatch(src, /(?<![A-Za-z0-9_$])roleLabels\(/, `${relative(ROOT, file)} calls roleLabels( — use visibleRoleLabels(`);
+  }
+  assert.match(code('src/app/admin/AdminDashboard.tsx'), /const labels = visibleRoleLabels\(roles\);/);
+});
+
 test('the account screen shows the role, and refuses deletion to any staff role', () => {
   const settings = code('src/app/account/AccountSettings.tsx');
   assert.match(settings, /const staff = isStaff\(roles\);/);
   assert.match(settings, /\{staff \? \(\s*<p className="auth__prose">\{copy\.adminCannotDelete\}<\/p>/);
-  assert.match(settings, /t\.account\.roleLine\(roleLabels\(roles\)\)/);
+  assert.match(settings, /t\.account\.roleLine\(visibleRoleLabels\(roles\)\)/);
 });
