@@ -5,6 +5,7 @@ import {
   ADMIN_SECTIONS,
   COORDINATOR_PLUS,
   DATA_ACCESS,
+  HIDDEN_ROLES,
   NO_ROLES,
   ROLE_KEYS,
   ROLE_LABELS,
@@ -20,6 +21,7 @@ import {
   isStaff,
   roleLabels,
   rolesFromClaims,
+  visibleRoleLabels,
   type AdminSection,
   type RoleKey,
   type Roles,
@@ -101,6 +103,26 @@ test('the Spanish names, as agreed in the plan', () => {
 test('roleLabels lists the held roles, most powerful first', () => {
   assert.deepEqual(roleLabels(only('events', 'rescuer')), ['Rescatista', 'Equipo de eventos']);
   assert.deepEqual(roleLabels(NO_ROLES), []);
+});
+
+test('visibleRoleLabels never names the superuser, for any of the 32 role combinations', () => {
+  assert.deepEqual([...HIDDEN_ROLES], ['su']);
+  let combos = 0;
+  for (let mask = 0; mask < 1 << ROLE_KEYS.length; mask++) {
+    const keys = ROLE_KEYS.filter((_, i) => (mask & (1 << i)) !== 0);
+    const roles = only(...keys);
+    const labels = visibleRoleLabels(roles);
+    assert.ok(!labels.includes('Administración general'), `su shown for ${keys.join('+')}`);
+    assert.ok(!labels.includes(ROLE_LABELS.su), `su shown for ${keys.join('+')}`);
+    // Everything else held is still shown, in ROLE_KEYS order.
+    assert.deepEqual(labels, roleLabels(roles).filter((l) => l !== ROLE_LABELS.su), keys.join('+'));
+    combos++;
+  }
+  assert.equal(combos, 32);
+  assert.deepEqual(visibleRoleLabels(only('su', 'admin')), ['Coordinación']);
+  assert.deepEqual(visibleRoleLabels(only('su')), []);
+  // The terminal output still names it: roleLabels is unchanged.
+  assert.deepEqual(roleLabels(only('su')), ['Administración general']);
 });
 
 // ─── sections ────────────────────────────────────────────────────────────────

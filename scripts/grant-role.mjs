@@ -29,6 +29,16 @@
  *     (`outcome: 'applied'`), so a change can never happen unlogged.
  *   - It refuses to revoke the last `su`, refuses unknown roles, and refuses a
  *     claims object over Firebase's 1000-byte limit.
+ *   - It grants `su` ONLY to the email in `_local/su-email` (gitignored; one
+ *     line holding the address, `#` comments allowed). The check runs right
+ *     after the arguments are read, before any network call, and fails
+ *     closed: with no file, every `su` grant is refused. Revoking `su` is not
+ *     affected. `--list` and `--check` warn about any account holding `su`
+ *     that is not that email, or about a missing file. This prevents a
+ *     mistyped grant; anyone with the project's credentials can still use
+ *     the Admin SDK directly.
+ *
+ *     To create the file:  echo you@example.com > _local/su-email
  *
  * Usage (needs ADC and GOOGLE_CLOUD_PROJECT; `--import tsx` because the role
  * table is TypeScript):
@@ -38,7 +48,9 @@
  *   npm run grant:role -- --list [role]             every account holding a role
  */
 
+import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
@@ -47,11 +59,15 @@ import { GoogleAuth } from 'google-auth-library';
 import { ROLE_LABELS, heldRoles, rolesFromClaims } from '../src/config/roles.ts';
 import {
   CLAIMS_MAX_BYTES,
+  SU_EMAIL_FILE,
   auditEntry,
   changesAnything,
   claimsBytes,
   nextClaims,
   parseGrantArgs,
+  parseSuEmailFile,
+  suGrantAllowed,
+  suLockWarnings,
   wouldRemoveLastSuper,
 } from '../src/lib/role-grants.ts';
 
@@ -60,6 +76,33 @@ const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCLOUD_PROJEC
 function fail(message) {
   console.error(`\n  ✗ ${message}\n`);
   process.exit(1);
+}
+
+/** The allowed su email, read relative to the repo root (never the cwd). Null if absent or invalid. */
+function readAllowedSuEmail() {
+  const path = fileURLToPath(new URL(`../${SU_EMAIL_FILE}`, import.meta.url));
+  let text = null;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    text = null;
+  }
+  return parseSuEmailFile(text);
+}
+
+/** Refuses an su grant to any email but the one in the lock file. No network call. */
+function enforceSuLock(email) {
+  if (!suGrantAllowed(email, readAllowedSuEmail())) {
+    fail(
+      `Refusing to grant su to ${email}: su may only be granted to the email in ${SU_EMAIL_FILE}.\n` +
+        `    That file is gitignored and holds one line, the allowed address. If it is\n` +
+        `    missing, create it at the repo root:  echo you@example.com > ${SU_EMAIL_FILE}`,
+    );
+  }
+}
+
+function printSuLockWarnings(accounts) {
+  for (const line of suLockWarnings(accounts, readAllowedSuEmail())) console.log(`  ⚠️ ${line}`);
 }
 
 /** Every account, paged — an unpaginated loop that truncates is how an audit misses page two. */
@@ -103,6 +146,9 @@ async function main() {
   if (!parsed.ok) fail(parsed.error);
   const command = parsed.command;
 
+  // The su lock runs before anything touches the network or the project.
+  if (command.mode === 'grant' && command.role === 'su') enforceSuLock(command.email);
+
   if (!PROJECT_ID) {
     fail('GOOGLE_CLOUD_PROJECT is not set. This script writes auth claims that grant access — it will not guess which project.');
   }
@@ -124,6 +170,7 @@ async function main() {
     }
     if (staff.length === 0) console.log('    (none)');
     console.log();
+    printSuLockWarnings(users.map((u) => ({ email: u.email, claims: u.customClaims })));
     return;
   }
 
@@ -149,6 +196,7 @@ async function main() {
 
   if (command.mode === 'check') {
     console.log(`  ${role.padEnd(8)}: ${before[role] === true ? 'yes' : 'no'}\n`);
+    printSuLockWarnings([{ email: user.email, claims: before }]);
     return;
   }
 

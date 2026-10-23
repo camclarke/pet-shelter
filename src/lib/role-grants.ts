@@ -16,6 +16,13 @@
  * changes to bank details. Revoking the last one leaves nobody able to do
  * either, and the only way back is this script run by someone with the
  * project's credentials. So it refuses, and says to grant a second one first.
+ *
+ * ── Why granting su is locked to one email ─────────────────────────────────
+ * A mistyped address or the wrong role on the command line must not be able
+ * to create a second superuser. `suGrantAllowed()` admits only the email kept
+ * in the gitignored `SU_EMAIL_FILE`, and refuses everyone when that file is
+ * missing. This prevents mistakes; it is not a boundary against someone who
+ * holds the project's credentials, who can call the Admin SDK directly.
  */
 
 import { ROLE_KEYS, isRoleKey, type RoleKey } from '@/config/roles';
@@ -112,6 +119,75 @@ export function wouldRemoveLastSuper(
   const remaining = new Set(superUids);
   remaining.delete(targetUid);
   return remaining.size === 0;
+}
+
+// ─── the superuser lock ──────────────────────────────────────────────────────
+
+/**
+ * Where the one email allowed to hold `su` is kept, relative to the repo root.
+ * `_local/` is gitignored: this repository is public and is a template other
+ * shelters fork, so the address must not live in a tracked file, and a fork
+ * must not inherit this shelter's superuser.
+ */
+export const SU_EMAIL_FILE = '_local/su-email';
+
+function normaliseEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** Exactly one `@`, something on both sides, and no whitespace anywhere. */
+function plausibleEmail(value: string): boolean {
+  if (/\s/.test(value)) return false;
+  const parts = value.split('@');
+  return parts.length === 2 && parts[0]!.length > 0 && parts[1]!.length > 0;
+}
+
+/**
+ * The allowed email in the lock file's text: the first line that is neither
+ * blank nor a `#` comment, trimmed. A leading BOM is ignored. Null when there
+ * is no file, no such line, or the line is not a plausible email — and null
+ * means every `su` grant is refused.
+ */
+export function parseSuEmailFile(text: string | null): string | null {
+  if (text === null) return null;
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    return plausibleEmail(line) ? line : null;
+  }
+  return null;
+}
+
+/**
+ * Whether `su` may be granted to `targetEmail`. Fails CLOSED: with no allowed
+ * email, an empty one or a malformed one, nobody may receive `su`. The
+ * comparison ignores case and surrounding spaces, as email addresses do in
+ * practice.
+ */
+export function suGrantAllowed(targetEmail: string, allowedEmail: string | null): boolean {
+  if (allowedEmail === null) return false;
+  const allowed = normaliseEmail(allowedEmail);
+  if (!plausibleEmail(allowed)) return false;
+  return normaliseEmail(targetEmail) === allowed;
+}
+
+/**
+ * The warnings `--list` and `--check` print about the lock: one when the lock
+ * file is missing or invalid, otherwise one per account that holds `su`
+ * (exactly `true`) without being the allowed email. Never names the allowed
+ * email itself.
+ */
+export function suLockWarnings(
+  accounts: readonly { email: string | null | undefined; claims: ClaimsObject | null | undefined }[],
+  allowedEmail: string | null,
+): string[] {
+  if (allowedEmail === null) {
+    return [`the su lock file ${SU_EMAIL_FILE} is missing or invalid — every su grant is refused until it exists.`];
+  }
+  return accounts
+    .filter((account) => account.claims?.su === true && !suGrantAllowed(account.email ?? '', allowedEmail))
+    .map((account) => `${account.email ?? '(no email)'} holds su but is not the email in ${SU_EMAIL_FILE}.`);
 }
 
 export interface RoleAuditEntry {
