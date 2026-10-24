@@ -47,6 +47,7 @@ export interface VerifiedIdToken {
   owner?: unknown;
   rescuer?: unknown;
   events?: unknown;
+  finance?: unknown;
   /** Seconds since the epoch of the sign-in this token descends from. */
   auth_time?: number;
 }
@@ -65,6 +66,12 @@ export type RoleCheck =
       email: string | null;
       /** Every role the token carries, each exactly `true` or false. */
       roles: Roles;
+      /**
+       * When the person last actually signed in, or null if the token does
+       * not say. Added 2026-10-24 for the donation routes, which require a
+       * recent sign-in; additive, so no existing caller changed.
+       */
+      authTimeS: number | null;
     }
   | { ok: false; error: 'unauthenticated'; status: 401 }
   | { ok: false; error: 'forbidden'; status: 403 };
@@ -130,7 +137,13 @@ export async function requireRole(
   const roles = rolesFromClaims(decoded);
   if (!hasAnyRole(roles, allowed)) return FORBIDDEN;
 
-  return { ok: true, uid: decoded.uid, email: decoded.email?.trim() || null, roles };
+  return { ok: true, uid: decoded.uid, email: decoded.email?.trim() || null, roles, authTimeS: authTimeOf(decoded) };
+}
+
+/** The token's `auth_time` in seconds, or null when it is missing or not a finite number. */
+function authTimeOf(decoded: VerifiedIdToken): number | null {
+  const authTime = decoded.auth_time;
+  return typeof authTime === 'number' && Number.isFinite(authTime) ? authTime : null;
 }
 
 /**
@@ -156,13 +169,12 @@ export async function requireUser(request: Request, verifyIdToken: VerifyIdToken
   const decoded = await verifiedToken(request, verifyIdToken);
   if (!decoded) return UNAUTHENTICATED;
 
-  const authTime = decoded.auth_time;
   return {
     ok: true,
     uid: decoded.uid,
     email: decoded.email?.trim() || null,
     admin: decoded.admin === true,
     roles: rolesFromClaims(decoded),
-    authTimeS: typeof authTime === 'number' && Number.isFinite(authTime) ? authTime : null,
+    authTimeS: authTimeOf(decoded),
   };
 }

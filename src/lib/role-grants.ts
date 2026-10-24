@@ -37,7 +37,7 @@ export type GrantCommand =
 export type ParsedArgs = { ok: true; command: GrantCommand } | { ok: false; error: string };
 
 export const USAGE =
-  'Usage: npm run grant:role -- <email> <su|owner|admin|rescuer|events> [--revoke|--check]  |  -- --list [role]';
+  'Usage: npm run grant:role -- <email> <su|owner|admin|finance|rescuer|events> [--revoke|--check]  |  -- --list [role]';
 
 /** Read `<email> <role> [--revoke|--check]` or `--list [role]`. Never guesses. */
 export function parseGrantArgs(argv: readonly string[]): ParsedArgs {

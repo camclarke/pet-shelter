@@ -116,7 +116,7 @@ test('an admin account is refused, so the shelter cannot lose its last admin fro
 });
 
 test('ANY staff role is refused, not only admin — each role alone', async () => {
-  for (const role of ['su', 'owner', 'admin', 'rescuer', 'events'] as const) {
+  for (const role of ['su', 'owner', 'admin', 'finance', 'rescuer', 'events'] as const) {
     const { d, calls } = deps({ uid: `staff-${role}`, [role]: true, auth_time: NOW_S });
     const res = await handleAccountDelete(request(), d);
     assert.equal(res.status, 403, role);

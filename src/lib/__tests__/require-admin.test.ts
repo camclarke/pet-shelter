@@ -93,8 +93,8 @@ test('requireAdmin admits each coordination-or-higher role, alone, with the same
   }
 });
 
-test('requireAdmin refuses a rescuer and event staff, alone or together', async () => {
-  for (const claims of [{ rescuer: true }, { events: true }, { rescuer: true, events: true }]) {
+test('requireAdmin refuses a rescuer, event staff and Tesorería, alone or together', async () => {
+  for (const claims of [{ rescuer: true }, { events: true }, { rescuer: true, events: true }, { finance: true }]) {
     const { verify } = verifier({ uid: 'u', ...claims });
     assert.deepEqual(await requireAdmin(request('Bearer t'), verify), FORBIDDEN, JSON.stringify(claims));
   }
@@ -102,9 +102,9 @@ test('requireAdmin refuses a rescuer and event staff, alone or together', async 
 
 test('requireRole: a claim must be exactly true — strings, numbers and objects grant nothing', async () => {
   for (const value of ['true', 1, {}, null, false]) {
-    const { verify } = verifier({ uid: 'u', su: value, owner: value, admin: value, rescuer: value, events: value });
+    const { verify } = verifier({ uid: 'u', su: value, owner: value, admin: value, finance: value, rescuer: value, events: value });
     assert.deepEqual(
-      await requireRole(request('Bearer t'), verify, ['su', 'owner', 'admin', 'rescuer', 'events']),
+      await requireRole(request('Bearer t'), verify, ['su', 'owner', 'admin', 'finance', 'rescuer', 'events']),
       FORBIDDEN,
       `value=${JSON.stringify(value)}`,
     );
@@ -132,11 +132,28 @@ test('requireRole: admits a caller holding any one allowed role, and returns eve
     uid: 'uid-b',
     email: 'b@example.com',
     roles: { ...NO_ROLES, rescuer: true, events: true },
+    authTimeS: null,
   });
 });
 
+test('requireRole: exposes auth_time as authTimeS, and null when it is missing or not a finite number', async () => {
+  const at = (auth_time: unknown) => verifier({ uid: 'u', finance: true, auth_time } as VerifiedIdToken).verify;
+  const authTimeOf = async (value: unknown) => {
+    const r = await requireRole(request('Bearer t'), at(value), ['finance']);
+    assert.ok(r.ok);
+    return r.authTimeS;
+  };
+  assert.equal(await authTimeOf(1_790_000_000), 1_790_000_000);
+  for (const bad of [undefined, null, '1790000000', Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(await authTimeOf(bad), null, String(bad));
+  }
+  // requireAdmin's shape is unchanged: no authTimeS, no roles.
+  const { verify } = verifier({ uid: 'u', admin: true, auth_time: 1 });
+  assert.deepEqual(await requireAdmin(request('Bearer t'), verify), { ok: true, uid: 'u', email: null });
+});
+
 test('requireRole: every role, alone, against every single-role list — exactly the diagonal passes', async () => {
-  const keys: RoleKey[] = ['su', 'owner', 'admin', 'rescuer', 'events'];
+  const keys: RoleKey[] = ['su', 'owner', 'admin', 'finance', 'rescuer', 'events'];
   for (const held of keys) {
     for (const wanted of keys) {
       const { verify } = verifier({ uid: 'u', [held]: true });
@@ -167,6 +184,11 @@ const ROOT = process.cwd();
 const UNAUTHENTICATED_ROUTES: Record<string, string> = {
   'src/app/api/qr/[token]/route.ts':
     'reads nothing and answers identically for any well-formed token (qr-guards.test.ts)',
+  // The /donate page shows it to anyone. Its GET takes no request at all, so
+  // nothing a caller sends can choose the object: only the CONFIRMED QR in
+  // donationSettings/current is served, while active and not expired
+  // (donations-handler.ts, handlePublicDonationQr; donations-guards.test.ts).
+  'src/app/api/donations/qr/route.ts': 'the public, confirmed donation QR; reads no input (donations-handler.ts)',
 };
 
 /**
@@ -213,6 +235,10 @@ const DELEGATED_ROUTES: Record<string, string> = {
   'src/app/api/account/delete/route.ts': 'src/lib/account-delete.ts',
   'src/app/api/adoption-applications/[applicationId]/id-document/[side]/route.ts':
     'src/lib/id-document-handler.ts',
+  'src/app/api/donations/propose/route.ts': 'src/lib/donations-handler.ts',
+  'src/app/api/donations/confirm/route.ts': 'src/lib/donations-handler.ts',
+  'src/app/api/donations/reject/route.ts': 'src/lib/donations-handler.ts',
+  'src/app/api/donations/pending/[pendingId]/qr/route.ts': 'src/lib/donations-handler.ts',
 };
 
 /**
@@ -283,6 +309,16 @@ const ROLE_ROUTES: Record<string, { roles: string; why: string }> = {
   'src/app/api/intake/suggest/route.ts': {
     roles: "[...COORDINATOR_PLUS, 'rescuer']",
     why: 'rescuers photograph intakes and may ask for suggestions (plan D7)',
+  },
+  // Donations: Tesorería and the superuser, NOT coordination (2026-10-24).
+  // One `requireRole(` in donations-handler.ts, inside `guard()`, which every
+  // handler there calls first (donations-guards.test.ts pins that).
+  'src/app/api/donations/propose/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería or su propose details' },
+  'src/app/api/donations/confirm/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería or su, never the proposer' },
+  'src/app/api/donations/reject/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería or su, never the proposer' },
+  'src/app/api/donations/pending/[pendingId]/qr/route.ts': {
+    roles: 'DONATION_ROLES',
+    why: 'the proposer uploads, Tesorería or su view, a proposal’s QR',
   },
 };
 

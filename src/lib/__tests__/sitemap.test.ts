@@ -10,16 +10,16 @@ const urls = (pets: { slug: string; updatedAt?: Date }[] = []) =>
 test('static public routes are present with the siteUrl prefix', () => {
   const u = urls();
   assert.ok(u.includes('https://wawitas.org'));
-  for (const r of ['/adopt', '/events', '/lost', '/help', '/about', '/privacy']) {
+  for (const r of ['/adopt', '/events', '/lost', '/help', '/donate', '/about', '/privacy']) {
     assert.ok(u.includes(`${SITE}${r}`), r);
   }
-  assert.equal(STATIC_SITEMAP_ROUTES.length, 7);
+  assert.equal(STATIC_SITEMAP_ROUTES.length, 8);
 });
 
 // Flipped deliberately in PR 3b: /events used to be asserted ABSENT, as a
 // "future" route, until the page existed. It is listed now.
 test('/events is a listed static route, after /adopt', () => {
-  assert.deepEqual([...STATIC_SITEMAP_ROUTES], ['/', '/adopt', '/events', '/lost', '/help', '/about', '/privacy']);
+  assert.deepEqual([...STATIC_SITEMAP_ROUTES], ['/', '/adopt', '/events', '/lost', '/help', '/donate', '/about', '/privacy']);
 });
 
 test('published event pages are listed with their id encoded and lastModified when known', () => {

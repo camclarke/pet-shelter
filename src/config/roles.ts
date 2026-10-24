@@ -25,14 +25,26 @@
  * Node scripts run through tsx.
  */
 
-export const ROLE_KEYS = ['su', 'owner', 'admin', 'rescuer', 'events'] as const;
+export const ROLE_KEYS = ['su', 'owner', 'admin', 'finance', 'rescuer', 'events'] as const;
 export type RoleKey = (typeof ROLE_KEYS)[number];
 
 /**
  * The roles that hold everything operational. `admin` is Coordinación; the
- * other two add to it (donations, granting roles) and never take from it.
+ * other two add to it (granting roles, for `su`) and never take from it.
+ *
+ * `finance` (Tesorería) is deliberately NOT here: whoever can change where
+ * donors' money goes holds nothing else (owner decision 2026-10-23). It opens
+ * the donations section and the dashboard, and no operational screen.
  */
 export const COORDINATOR_PLUS: readonly RoleKey[] = ['admin', 'owner', 'su'];
+
+/**
+ * Who may view, propose, confirm and reject donation details: Tesorería and
+ * the superuser (owner decision 2026-10-24). Confirming and rejecting also
+ * need a caller who is NOT the proposer — `canConfirm()` in
+ * `src/lib/donations.ts`; this list is only the role half of that.
+ */
+export const DONATION_ROLES: readonly RoleKey[] = ['finance', 'su'];
 
 /**
  * Names shown in the panel. Nouns without grammatical gender ("el/la
@@ -43,6 +55,7 @@ export const ROLE_LABELS: Readonly<Record<RoleKey, string>> = {
   su: 'Administración general',
   owner: 'Responsable del refugio',
   admin: 'Coordinación',
+  finance: 'Tesorería',
   rescuer: 'Rescatista',
   events: 'Equipo de eventos',
 };
@@ -54,6 +67,7 @@ export const NO_ROLES: Roles = Object.freeze({
   su: false,
   owner: false,
   admin: false,
+  finance: false,
   rescuer: false,
   events: false,
 });
@@ -135,6 +149,7 @@ export const ADMIN_SECTIONS = [
   'applications',
   'food',
   'events',
+  'donations',
 ] as const;
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];
 
@@ -145,9 +160,12 @@ export type AdminSection = (typeof ADMIN_SECTIONS)[number];
  * staff's shows the events link. Everything about a PUBLISHED animal (`pets`,
  * which includes its health card and tag print pages) stays with
  * coordination: a rescuer adds, a coordinator decides.
+ *
+ * Donations are Tesorería's and the superuser's ONLY — not coordination's,
+ * not the owner's (plan §5, revised 2026-10-24).
  */
 export const SECTION_ROLES: Readonly<Record<AdminSection, readonly RoleKey[]>> = {
-  dashboard: [...COORDINATOR_PLUS, 'rescuer', 'events'],
+  dashboard: [...COORDINATOR_PLUS, 'finance', 'rescuer', 'events'],
   intake: [...COORDINATOR_PLUS, 'rescuer'],
   pets: COORDINATOR_PLUS,
   register: COORDINATOR_PLUS,
@@ -156,6 +174,7 @@ export const SECTION_ROLES: Readonly<Record<AdminSection, readonly RoleKey[]>> =
   applications: COORDINATOR_PLUS,
   food: COORDINATOR_PLUS,
   events: [...COORDINATOR_PLUS, 'events'],
+  donations: DONATION_ROLES,
 };
 
 /** The route each section's screen lives at. */
@@ -169,6 +188,7 @@ export const SECTION_HREF: Readonly<Record<AdminSection, string>> = {
   applications: '/admin/applications',
   food: '/admin/food',
   events: '/admin/events',
+  donations: '/admin/donations',
 };
 
 export function isAdminSection(value: unknown): value is AdminSection {
@@ -221,6 +241,14 @@ export type DataVerb = 'read' | 'create' | 'update' | 'delete';
  *                 events for everyone; that is not a role question.
  *  - `roleAudit`  the grant script's log, written only by the Admin SDK.
  *  - `petPhotos`  Storage `pets/{petId}/…` and `pets/{petId}/private/…`.
+ *  - `donationCurrent`  `donationSettings/current`, the confirmed details.
+ *                 PUBLIC read (anyone, signed in or not — see
+ *                 `PUBLIC_READ`), and no client write: only the confirm route
+ *                 writes it, through the Admin SDK.
+ *  - `donationPending`  `donationSettings/current/pending/{id}`: proposals.
+ *  - `donationHistory`  `donationSettings/current/history/{id}`: append-only.
+ *                 Both read by Tesorería and the superuser only, and written
+ *                 only by the routes. NOT coordination, NOT the owner.
  */
 export const DATA_ACCESS = {
   petDrafts: {
@@ -289,9 +317,38 @@ export const DATA_ACCESS = {
       { roles: ['rescuer'], scope: 'own-recent' },
     ],
   },
+  donationCurrent: {
+    read: [],
+    create: [],
+    update: [],
+    delete: [],
+  },
+  donationPending: {
+    read: [{ roles: DONATION_ROLES, scope: 'any' }],
+    create: [],
+    update: [],
+    delete: [],
+  },
+  donationHistory: {
+    read: [{ roles: DONATION_ROLES, scope: 'any' }],
+    create: [],
+    update: [],
+    delete: [],
+  },
 } as const satisfies Record<string, Record<DataVerb, readonly Grant[]>>;
 
 export type DataResource = keyof typeof DATA_ACCESS;
+
+/**
+ * Resources ANYONE may read, signed in or not. Not a role question, so it
+ * is not a grant: `dataAllows()` stays "what these roles allow", and a reader
+ * of the matrix asks `publicCanRead()` too. Writes are never public.
+ */
+export const PUBLIC_READ: readonly DataResource[] = ['donationCurrent'];
+
+export function publicCanRead(resource: DataResource): boolean {
+  return PUBLIC_READ.includes(resource);
+}
 
 /**
  * What a request is about, for the scopes above. Every fact defaults to the

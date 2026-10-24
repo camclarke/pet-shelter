@@ -105,6 +105,7 @@ export function Footer() {
           <a href={`https://wa.me/${SHELTER.whatsapp}`}>WhatsApp {SHELTER.whatsappDisplay}</a>
           {SHELTER.instagram && <a href={SHELTER.instagram}>Instagram</a>}
           {SHELTER.facebook && <a href={SHELTER.facebook}>Facebook</a>}
+          <Link href="/donate">Dona</Link>
           <Link href="/privacy">Privacidad</Link>
           <span>
             {SHELTER.city}, {SHELTER.country}

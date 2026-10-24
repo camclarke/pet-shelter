@@ -5,9 +5,11 @@
  * `src/config/roles.ts`):
  *
  *   su       Administración general   everything operational + grants roles
- *   owner    Responsable del refugio  everything operational + donation details
+ *   owner    Responsable del refugio  everything operational (no donation rights)
  *   admin    Coordinación             everything operational (the claim used
  *                                     since 2026-08-23 — unchanged)
+ *   finance  Tesorería                donation details only: view, propose,
+ *                                     confirm or reject (never their own)
  *   rescuer  Rescatista               their own unpublished intake drafts
  *   events   Equipo de eventos        events that have not ended
  *
