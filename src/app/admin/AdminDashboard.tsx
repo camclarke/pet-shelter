@@ -173,6 +173,11 @@ export function AdminDashboard() {
               {t.food.navLabel}
             </Link>
           )}
+          {canAccess('donations', roles) && (
+            <Link href="/admin/donations" className="btn btn--muted">
+              Donaciones
+            </Link>
+          )}
           {canAccess('events', roles) && (
             <Link href="/admin/events" className="btn btn--muted">
               {t.events.navLabel}

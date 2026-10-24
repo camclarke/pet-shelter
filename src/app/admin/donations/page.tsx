@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { AdminGate } from '@/components/AdminGate';
+import { DonationsPanel } from './DonationsPanel';
 
 export const metadata: Metadata = {
   title: 'Donaciones',
@@ -13,8 +14,6 @@ export const metadata: Metadata = {
  * harmless: the details, proposals and history load client-side after the
  * role is checked, and the rules let only Tesorería and the superuser read
  * the proposals and the history.
- *
- * PLACEHOLDER BODY: the donations screen replaces it. The section gate stays.
  */
 export const revalidate = 300;
 
@@ -22,7 +21,7 @@ export default function DonationsPage() {
   return (
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
       <AdminGate section="donations">
-        <p>Datos para donaciones: pantalla en preparación.</p>
+        <DonationsPanel />
       </AdminGate>
     </div>
   );

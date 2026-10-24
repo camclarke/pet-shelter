@@ -4967,3 +4967,167 @@ textarea {
 .home-events__all {
   margin-top: var(--space-3);
 }
+
+/* ── /donate and /admin/donations ─────────────────────────────────────────
+   Measured at 390px and 1280px: no horizontal overflow. Long values (an IBAN,
+   an email) wrap rather than widen the card. */
+.donate {
+  padding-block: var(--space-5);
+  max-width: 760px;
+}
+.donate__lead {
+  margin-top: var(--space-2);
+  max-width: 60ch;
+  opacity: 0.85;
+}
+.donate__check {
+  margin-top: var(--space-3);
+}
+.donate__methods {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.donate__method,
+.donate__qr,
+.donate__voucher {
+  padding: var(--space-3);
+  background: var(--cream);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+.donate__qr,
+.donate__voucher {
+  margin-top: var(--space-3);
+}
+.donate__qr img {
+  display: block;
+  margin-top: var(--space-2);
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+}
+.donate__voucher .btn {
+  margin-top: var(--space-2);
+}
+.donate__facts {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+}
+.donate__facts dd {
+  margin: 2px 0 0;
+}
+.donate__number {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+.donate__copy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  vertical-align: middle;
+}
+.donate__copy .btn {
+  min-height: 44px;
+}
+.donate__copy-note {
+  font-size: 13px;
+  opacity: 0.75;
+}
+.donate__copy-field {
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px solid var(--line);
+  background: var(--cream);
+  font-size: 16px;
+}
+.donate__note {
+  margin-top: var(--space-2);
+  font-size: 14px;
+  opacity: 0.8;
+}
+.donate__updated {
+  margin-top: var(--space-3);
+  opacity: 0.7;
+}
+
+.donations__compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+@media (max-width: 760px) {
+  .donations__compare {
+    grid-template-columns: 1fr;
+  }
+}
+.donations__side {
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  background: var(--cream);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.donations__row {
+  padding: 6px 8px;
+  border-left: 3px solid transparent;
+}
+.donations__row dt {
+  font-size: 12.5px;
+  opacity: 0.7;
+}
+.donations__row dd {
+  margin: 0;
+}
+/* Changed fields carry a text label as well as a bar and weight: never colour alone. */
+.donations__row--changed {
+  border-left-color: var(--coral);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--coral), var(--cream) 85%);
+}
+.donations__tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 12px;
+  border: 1px solid var(--charcoal);
+}
+.donations__qr-img {
+  display: block;
+  max-width: 100%;
+  width: 220px;
+  height: auto;
+  background: #fff;
+  margin-top: var(--space-1);
+}
+.donations__check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-height: 44px;
+  padding-block: 6px;
+}
+.donations__check input {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  margin-top: 2px;
+}
+.donations__method-form {
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.donations__section {
+  margin-top: var(--space-4);
+}

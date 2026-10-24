@@ -21,7 +21,7 @@ const LEGACY_SPANISH_ROUTES = [
   { source: '/cuenta', destination: '/account' },
 ];
 
-export const CDN_CACHED_PATHS = ['/', '/adopt', '/events', '/sitemap.xml'];
+export const CDN_CACHED_PATHS = ['/', '/adopt', '/events', '/donate', '/sitemap.xml'];
 export const CDN_CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=60';
 
 /**

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { SHELTER } from '@/config/shelter';
 
 export const metadata: Metadata = {
@@ -29,8 +30,8 @@ export default function HelpPage() {
     <div className="container" style={{ paddingBlock: 'var(--space-5)' }}>
       <h1 className="t-title">Quiero ayudar</h1>
       <p style={{ marginTop: 'var(--space-2)', maxWidth: '60ch', opacity: 0.8 }}>
-        Donaciones, hogares de tránsito y voluntariado están en construcción. Mientras tanto,
-        escríbenos por <a href={`https://wa.me/${SHELTER.whatsapp}`}>WhatsApp</a>.
+        Para donar, entra a <Link href="/donate">Dona</Link>. Para hogares de tránsito y
+        voluntariado, escríbenos por <a href={`https://wa.me/${SHELTER.whatsapp}`}>WhatsApp</a>.
       </p>
     </div>
   );
