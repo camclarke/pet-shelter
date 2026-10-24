@@ -41,7 +41,8 @@ service cloud.firestore {
       return hasRole('su');
     }
 
-    // Responsable del refugio: everything operational, plus donation details.
+    // Responsable del refugio: everything operational. No donation rights:
+    // those are Tesorería's (owner decision 2026-10-23).
     function isShelterOwner() {
       return hasRole('owner');
     }
@@ -54,6 +55,13 @@ service cloud.firestore {
     // Equipo de eventos: events that have not ended yet.
     function isEventStaff() {
       return hasRole('events');
+    }
+
+    // Tesorería: donation details and nothing else. Deliberately NOT inside
+    // isAdmin(), and used ONLY in the donationSettings block below
+    // (roles-rules-wiring.test.ts pins both).
+    function isFinance() {
+      return hasRole('finance');
     }
 
     // COORDINATION OR HIGHER. The name is kept from before roles existed, when
@@ -1323,6 +1331,32 @@ service cloud.firestore {
     match /roleAudit/{entryId} {
       allow read: if isSuper();
       allow write: if false;
+    }
+
+    // ── donationSettings ───────────────────────────────────────────────────
+    // Where donors send money. Every write goes through the propose, confirm
+    // and reject routes (src/lib/donations-handler.ts) via the Admin SDK, which
+    // bypasses these rules: a change needs a recent sign-in AND a second
+    // person, and the rules cannot express "a different person confirmed it".
+    // So no client writes any of it, ever.
+    //
+    // `current`: the confirmed details, public — the /donate page shows them
+    // to anyone. It carries no uid. `pending` and `history`: proposals and the
+    // audit trail, with who proposed and who confirmed; Tesorería and the
+    // superuser only. NOT coordination, NOT the owner (plan §5, 2026-10-24).
+    match /donationSettings/current {
+      allow read: if true;
+      allow write: if false;
+
+      match /pending/{pendingId} {
+        allow read: if isFinance() || isSuper();
+        allow write: if false;
+      }
+
+      match /history/{entryId} {
+        allow read: if isFinance() || isSuper();
+        allow write: if false;
+      }
     }
 
     // ── default deny ───────────────────────────────────────────────────────

@@ -64,7 +64,7 @@ test('requireUser: carries every role, each exactly `true`, so a staff account c
   const { verify } = verifier({ uid: 'u', rescuer: true, events: 'true', su: 1 });
   const result = await requireUser(request('Bearer t'), verify);
   assert.ok(result.ok);
-  assert.deepEqual(result.roles, { su: false, owner: false, admin: false, rescuer: true, events: false });
+  assert.deepEqual(result.roles, { su: false, owner: false, admin: false, finance: false, rescuer: true, events: false });
 });
 
 test('requireUser: a missing or non-finite auth_time is null', async () => {

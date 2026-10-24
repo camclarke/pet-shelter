@@ -5,6 +5,9 @@ import {
   ADMIN_SECTIONS,
   COORDINATOR_PLUS,
   DATA_ACCESS,
+  DONATION_ROLES,
+  PUBLIC_READ,
+  publicCanRead,
   HIDDEN_ROLES,
   NO_ROLES,
   ROLE_KEYS,
@@ -32,16 +35,25 @@ const only = (...keys: RoleKey[]): Roles => rolesFromClaims(Object.fromEntries(k
 
 // ─── claims ──────────────────────────────────────────────────────────────────
 
-test('the five role keys, in order, and the coordination set', () => {
-  assert.deepEqual([...ROLE_KEYS], ['su', 'owner', 'admin', 'rescuer', 'events']);
+test('the six role keys, in order, and the coordination set', () => {
+  assert.deepEqual([...ROLE_KEYS], ['su', 'owner', 'admin', 'finance', 'rescuer', 'events']);
   assert.deepEqual([...COORDINATOR_PLUS].sort(), ['admin', 'owner', 'su']);
+});
+
+test('Tesorería is NOT coordination: finance stays out of COORDINATOR_PLUS, and donations are finance + su only', () => {
+  assert.equal(COORDINATOR_PLUS.includes('finance'), false);
+  assert.equal(isCoordinatorPlus(only('finance')), false);
+  assert.deepEqual([...DONATION_ROLES].sort(), ['finance', 'su']);
+  assert.deepEqual([...SECTION_ROLES.donations].sort(), ['finance', 'su']);
+  // A treasurer is staff, so Mi cuenta refuses to delete the account.
+  assert.equal(isStaff(only('finance')), true);
 });
 
 test('rolesFromClaims reads each claim as exactly true, never truthiness', () => {
   assert.deepEqual(rolesFromClaims({ admin: true }), { ...NO_ROLES, admin: true });
   for (const value of ['true', 1, {}, [], null, undefined, false]) {
     assert.deepEqual(
-      rolesFromClaims({ su: value, owner: value, admin: value, rescuer: value, events: value }),
+      rolesFromClaims({ su: value, owner: value, admin: value, finance: value, rescuer: value, events: value }),
       NO_ROLES,
       `value=${JSON.stringify(value)}`,
     );
@@ -94,6 +106,7 @@ test('the Spanish names, as agreed in the plan', () => {
     su: 'Administración general',
     owner: 'Responsable del refugio',
     admin: 'Coordinación',
+    finance: 'Tesorería',
     rescuer: 'Rescatista',
     events: 'Equipo de eventos',
   });
@@ -105,7 +118,7 @@ test('roleLabels lists the held roles, most powerful first', () => {
   assert.deepEqual(roleLabels(NO_ROLES), []);
 });
 
-test('visibleRoleLabels never names the superuser, for any of the 32 role combinations', () => {
+test('visibleRoleLabels never names the superuser, for any of the 64 role combinations', () => {
   assert.deepEqual([...HIDDEN_ROLES], ['su']);
   let combos = 0;
   for (let mask = 0; mask < 1 << ROLE_KEYS.length; mask++) {
@@ -118,7 +131,7 @@ test('visibleRoleLabels never names the superuser, for any of the 32 role combin
     assert.deepEqual(labels, roleLabels(roles).filter((l) => l !== ROLE_LABELS.su), keys.join('+'));
     combos++;
   }
-  assert.equal(combos, 32);
+  assert.equal(combos, 64);
   assert.deepEqual(visibleRoleLabels(only('su', 'admin')), ['Coordinación']);
   assert.deepEqual(visibleRoleLabels(only('su')), []);
   // The terminal output still names it: roleLabels is unchanged.
@@ -135,14 +148,19 @@ test('every section has roles and a route under /admin', () => {
     assert.match(SECTION_HREF[section], /^\/admin(\/[a-z]+)?$/, section);
   }
   assert.ok(isAdminSection('events'));
-  assert.equal(isAdminSection('donations'), false);
+  assert.ok(isAdminSection('donations'));
+  assert.equal(SECTION_HREF.donations, '/admin/donations');
+  assert.equal(isAdminSection('finance'), false);
 });
 
-/** Plan §4, row by row: which sections each single role opens. */
+const OPERATIONAL = ADMIN_SECTIONS.filter((s) => s !== 'donations');
+
+/** Plan §4 (donations revised 2026-10-24), row by row: which sections each single role opens. */
 const EXPECTED_SECTIONS: Record<RoleKey | 'none', AdminSection[]> = {
   su: [...ADMIN_SECTIONS],
-  owner: [...ADMIN_SECTIONS],
-  admin: [...ADMIN_SECTIONS],
+  owner: OPERATIONAL,
+  admin: OPERATIONAL,
+  finance: ['dashboard', 'donations'],
   rescuer: ['dashboard', 'intake'],
   events: ['dashboard', 'events'],
   none: [],
@@ -169,7 +187,7 @@ test('coordination or higher may do every verb the matrix lists for any resource
   for (const role of COORDINATOR_PLUS) {
     for (const [resource, verbs] of Object.entries(DATA_ACCESS)) {
       for (const [verb, grants] of Object.entries(verbs)) {
-        if (resource === 'roleAudit') continue;
+        if (resource === 'roleAudit' || resource.startsWith('donation')) continue;
         if ((grants as readonly unknown[]).length === 0) continue;
         assert.ok(
           dataAllows(resource as keyof typeof DATA_ACCESS, verb as 'read', only(role)),
@@ -185,6 +203,34 @@ test('roleAudit: only the superuser reads it, and nobody writes it through the r
     assert.equal(dataAllows('roleAudit', 'read', only(role)), role === 'su', role);
     for (const verb of ['create', 'update', 'delete'] as const) {
       assert.equal(dataAllows('roleAudit', verb, only(role)), false, `${role} ${verb}`);
+    }
+  }
+});
+
+test('donations: current is public to read; pending and history are Tesorería + su; no client writes any of it', () => {
+  assert.deepEqual([...PUBLIC_READ], ['donationCurrent']);
+  assert.ok(publicCanRead('donationCurrent'));
+  assert.equal(publicCanRead('donationPending'), false);
+  assert.equal(publicCanRead('donationHistory'), false);
+  for (const role of ROLE_KEYS) {
+    for (const resource of ['donationPending', 'donationHistory'] as const) {
+      assert.equal(dataAllows(resource, 'read', only(role)), role === 'finance' || role === 'su', `${role} reads ${resource}`);
+    }
+    for (const resource of ['donationCurrent', 'donationPending', 'donationHistory'] as const) {
+      for (const verb of ['create', 'update', 'delete'] as const) {
+        assert.equal(dataAllows(resource, verb, only(role)), false, `${role} ${verb} ${resource}`);
+      }
+    }
+  }
+  // The owner explicitly has NO donation rights any more (2026-10-24).
+  assert.equal(dataAllows('donationPending', 'read', only('owner', 'admin')), false);
+});
+
+test('Tesorería opens nothing operational in the matrix', () => {
+  const f = only('finance');
+  for (const resource of ['petDrafts', 'publish', 'medical', 'events', 'roleAudit', 'petPhotos'] as const) {
+    for (const verb of ['read', 'create', 'update', 'delete'] as const) {
+      assert.equal(dataAllows(resource, verb, f, { own: true, recent: true, ended: false }), false, `${verb} ${resource}`);
     }
   }
 });

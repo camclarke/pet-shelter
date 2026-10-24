@@ -41,7 +41,7 @@ test('isAdmin() is coordination or higher, built on hasRole(), in BOTH rule file
   assert.match(STORAGE, /function isAdmin\(\) \{\s*return request\.auth != null && \(hasRole\('admin'\) \|\| isSuper\(\) \|\| isShelterOwner\(\)\);\s*\}/);
   // Nothing reads a claim by name any more except through hasRole().
   for (const [name, src] of [['firestore.rules', FIRESTORE], ['storage.rules', STORAGE]] as const) {
-    assert.doesNotMatch(src, /request\.auth\.token\.(admin|su|owner|rescuer|events)\b/, `${name} reads a role claim directly`);
+    assert.doesNotMatch(src, /request\.auth\.token\.(admin|su|owner|finance|rescuer|events)\b/, `${name} reads a role claim directly`);
   }
 });
 
@@ -58,6 +58,34 @@ test('the role helpers and every new rule cost no document read', () => {
   assert.doesNotMatch(block(FIRESTORE, 'match /petDrafts/{draftId} {', 'match /registerEntries/{no} {'), DOCUMENT_READ);
   assert.doesNotMatch(block(FIRESTORE, 'match /events/{eventId} {', 'match /{document=**} {'), DOCUMENT_READ);
   assert.doesNotMatch(block(STORAGE, 'function hasRole(role)', 'match /pets/{petId}/{fileName} {'), DOCUMENT_READ);
+});
+
+test('Tesorería: isFinance() is hasRole(finance), and is used ONLY inside the donationSettings block', () => {
+  assert.match(FIRESTORE, /function isFinance\(\) \{\s*return hasRole\('finance'\);\s*\}/);
+  const donations = block(FIRESTORE, 'match /donationSettings/current {', 'match /{document=**} {');
+  const outside = FIRESTORE.replace(donations, '').replace(/function isFinance\(\) \{[^}]*\}/, '');
+  assert.doesNotMatch(outside, /isFinance\(\)/, 'isFinance() used outside the donationSettings block');
+  assert.equal((donations.match(/isFinance\(\)/g) ?? []).length, 2, 'pending and history, nothing else');
+  // isAdmin() still does not include it (the exact definition is pinned above).
+  assert.doesNotMatch(block(FIRESTORE, 'function isAdmin()', '}'), /finance|isFinance/);
+  // Storage has no finance condition at all: donations/** falls to its catch-all deny.
+  assert.doesNotMatch(STORAGE, /finance/);
+});
+
+test('donationSettings: current is public read; pending and history are Tesorería + su; no client writes', () => {
+  const donations = block(FIRESTORE, 'match /donationSettings/current {', 'match /{document=**} {');
+  const allows = [...donations.matchAll(/allow ([a-z, ]+): if ([^;]+);/g)].map((m) => `${m[1]}: ${m[2]!.trim()}`);
+  assert.deepEqual(allows, [
+    'read: true',
+    'write: false',
+    'read: isFinance() || isSuper()',
+    'write: false',
+    'read: isFinance() || isSuper()',
+    'write: false',
+  ]);
+  assert.match(donations, /match \/pending\/\{pendingId\} \{/);
+  assert.match(donations, /match \/history\/\{entryId\} \{/);
+  assert.doesNotMatch(donations, DOCUMENT_READ);
 });
 
 test('roleAudit: read by the superuser, written by no client', () => {

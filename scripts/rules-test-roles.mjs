@@ -22,8 +22,11 @@
  * ── Personas ──────────────────────────────────────────────────────────────
  * anonymous, a signed-in account with no role, rescuer A, rescuer B, event
  * staff, a rescuer who is also event staff, coordination (`admin`), the shelter
- * owner, the superuser — plus two near-misses that must grant nothing: the
- * STRING "true" as a claim, and every role explicitly `false`.
+ * owner, the superuser, Tesorería alone, with coordination and with the
+ * superuser — plus two near-misses that must grant nothing: the STRING "true"
+ * as a claim, and every role explicitly `false`. Donation details
+ * (`donationSettings/current` and its `pending` and `history`) are covered
+ * for every persona, on every verb.
  *
  * ── What it CANNOT check ──────────────────────────────────────────────────
  * A real `list` QUERY. The test API evaluates one hypothetical document, not a
@@ -46,7 +49,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { GoogleAuth } from 'google-auth-library';
 
-import { COORDINATOR_PLUS, dataAllows, hasAnyRole, rolesFromClaims } from '../src/config/roles.ts';
+import { COORDINATOR_PLUS, dataAllows, hasAnyRole, publicCanRead, rolesFromClaims } from '../src/config/roles.ts';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -95,14 +98,23 @@ const RESCUER_EVENTS = persona('rescuer + event staff', 'nightprobe-roles-both',
 const ADMIN = persona('coordination (admin)', 'nightprobe-roles-admin', { admin: true });
 const OWNER = persona('shelter owner', 'nightprobe-roles-owner', { owner: true });
 const SU = persona('superuser', 'nightprobe-roles-su', { su: true });
+// Tesorería (2026-10-24): donation details only. Alone, with coordination
+// (must still be refused nothing coordination has, and gain nothing beyond
+// donations), and with su.
+const FINANCE = persona('Tesorería (finance)', 'nightprobe-roles-finance', { finance: true });
+const FINANCE_ADMIN = persona('Tesorería + coordination', 'nightprobe-roles-finance-admin', { finance: true, admin: true });
+const FINANCE_SU = persona('Tesorería + superuser', 'nightprobe-roles-finance-su', { finance: true, su: true });
 const STRING_CLAIMS = persona('every role as the STRING "true"', 'nightprobe-roles-string', {
-  su: 'true', owner: 'true', admin: 'true', rescuer: 'true', events: 'true',
+  su: 'true', owner: 'true', admin: 'true', finance: 'true', rescuer: 'true', events: 'true',
 });
 const FALSE_CLAIMS = persona('every role explicitly false', 'nightprobe-roles-false', {
-  su: false, owner: false, admin: false, rescuer: false, events: false,
+  su: false, owner: false, admin: false, finance: false, rescuer: false, events: false,
 });
 
-const PERSONAS = [ANON, USER, RESCUER_A, RESCUER_B, EVENTS, RESCUER_EVENTS, ADMIN, OWNER, SU, STRING_CLAIMS, FALSE_CLAIMS];
+const PERSONAS = [
+  ANON, USER, RESCUER_A, RESCUER_B, EVENTS, RESCUER_EVENTS, ADMIN, OWNER, SU,
+  FINANCE, FINANCE_ADMIN, FINANCE_SU, STRING_CLAIMS, FALSE_CLAIMS,
+];
 
 // The near-miss personas must grant nothing in the matrix too, or the
 // expectations below would be computed from a wrong premise.
@@ -339,6 +351,45 @@ for (const p of PERSONAS) {
   add(`[${p.name}] edit a roleAudit entry`, dataAllows('roleAudit', 'update', p.roles),
     req('update', p, auditPath, { ...auditEntry, action: 'revoke' }), auditEntry);
   add(`[${p.name}] delete a roleAudit entry`, dataAllows('roleAudit', 'delete', p.roles), req('delete', p, auditPath), auditEntry);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// donationSettings — current (public), pending and history (Tesorería + su)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Expectations: a read is allowed when the resource is public
+// (`publicCanRead`) or the matrix grants it to the persona's roles; every
+// write is whatever the matrix says, which for donations is NOTHING — only the
+// routes write, through the Admin SDK. The owner and coordination are
+// deliberately DENIED pending and history.
+
+// Fixture data only — never a real account.
+const METHOD = {
+  kind: 'bank', bankName: 'Banco de Prueba', accountHolder: 'Titular de Prueba', accountNumber: '0000000000',
+  accountType: 'caja de ahorro', currency: 'BOB', note: '',
+};
+const DONATION_DOCS = [
+  ['donationCurrent', 'donationSettings/current', `${DOCS}/donationSettings/current`,
+    { methods: [METHOD], version: 1, updatedAt: EARLIER, active: true, qrPath: null, qrExpiresAt: null }],
+  ['donationPending', 'donationSettings/current/pending/{id}', `${DOCS}/donationSettings/current/pending/nightprobe-p1`,
+    { proposedBy: FINANCE.uid, status: 'pending', proposal: { methods: [METHOD], active: true, qrExpiresAt: null, qrAction: 'keep' }, qrPath: null }],
+  ['donationHistory', 'donationSettings/current/history/{id}', `${DOCS}/donationSettings/current/history/v000001`,
+    { kind: 'confirmed', pendingId: 'nightprobe-p1', version: 1, proposedBy: FINANCE.uid, decidedBy: SU.uid }],
+];
+for (const p of PERSONAS) {
+  const tag = `[${p.name}]`;
+  for (const [resource, label, path, data] of DONATION_DOCS) {
+    const canRead = publicCanRead(resource) || dataAllows(resource, 'read', p.roles);
+    add(`${tag} get ${label}`, canRead, req('get', p, path), data);
+    add(`${tag} list ${label}`, canRead, req('list', p, path), data);
+    add(`${tag} get a MISSING ${label}`, canRead, req('get', p, path));
+    add(`${tag} create ${label}`, dataAllows(resource, 'create', p.roles), req('create', p, path, data));
+    add(`${tag} update ${label}`, dataAllows(resource, 'update', p.roles),
+      req('update', p, path, { ...data, active: false }), data);
+    add(`${tag} delete ${label}`, dataAllows(resource, 'delete', p.roles), req('delete', p, path), data);
+  }
+  // A path under donationSettings that is not one of the three is default-denied.
+  add(`${tag} get donationSettings/other`, false, req('get', p, `${DOCS}/donationSettings/other`), { x: 1 });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
