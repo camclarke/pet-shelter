@@ -5,7 +5,7 @@
  * every rule is unit-tested.
  *
  * ═══ WHO ════════════════════════════════════════════════════════════════════
- * Tesorería (`finance`) and the superuser (`su`) may view, propose, confirm and
+ * Tesorería (`finance`), the shelter owner (`owner`) and the superuser (`su`) may view, propose, confirm and
  * reject. NOBODY confirms or rejects their own proposal: Tesorería confirms the
  * superuser's, the superuser confirms Tesorería's (owner decision 2026-10-24).
  * Until a second eligible person exists, a proposal simply waits and the
@@ -14,14 +14,14 @@
  *
  * ═══ WHERE ══════════════════════════════════════════════════════════════════
  *   donationSettings/current                 confirmed details, PUBLIC, no uid
- *   donationSettings/current/pending/{id}    proposals (Tesorería + su)
- *   donationSettings/current/history/{id}    append-only audit (Tesorería + su)
+ *   donationSettings/current/pending/{id}    proposals (Tesorería + owner + su)
+ *   donationSettings/current/history/{id}    append-only audit (Tesorería + owner + su)
  *   Storage donations/qr/{pendingId}.png     QR images, Admin SDK only
  *
  * Only the routes write any of it, through the Admin SDK (`firestore.rules`
  * refuses every client write). The QR objects fall under `storage.rules`'
  * catch-all deny and are served by `/api/donations/qr` (public, confirmed
- * only) and `/api/donations/pending/{id}/qr` (Tesorería + su).
+ * only) and `/api/donations/pending/{id}/qr` (Tesorería + owner + su).
  *
  * ═══ ONE PROPOSAL AT A TIME ═════════════════════════════════════════════════
  * A new proposal SUPERSEDES any open one, in the same transaction that creates
@@ -82,7 +82,7 @@ export interface DonationMethod {
   note: string;
 }
 
-/** What Tesorería or the superuser proposes. Never contains a uid. */
+/** What Tesorería, the shelter owner or the superuser proposes. Never contains a uid. */
 export interface DonationProposal {
   methods: DonationMethod[];
   active: boolean;

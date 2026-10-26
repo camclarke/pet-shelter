@@ -12,7 +12,7 @@ export const metadata: Metadata = {
  * A fully-static App Router page sends `s-maxage=31536000`, and Firebase
  * Hosting would serve this shell frozen for a year. Caching the shell is
  * harmless: the details, proposals and history load client-side after the
- * role is checked, and the rules let only Tesorería and the superuser read
+ * role is checked, and the rules let only Tesorería, the shelter owner and the superuser read
  * the proposals and the history.
  */
 export const revalidate = 300;
