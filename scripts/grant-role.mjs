@@ -4,8 +4,11 @@
  * Roles (the role-based access plan of 2026-10-22; table in
  * `src/config/roles.ts`):
  *
- *   su       Administración general   everything operational + grants roles
- *   owner    Responsable del refugio  everything operational (no donation rights)
+ *   su       Administración general   everything, grants every role but su
+ *                                     on /admin/roles; su only here
+ *   owner    Responsable del refugio  everything operational + donations +
+ *                                     grants admin/finance/rescuer/events on
+ *                                     /admin/roles (plan §12)
  *   admin    Coordinación             everything operational (the claim used
  *                                     since 2026-08-23 — unchanged)
  *   finance  Tesorería                donation details only: view, propose,
@@ -13,11 +16,13 @@
  *   rescuer  Rescatista               their own unpublished intake drafts
  *   events   Equipo de eventos        events that have not ended
  *
- * ── Why a script and not a screen ──────────────────────────────────────────
- * Same reason as `grant-admin.mjs`, which now delegates here: a claim can only
- * be written by the Admin SDK, and an HTTP endpoint that writes one would be
- * the most powerful thing in the system, reachable from any browser. Running
- * this needs the project's credentials on this machine (plan D8).
+ * ── The script and the screen ──────────────────────────────────────────────
+ * Until 2026-10-26 this was the only way to change a role (plan D8). Since
+ * PR-3 (plan §12) the owner and the superuser also change every role but `su`
+ * on /admin/roles, through `/api/roles/change`. Both decide with the SAME
+ * pure function, `decideRoleChange()` in `src/lib/role-grants.ts`, so their
+ * guardrails cannot drift; the script calls it as the superuser. `su` itself
+ * stays script-only, on its own path below, locked to one email.
  *
  * ── What it guarantees ─────────────────────────────────────────────────────
  *   - Claims are MERGED, one key at a time; a revoke deletes the key rather
@@ -29,7 +34,7 @@
  *   - Every change writes `roleAudit/{auto}` through the Admin SDK — BEFORE
  *     the change (`outcome: 'attempted'`) and again after the read-back
  *     (`outcome: 'applied'`), so a change can never happen unlogged.
- *   - It refuses to revoke the last `su`, refuses unknown roles, and refuses a
+ *   - It refuses to revoke the last `su` or the last `owner`, refuses unknown roles, and refuses a
  *     claims object over Firebase's 1000-byte limit.
  *   - It grants `su` ONLY to the email in `_local/su-email` (gitignored; one
  *     line holding the address, `#` comments allowed). The check runs right
@@ -65,6 +70,8 @@ import {
   auditEntry,
   changesAnything,
   claimsBytes,
+  countOwners,
+  decideRoleChange,
   nextClaims,
   parseGrantArgs,
   parseSuEmailFile,
@@ -74,6 +81,21 @@ import {
 } from '../src/lib/role-grants.ts';
 
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCLOUD_PROJECT;
+
+/**
+ * The caller uid the script passes to `decideRoleChange()`. Firebase uids are
+ * at most 128 characters of letters, digits and a few symbols, never `:` or
+ * a space, so no real account can equal it and the self-check cannot fire.
+ */
+const SCRIPT_CALLER_UID = 'script: grant-role.mjs';
+
+/** What each refusal of `decideRoleChange()` means on the command line. */
+const SCRIPT_REFUSALS = {
+  'not-allowed-role': 'That role cannot be changed this way.',
+  'target-is-owner': 'Only the superuser may change an account holding owner.',
+  'last-owner': 'Refusing to revoke the LAST owner. Grant owner to a second account first, then revoke this one.',
+  'claims-too-large': `The claims would be over Firebase's ${CLAIMS_MAX_BYTES}-byte limit.`,
+};
 
 function fail(message) {
   console.error(`\n  ✗ ${message}\n`);
@@ -203,21 +225,48 @@ async function main() {
   }
 
   const action = command.mode;
-  if (!changesAnything(before, role, action)) {
+  const nothingToDo = () =>
     console.log(`\n  nothing to do — this account ${action === 'grant' ? 'already holds' : 'does not hold'} ${role}.\n`);
-    return;
-  }
 
-  if (action === 'revoke' && role === 'su') {
-    const supers = (await allUsers(auth)).filter((u) => u.customClaims?.su === true).map((u) => u.uid);
-    if (wouldRemoveLastSuper(supers, user.uid, role, action)) {
-      fail('Refusing to revoke the LAST su. Grant su to a second account first, then revoke this one.');
+  if (role === 'su') {
+    // ── su: the script's own path, and the ONLY way su changes ─────────────
+    // (the email lock ran above; the screen can never grant or revoke su).
+    if (!changesAnything(before, role, action)) {
+      nothingToDo();
+      return;
+    }
+    if (action === 'revoke') {
+      const supers = (await allUsers(auth)).filter((u) => u.customClaims?.su === true).map((u) => u.uid);
+      if (wouldRemoveLastSuper(supers, user.uid, role, action)) {
+        fail('Refusing to revoke the LAST su. Grant su to a second account first, then revoke this one.');
+      }
+    }
+    const bytes = claimsBytes(nextClaims(before, role, action));
+    if (bytes > CLAIMS_MAX_BYTES) fail(`The claims would be ${bytes} bytes; Firebase allows ${CLAIMS_MAX_BYTES}.`);
+  } else {
+    // ── every other role: the SAME decision the screen makes ───────────────
+    // decideRoleChange() as the superuser, `via: 'script'` (which may still
+    // change an account holding su — the superuser's own tool). The caller
+    // uid can never equal a real uid, so the self-check never fires here.
+    const ownersCount = countOwners((await allUsers(auth)).map((u) => ({ claims: u.customClaims })));
+    const decision = decideRoleChange({
+      caller: { uid: SCRIPT_CALLER_UID, roles: rolesFromClaims({ su: true }) },
+      target: { uid: user.uid, claims: before },
+      role,
+      action,
+      ownersCount,
+      via: 'script',
+    });
+    if (!decision.ok) {
+      if (decision.reason === 'no-change') {
+        nothingToDo();
+        return;
+      }
+      fail(SCRIPT_REFUSALS[decision.reason] ?? `Refused: ${decision.reason}.`);
     }
   }
 
   const after = nextClaims(before, role, action);
-  const bytes = claimsBytes(after);
-  if (bytes > CLAIMS_MAX_BYTES) fail(`The claims would be ${bytes} bytes; Firebase allows ${CLAIMS_MAX_BYTES}.`);
 
   // ── the audit, BEFORE the change ─────────────────────────────────────────
   const db = getFirestore();
@@ -228,6 +277,7 @@ async function main() {
     targetUid: user.uid,
     targetEmail: user.email ?? null,
     actor,
+    via: 'script',
     claimsBefore: before,
     claimsAfter: after,
   });

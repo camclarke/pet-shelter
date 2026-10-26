@@ -239,6 +239,8 @@ const DELEGATED_ROUTES: Record<string, string> = {
   'src/app/api/donations/confirm/route.ts': 'src/lib/donations-handler.ts',
   'src/app/api/donations/reject/route.ts': 'src/lib/donations-handler.ts',
   'src/app/api/donations/pending/[pendingId]/qr/route.ts': 'src/lib/donations-handler.ts',
+  'src/app/api/roles/staff/route.ts': 'src/lib/role-admin-handler.ts',
+  'src/app/api/roles/change/route.ts': 'src/lib/role-admin-handler.ts',
 };
 
 /**
@@ -310,16 +312,21 @@ const ROLE_ROUTES: Record<string, { roles: string; why: string }> = {
     roles: "[...COORDINATOR_PLUS, 'rescuer']",
     why: 'rescuers photograph intakes and may ask for suggestions (plan D7)',
   },
-  // Donations: Tesorería and the superuser, NOT coordination (2026-10-24).
+  // Donations: Tesorería, the owner and the superuser, NOT coordination
+  // (2026-10-24; the owner added 2026-10-26, plan §12).
   // One `requireRole(` in donations-handler.ts, inside `guard()`, which every
   // handler there calls first (donations-guards.test.ts pins that).
-  'src/app/api/donations/propose/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería or su propose details' },
-  'src/app/api/donations/confirm/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería or su, never the proposer' },
-  'src/app/api/donations/reject/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería or su, never the proposer' },
+  'src/app/api/donations/propose/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería, owner or su propose details' },
+  'src/app/api/donations/confirm/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería, owner or su, never the proposer' },
+  'src/app/api/donations/reject/route.ts': { roles: 'DONATION_ROLES', why: 'Tesorería, owner or su, never the proposer' },
   'src/app/api/donations/pending/[pendingId]/qr/route.ts': {
     roles: 'DONATION_ROLES',
-    why: 'the proposer uploads, Tesorería or su view, a proposal’s QR',
+    why: 'the proposer uploads, Tesorería, owner or su view, a proposal’s QR',
   },
+  // Roles (plan §12): the owner and the superuser. One `requireRole(` in
+  // role-admin-handler.ts, inside `guard()` (role-admin-handler.test.ts pins it).
+  'src/app/api/roles/staff/route.ts': { roles: 'ROLE_MANAGERS', why: 'the owner or su list the team' },
+  'src/app/api/roles/change/route.ts': { roles: 'ROLE_MANAGERS', why: 'the owner or su change another person’s role' },
 };
 
 /** The guard a staff route calls first: requireAdmin, or requireRole with a named list. */

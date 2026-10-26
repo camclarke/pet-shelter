@@ -1,8 +1,9 @@
 /**
- * The decisions `scripts/grant-role.mjs` makes, kept pure so each is tested
- * without firebase-admin: what the command line asks for, what the claims
- * become, whether a revoke would leave the project with no superuser, and
- * what the audit entry says.
+ * The decisions `scripts/grant-role.mjs` and `/api/roles/change` make, kept
+ * pure so each is tested without firebase-admin: what the command line asks
+ * for, what the claims become, whether a revoke would leave the project with
+ * no superuser, who may change whose roles (`decideRoleChange`, plan §12),
+ * and what the audit entry says.
  *
  * ── Why claims are MERGED ──────────────────────────────────────────────────
  * `setCustomUserClaims()` REPLACES the whole claims object. Passing
@@ -25,7 +26,7 @@
  * holds the project's credentials, who can call the Admin SDK directly.
  */
 
-import { ROLE_KEYS, isRoleKey, type RoleKey } from '@/config/roles';
+import { GRANTABLE_BY, ROLE_KEYS, isRoleKey, managerLevel, rolesFromClaims, type RoleKey, type Roles } from '@/config/roles';
 
 /** Firebase: "The payload must not exceed 1000 bytes." (custom-claims docs) */
 export const CLAIMS_MAX_BYTES = 1000;
@@ -121,6 +122,112 @@ export function wouldRemoveLastSuper(
   return remaining.size === 0;
 }
 
+/** How many accounts hold `owner` exactly `true`. The input `decideRoleChange` needs for G3. */
+export function countOwners(accounts: readonly { claims: ClaimsObject | null | undefined }[]): number {
+  return accounts.filter((account) => account.claims?.owner === true).length;
+}
+
+// ─── who may change whose roles (plan §12, PR-3) ─────────────────────────────
+
+/**
+ * Why a role change is refused. One per guardrail of plan §12.2, plus the two
+ * the script always had:
+ *
+ *  - `forbidden`         the caller holds neither `owner` nor `su`.
+ *  - `not-allowed-role`  G1: the role is not in `GRANTABLE_BY` for the
+ *                        caller's highest manager role. `su` is ALWAYS refused
+ *                        here: it is granted only by the script's own path.
+ *  - `self`              G3: nobody changes their own roles.
+ *  - `target-is-su`      G4: an account holding `su` is untouchable in the app.
+ *  - `target-is-owner`   G4: only the superuser changes an account holding `owner`.
+ *  - `no-change`         the grant is already held, or the revoke is of a key
+ *                        that is not there (`changesAnything()`).
+ *  - `last-owner`        G3: revoking `owner` from the last account holding it.
+ *  - `claims-too-large`  the claims would pass Firebase's 1000-byte limit.
+ */
+export const ROLE_CHANGE_REFUSALS = [
+  'forbidden',
+  'not-allowed-role',
+  'self',
+  'target-is-su',
+  'target-is-owner',
+  'no-change',
+  'last-owner',
+  'claims-too-large',
+] as const;
+export type RoleChangeRefusal = (typeof ROLE_CHANGE_REFUSALS)[number];
+
+export type RoleChangeDecision = { ok: true } | { ok: false; reason: RoleChangeRefusal };
+
+export interface RoleChangeInput {
+  /** Who asks: their uid and every role their VERIFIED token carries. */
+  caller: { uid: string; roles: Roles };
+  /**
+   * Whose roles change: their uid and their CURRENT claims, read from Auth
+   * just now. Claims rather than roles, because `no-change` and
+   * `claims-too-large` are questions about the claims object itself.
+   */
+  target: { uid: string; claims: ClaimsObject | null | undefined };
+  role: RoleKey;
+  action: 'grant' | 'revoke';
+  /** Accounts holding `owner` exactly true right now, the target included (`countOwners()`). */
+  ownersCount: number;
+  /**
+   * `screen` (the default) applies every guardrail. `script` is
+   * `scripts/grant-role.mjs`, run with the project's credentials: it is the
+   * superuser's own tool, so it may change an account that holds `su` — the
+   * superuser giving themselves Tesorería, say (plan LOG 2026-10-24). It is
+   * still refused a grant of `su` here; the script grants `su` only through
+   * its email-locked path, which never calls this.
+   */
+  via?: 'screen' | 'script';
+}
+
+/**
+ * Whether `caller` may `action` `role` on `target`. The ONE place the
+ * guardrails of plan §12.2 are decided: `/api/roles/change`, the staff list's
+ * per-account `editable` and `scripts/grant-role.mjs` all call it, so their
+ * rules cannot drift. Pure.
+ *
+ * The checks run in this order, and the first that fails is the reason:
+ * forbidden → not-allowed-role → self → target-is-su → target-is-owner →
+ * no-change → last-owner → claims-too-large. The protections come before
+ * `no-change` on purpose: asking about a protected account must not tell the
+ * caller which roles it holds.
+ */
+export function decideRoleChange(input: RoleChangeInput): RoleChangeDecision {
+  const { caller, target, role, action, ownersCount } = input;
+  const via = input.via ?? 'screen';
+
+  const level = managerLevel(caller.roles);
+  if (level === null) return { ok: false, reason: 'forbidden' };
+
+  // G1. `su` is never in GRANTABLE_BY, and is refused here by name as well,
+  // so widening that table can never open it.
+  if (role === 'su' || !GRANTABLE_BY[level].includes(role)) return { ok: false, reason: 'not-allowed-role' };
+
+  // G3: nobody changes their own roles.
+  if (caller.uid === target.uid) return { ok: false, reason: 'self' };
+
+  // G4: untouchable accounts.
+  const targetRoles = rolesFromClaims(target.claims);
+  if (via === 'screen' && targetRoles.su) return { ok: false, reason: 'target-is-su' };
+  if (targetRoles.owner && level !== 'su') return { ok: false, reason: 'target-is-owner' };
+
+  if (!changesAnything(target.claims, role, action)) return { ok: false, reason: 'no-change' };
+
+  // G3: never the last owner. Only a revoke of an owner that IS one can
+  // reduce the count; a stray non-true `owner` key is cleaned up freely.
+  if (role === 'owner' && action === 'revoke' && targetRoles.owner && ownersCount <= 1) {
+    return { ok: false, reason: 'last-owner' };
+  }
+
+  if (claimsBytes(nextClaims(target.claims, role, action)) > CLAIMS_MAX_BYTES) {
+    return { ok: false, reason: 'claims-too-large' };
+  }
+  return { ok: true };
+}
+
 // ─── the superuser lock ──────────────────────────────────────────────────────
 
 /**
@@ -195,8 +302,15 @@ export interface RoleAuditEntry {
   role: RoleKey;
   targetUid: string;
   targetEmail: string | null;
-  /** Who ran the script: the ADC identity, or the OS user when it cannot be read. */
+  /**
+   * Who made the change. The script: the ADC identity, or the OS user when it
+   * cannot be read. The screen: the caller's email, or their uid without one.
+   */
   actor: string;
+  /** The screen only: the caller's uid, from the verified token. */
+  actorUid?: string;
+  /** Where the change came from. Absent on entries written before 2026-10-26 (all by the script). */
+  via?: 'script' | 'screen';
   claimsBefore: ClaimsObject;
   claimsAfter: ClaimsObject;
   /** `attempted` is written BEFORE the change, `applied` after it is read back. */

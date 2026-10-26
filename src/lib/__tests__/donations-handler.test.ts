@@ -230,9 +230,9 @@ test('a revoked or invalid token → 401, on every handler', async () => {
   }
 });
 
-test('every role but Tesorería and su → 403 forbidden — the owner and coordination included', async () => {
+test('every role but Tesorería, the owner and su → 403 forbidden — coordination included', async () => {
   for (const [name, call] of HANDLERS) {
-    for (const token of ['owner', 'admin', 'rescuer', 'events', 'user']) {
+    for (const token of ['admin', 'rescuer', 'events', 'user']) {
       const w = world();
       const f = await failureOf(await call(w, token));
       assert.deepEqual([f.status, f.error], [403, 'forbidden'], `${name} as ${token}`);
@@ -361,6 +361,40 @@ test('confirm: cross confirmation works BOTH ways — Tesorería confirms su’s
     assert.equal(res.status, 200, `${confirmer} on ${proposer}`);
     assert.deepEqual(await res.json(), { version: 1 });
   }
+});
+
+test('the owner (plan §12, 2026-10-26): proposes, confirms and rejects another person’s proposal, sees a pending QR — never their own', async () => {
+  // propose
+  const wp = world();
+  const res = await propose(wp, 'owner');
+  assert.equal(res.status, 201);
+  const [stored] = [...wp.pending.values()];
+  assert.equal(stored!.proposedBy, 'uid-owner');
+
+  // confirm and reject someone else's, both ways round
+  for (const [proposer, confirmer] of [['uid-fin', 'owner'], ['uid-owner', 'fin'], ['uid-owner', 'su']] as const) {
+    const w = world();
+    seedPending(w, 'p1', proposer);
+    assert.equal((await confirm(w, confirmer, 'p1')).status, 200, `${confirmer} confirms ${proposer}`);
+    const r = world();
+    seedPending(r, 'p1', proposer);
+    assert.equal((await reject(r, confirmer, 'p1')).status, 200, `${confirmer} rejects ${proposer}`);
+  }
+
+  // never their own
+  for (const call of [confirm, reject]) {
+    const w = world();
+    seedPending(w, 'p1', 'uid-owner');
+    const f = await failureOf(await call(w, 'owner', 'p1'));
+    assert.deepEqual([f.status, f.error], [403, 'own-proposal']);
+    assert.equal(w.pending.get('p1')!.status, 'pending');
+  }
+
+  // the pending QR
+  const wq = world();
+  seedPending(wq, 'p1', 'uid-fin', { qrPath: 'donations/qr/p1.png' });
+  wq.objects.set('donations/qr/p1.png', PNG);
+  assert.equal((await handleDonationPendingQr(get('/x', 'owner'), { pendingId: 'p1' }, deps(wq))).status, 200);
 });
 
 test('confirm: ONE transaction writes current (version + 1, no uid), appends history, and marks the proposal confirmed', async () => {

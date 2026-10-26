@@ -40,11 +40,12 @@ test('the six role keys, in order, and the coordination set', () => {
   assert.deepEqual([...COORDINATOR_PLUS].sort(), ['admin', 'owner', 'su']);
 });
 
-test('Tesorería is NOT coordination: finance stays out of COORDINATOR_PLUS, and donations are finance + su only', () => {
+test('Tesorería is NOT coordination: finance stays out of COORDINATOR_PLUS, and donations are finance + owner + su', () => {
   assert.equal(COORDINATOR_PLUS.includes('finance'), false);
   assert.equal(isCoordinatorPlus(only('finance')), false);
-  assert.deepEqual([...DONATION_ROLES].sort(), ['finance', 'su']);
-  assert.deepEqual([...SECTION_ROLES.donations].sort(), ['finance', 'su']);
+  // The owner joined on 2026-10-26 (plan §12, D20); coordination did not.
+  assert.deepEqual([...DONATION_ROLES].sort(), ['finance', 'owner', 'su']);
+  assert.deepEqual([...SECTION_ROLES.donations].sort(), ['finance', 'owner', 'su']);
   // A treasurer is staff, so Mi cuenta refuses to delete the account.
   assert.equal(isStaff(only('finance')), true);
 });
@@ -150,15 +151,20 @@ test('every section has roles and a route under /admin', () => {
   assert.ok(isAdminSection('events'));
   assert.ok(isAdminSection('donations'));
   assert.equal(SECTION_HREF.donations, '/admin/donations');
+  assert.ok(isAdminSection('roles'));
+  assert.equal(SECTION_HREF.roles, '/admin/roles');
   assert.equal(isAdminSection('finance'), false);
 });
 
-const OPERATIONAL = ADMIN_SECTIONS.filter((s) => s !== 'donations');
+const OPERATIONAL = ADMIN_SECTIONS.filter((s) => s !== 'donations' && s !== 'roles');
 
-/** Plan §4 (donations revised 2026-10-24), row by row: which sections each single role opens. */
+/**
+ * Plan §4 (donations revised 2026-10-24; the owner made GCP-Owner-like by
+ * §12, 2026-10-26), row by row: which sections each single role opens.
+ */
 const EXPECTED_SECTIONS: Record<RoleKey | 'none', AdminSection[]> = {
   su: [...ADMIN_SECTIONS],
-  owner: OPERATIONAL,
+  owner: [...OPERATIONAL, 'donations', 'roles'],
   admin: OPERATIONAL,
   finance: ['dashboard', 'donations'],
   rescuer: ['dashboard', 'intake'],
@@ -198,23 +204,27 @@ test('coordination or higher may do every verb the matrix lists for any resource
   }
 });
 
-test('roleAudit: only the superuser reads it, and nobody writes it through the rules', () => {
+test('roleAudit: only the owner and the superuser read it, and nobody writes it through the rules', () => {
   for (const role of ROLE_KEYS) {
-    assert.equal(dataAllows('roleAudit', 'read', only(role)), role === 'su', role);
+    assert.equal(dataAllows('roleAudit', 'read', only(role)), role === 'su' || role === 'owner', role);
     for (const verb of ['create', 'update', 'delete'] as const) {
       assert.equal(dataAllows('roleAudit', verb, only(role)), false, `${role} ${verb}`);
     }
   }
 });
 
-test('donations: current is public to read; pending and history are Tesorería + su; no client writes any of it', () => {
+test('donations: current is public to read; pending and history are Tesorería + owner + su; no client writes any of it', () => {
   assert.deepEqual([...PUBLIC_READ], ['donationCurrent']);
   assert.ok(publicCanRead('donationCurrent'));
   assert.equal(publicCanRead('donationPending'), false);
   assert.equal(publicCanRead('donationHistory'), false);
   for (const role of ROLE_KEYS) {
     for (const resource of ['donationPending', 'donationHistory'] as const) {
-      assert.equal(dataAllows(resource, 'read', only(role)), role === 'finance' || role === 'su', `${role} reads ${resource}`);
+      assert.equal(
+        dataAllows(resource, 'read', only(role)),
+        role === 'finance' || role === 'owner' || role === 'su',
+        `${role} reads ${resource}`,
+      );
     }
     for (const resource of ['donationCurrent', 'donationPending', 'donationHistory'] as const) {
       for (const verb of ['create', 'update', 'delete'] as const) {
@@ -222,8 +232,10 @@ test('donations: current is public to read; pending and history are Tesorería +
       }
     }
   }
-  // The owner explicitly has NO donation rights any more (2026-10-24).
-  assert.equal(dataAllows('donationPending', 'read', only('owner', 'admin')), false);
+  // The owner regained donation rights on 2026-10-26 (plan §12, D20);
+  // coordination alone still has none.
+  assert.equal(dataAllows('donationPending', 'read', only('owner', 'admin')), true);
+  assert.equal(dataAllows('donationPending', 'read', only('admin')), false);
 });
 
 test('Tesorería opens nothing operational in the matrix', () => {

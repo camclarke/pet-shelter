@@ -23,7 +23,7 @@
  * anonymous, a signed-in account with no role, rescuer A, rescuer B, event
  * staff, a rescuer who is also event staff, coordination (`admin`), the shelter
  * owner, the superuser, Tesorería alone, with coordination and with the
- * superuser — plus two near-misses that must grant nothing: the STRING "true"
+ * superuser, the owner with coordination and with the superuser — plus two near-misses that must grant nothing: the STRING "true"
  * as a claim, and every role explicitly `false`. Donation details
  * (`donationSettings/current` and its `pending` and `history`) are covered
  * for every persona, on every verb.
@@ -104,6 +104,10 @@ const SU = persona('superuser', 'nightprobe-roles-su', { su: true });
 const FINANCE = persona('Tesorería (finance)', 'nightprobe-roles-finance', { finance: true });
 const FINANCE_ADMIN = persona('Tesorería + coordination', 'nightprobe-roles-finance-admin', { finance: true, admin: true });
 const FINANCE_SU = persona('Tesorería + superuser', 'nightprobe-roles-finance-su', { finance: true, su: true });
+// PR-3 (plan §12, 2026-10-26): the owner reads donations and the role audit.
+// With coordination, and with the superuser, to show the grants add up.
+const OWNER_ADMIN = persona('shelter owner + coordination', 'nightprobe-roles-owner-admin', { owner: true, admin: true });
+const OWNER_SU = persona('shelter owner + superuser', 'nightprobe-roles-owner-su', { owner: true, su: true });
 const STRING_CLAIMS = persona('every role as the STRING "true"', 'nightprobe-roles-string', {
   su: 'true', owner: 'true', admin: 'true', finance: 'true', rescuer: 'true', events: 'true',
 });
@@ -113,7 +117,7 @@ const FALSE_CLAIMS = persona('every role explicitly false', 'nightprobe-roles-fa
 
 const PERSONAS = [
   ANON, USER, RESCUER_A, RESCUER_B, EVENTS, RESCUER_EVENTS, ADMIN, OWNER, SU,
-  FINANCE, FINANCE_ADMIN, FINANCE_SU, STRING_CLAIMS, FALSE_CLAIMS,
+  FINANCE, FINANCE_ADMIN, FINANCE_SU, OWNER_ADMIN, OWNER_SU, STRING_CLAIMS, FALSE_CLAIMS,
 ];
 
 // The near-miss personas must grant nothing in the matrix too, or the
@@ -353,15 +357,39 @@ for (const p of PERSONAS) {
   add(`[${p.name}] delete a roleAudit entry`, dataAllows('roleAudit', 'delete', p.roles), req('delete', p, auditPath), auditEntry);
 }
 
+// ── PR-3 anchors: FIXED expectations, not computed from the matrix ─────────
+// Plan §12.1 restated from the claims themselves, so a matrix that drifted
+// together with the rules still fails here: the role audit and donation
+// proposals/history are read by `owner` or `su` (and donations also by
+// `finance`) holding the claim exactly true — nobody else, whatever they hold;
+// and no client writes either, ever.
+const holds = (p, key) => p.uid !== null && p.auth.token[key] === true;
+for (const p of PERSONAS) {
+  const auditReader = holds(p, 'owner') || holds(p, 'su');
+  const donationReader = auditReader || holds(p, 'finance');
+  add(`ANCHOR [${p.name}] get roleAudit (owner|su only)`, auditReader, req('get', p, auditPath), auditEntry);
+  add(`ANCHOR [${p.name}] list roleAudit (owner|su only)`, auditReader, req('list', p, auditPath), auditEntry);
+  add(`ANCHOR [${p.name}] create roleAudit (never)`, false, req('create', p, `${DOCS}/roleAudit/nightprobe-audit-2`, auditEntry));
+  add(`ANCHOR [${p.name}] update roleAudit (never)`, false, req('update', p, auditPath, { ...auditEntry, outcome: 'applied' }), auditEntry);
+  add(`ANCHOR [${p.name}] delete roleAudit (never)`, false, req('delete', p, auditPath), auditEntry);
+  for (const sub of ['pending/nightprobe-p1', 'history/v000001']) {
+    const path = `${DOCS}/donationSettings/current/${sub}`;
+    const data = { proposedBy: FINANCE.uid, status: 'pending' };
+    add(`ANCHOR [${p.name}] get donation ${sub.split('/')[0]} (finance|owner|su only)`, donationReader, req('get', p, path), data);
+    add(`ANCHOR [${p.name}] list donation ${sub.split('/')[0]} (finance|owner|su only)`, donationReader, req('list', p, path), data);
+    add(`ANCHOR [${p.name}] write donation ${sub.split('/')[0]} (never)`, false, req('create', p, path, data));
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// donationSettings — current (public), pending and history (Tesorería + su)
+// donationSettings — current (public), pending and history (Tesorería + owner + su)
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Expectations: a read is allowed when the resource is public
 // (`publicCanRead`) or the matrix grants it to the persona's roles; every
 // write is whatever the matrix says, which for donations is NOTHING — only the
-// routes write, through the Admin SDK. The owner and coordination are
-// deliberately DENIED pending and history.
+// routes write, through the Admin SDK. Coordination is deliberately DENIED
+// pending and history; the owner is ALLOWED since PR-3 (plan §12).
 
 // Fixture data only — never a real account.
 const METHOD = {

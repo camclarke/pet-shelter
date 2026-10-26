@@ -2,8 +2,10 @@
  * Staff roles: who may do what in the shelter's panel.
  *
  * ── Where a role lives ─────────────────────────────────────────────────────
- * One custom auth claim per role, each a boolean, set only by
- * `scripts/grant-role.mjs` through the Admin SDK. A claim is already inside the
+ * One custom auth claim per role, each a boolean, set only through the Admin
+ * SDK: by `scripts/grant-role.mjs`, or — for every role but `su` — by the
+ * owner or the superuser through `/api/roles/change` (plan §12, which
+ * reversed D8 for those roles). A claim is already inside the
  * ID token, so `firestore.rules` and `storage.rules` check it for free; a
  * `roles/{uid}` document would cost a billed `get()` on every evaluation and
  * would itself need protecting. (Role-based access plan, 2026-10-22, §2.)
@@ -39,12 +41,56 @@ export type RoleKey = (typeof ROLE_KEYS)[number];
 export const COORDINATOR_PLUS: readonly RoleKey[] = ['admin', 'owner', 'su'];
 
 /**
- * Who may view, propose, confirm and reject donation details: Tesorería and
- * the superuser (owner decision 2026-10-24). Confirming and rejecting also
- * need a caller who is NOT the proposer — `canConfirm()` in
- * `src/lib/donations.ts`; this list is only the role half of that.
+ * Who may view, propose, confirm and reject donation details: Tesorería, the
+ * shelter owner and the superuser. Tesorería and su since 2026-10-24; the
+ * owner since PR-3 (2026-10-26), when «Responsable del refugio» became
+ * GCP-Owner-like (plan §12, D20). Confirming and rejecting also need a caller
+ * who is NOT the proposer — `canConfirm()` in `src/lib/donations.ts`; this
+ * list is only the role half of that.
  */
-export const DONATION_ROLES: readonly RoleKey[] = ['finance', 'su'];
+export const DONATION_ROLES: readonly RoleKey[] = ['finance', 'owner', 'su'];
+
+/**
+ * Who manages other people's roles from the panel (`/admin/roles`, the
+ * `/api/roles/*` routes) and reads the role audit: the shelter owner and the
+ * superuser (plan §12). WHICH roles each may change is `GRANTABLE_BY`; the
+ * guardrails are `decideRoleChange()` in `src/lib/role-grants.ts`.
+ */
+export const ROLE_MANAGERS: readonly RoleKey[] = ['owner', 'su'];
+
+/** The roles that may manage roles, as a type: the keys of `GRANTABLE_BY`. */
+export type RoleManager = 'owner' | 'su';
+
+/**
+ * Which roles each manager may grant or revoke IN THE APP (plan §12.1, G1).
+ *
+ *  - The owner: every operational role and Tesorería, never a peer `owner`
+ *    and never `su` — so a hijacked owner account cannot mint a second one.
+ *  - The superuser: those plus `owner`.
+ *
+ * `su` itself is in NEITHER list: it is granted only by
+ * `scripts/grant-role.mjs`, locked to the email in `_local/su-email`.
+ */
+export const GRANTABLE_BY: Readonly<Record<RoleManager, readonly RoleKey[]>> = {
+  owner: ['admin', 'rescuer', 'events', 'finance'],
+  su: ['admin', 'rescuer', 'events', 'finance', 'owner'],
+};
+
+/**
+ * The highest manager role these roles hold — `su` over `owner` — or null for
+ * someone who manages nobody.
+ */
+export function managerLevel(roles: Roles): RoleManager | null {
+  if (roles.su === true) return 'su';
+  if (roles.owner === true) return 'owner';
+  return null;
+}
+
+/** The roles these roles may grant or revoke in the app: `GRANTABLE_BY` of their highest manager role, or none. */
+export function grantableBy(roles: Roles): readonly RoleKey[] {
+  const level = managerLevel(roles);
+  return level === null ? [] : GRANTABLE_BY[level];
+}
 
 /**
  * Names shown in the panel. Nouns without grammatical gender ("el/la
@@ -135,6 +181,22 @@ export function visibleRoleLabels(roles: Roles): string[] {
     .map((role) => ROLE_LABELS[role]);
 }
 
+/** The role keys a screen may name: every key but `su`. */
+export type VisibleRoleKey = Exclude<RoleKey, 'su'>;
+export const VISIBLE_ROLE_KEYS: readonly VisibleRoleKey[] = ROLE_KEYS.filter(
+  (role): role is VisibleRoleKey => !HIDDEN_ROLES.includes(role),
+);
+
+/** Every role a screen may show, true or false — `su` is not a key at all, so it cannot leak by accident. */
+export type VisibleRoles = Readonly<Record<VisibleRoleKey, boolean>>;
+
+/** `roles` without the hidden ones: what an API may send to a screen. */
+export function visibleRoles(roles: Roles): VisibleRoles {
+  const out = {} as Record<VisibleRoleKey, boolean>;
+  for (const role of VISIBLE_ROLE_KEYS) out[role] = roles[role] === true;
+  return Object.freeze(out);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Sections of the panel
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,6 +212,7 @@ export const ADMIN_SECTIONS = [
   'food',
   'events',
   'donations',
+  'roles',
 ] as const;
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];
 
@@ -161,8 +224,9 @@ export type AdminSection = (typeof ADMIN_SECTIONS)[number];
  * which includes its health card and tag print pages) stays with
  * coordination: a rescuer adds, a coordinator decides.
  *
- * Donations are Tesorería's and the superuser's ONLY — not coordination's,
- * not the owner's (plan §5, revised 2026-10-24).
+ * Donations are Tesorería's, the owner's and the superuser's — not
+ * coordination's (plan §5, revised 2026-10-24; owner added by plan §12).
+ * The role screen is the owner's and the superuser's (plan §12).
  */
 export const SECTION_ROLES: Readonly<Record<AdminSection, readonly RoleKey[]>> = {
   dashboard: [...COORDINATOR_PLUS, 'finance', 'rescuer', 'events'],
@@ -175,6 +239,7 @@ export const SECTION_ROLES: Readonly<Record<AdminSection, readonly RoleKey[]>> =
   food: COORDINATOR_PLUS,
   events: [...COORDINATOR_PLUS, 'events'],
   donations: DONATION_ROLES,
+  roles: ROLE_MANAGERS,
 };
 
 /** The route each section's screen lives at. */
@@ -189,6 +254,7 @@ export const SECTION_HREF: Readonly<Record<AdminSection, string>> = {
   food: '/admin/food',
   events: '/admin/events',
   donations: '/admin/donations',
+  roles: '/admin/roles',
 };
 
 export function isAdminSection(value: unknown): value is AdminSection {
@@ -239,7 +305,9 @@ export type DataVerb = 'read' | 'create' | 'update' | 'delete';
  *  - `medical`    medical records.
  *  - `events`     adoption fairs. Delete is further limited to UNPUBLISHED
  *                 events for everyone; that is not a role question.
- *  - `roleAudit`  the grant script's log, written only by the Admin SDK.
+ *  - `roleAudit`  the role-change log, written only by the Admin SDK (the
+ *                 grant script and `/api/roles/change`). Read by the owner
+ *                 and the superuser (plan §12).
  *  - `petPhotos`  Storage `pets/{petId}/…` and `pets/{petId}/private/…`.
  *  - `donationCurrent`  `donationSettings/current`, the confirmed details.
  *                 PUBLIC read (anyone, signed in or not — see
@@ -247,8 +315,9 @@ export type DataVerb = 'read' | 'create' | 'update' | 'delete';
  *                 writes it, through the Admin SDK.
  *  - `donationPending`  `donationSettings/current/pending/{id}`: proposals.
  *  - `donationHistory`  `donationSettings/current/history/{id}`: append-only.
- *                 Both read by Tesorería and the superuser only, and written
- *                 only by the routes. NOT coordination, NOT the owner.
+ *                 Both read by Tesorería, the owner and the superuser
+ *                 (`DONATION_ROLES`), and written only by the routes. NOT
+ *                 coordination.
  */
 export const DATA_ACCESS = {
   petDrafts: {
@@ -300,7 +369,7 @@ export const DATA_ACCESS = {
     ],
   },
   roleAudit: {
-    read: [{ roles: ['su'], scope: 'any' }],
+    read: [{ roles: ROLE_MANAGERS, scope: 'any' }],
     create: [],
     update: [],
     delete: [],
