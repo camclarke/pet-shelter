@@ -2,7 +2,7 @@ import { handleDonationConfirm } from '@/lib/donations-handler';
 import { donationDeps } from '@/lib/donations-server';
 
 /**
- * POST /api/donations/confirm — `{pendingId}`. Tesorería or the superuser,
+ * POST /api/donations/confirm — `{pendingId}`. Tesorería, the shelter owner or the superuser,
  * NEVER the person who proposed it, makes a proposal live: one transaction
  * writes `donationSettings/current` (version + 1), appends history and marks
  * the proposal confirmed.

@@ -178,6 +178,11 @@ export function AdminDashboard() {
               Donaciones
             </Link>
           )}
+          {canAccess('roles', roles) && (
+            <Link href="/admin/roles" className="btn btn--muted">
+              Roles del equipo
+            </Link>
+          )}
           {canAccess('events', roles) && (
             <Link href="/admin/events" className="btn btn--muted">
               {t.events.navLabel}

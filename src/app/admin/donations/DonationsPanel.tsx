@@ -50,7 +50,7 @@ import { ReauthPrompt } from './ReauthPrompt';
  * (propose, then someone ELSE confirms), and the history.
  *
  * ⚠️ This screen is not the security boundary. `firestore.rules` lets only
- * Tesorería and the superuser read the proposals and the history, and the
+ * Tesorería, the shelter owner and the superuser read the proposals and the history, and the
  * routes decide who may propose, confirm or reject (`donations-handler.ts`);
  * `canConfirm()` here only decides whether to OFFER the buttons.
  *

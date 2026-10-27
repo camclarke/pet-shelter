@@ -224,8 +224,15 @@ test('canConfirm: NOBODY confirms their own proposal, whatever roles they hold',
   }
 });
 
-test('canConfirm: only Tesorería or su, and a missing proposer or caller never passes', () => {
-  for (const role of ['owner', 'admin', 'rescuer', 'events'] as const) {
+test('canConfirm: the owner confirms someone else’s proposal, never their own (plan §12, 2026-10-26)', () => {
+  assert.ok(canConfirm({ callerUid: 'own', callerRoles: only('owner'), proposerUid: 'fin' }));
+  assert.ok(canConfirm({ callerUid: 'fin', callerRoles: only('finance'), proposerUid: 'own' }));
+  assert.equal(canConfirm({ callerUid: 'own', callerRoles: only('owner'), proposerUid: 'own' }), false);
+  assert.equal(canConfirm({ callerUid: 'own', callerRoles: only('owner', 'admin'), proposerUid: 'own' }), false);
+});
+
+test('canConfirm: only Tesorería, the owner or su, and a missing proposer or caller never passes', () => {
+  for (const role of ['admin', 'rescuer', 'events'] as const) {
     assert.equal(canConfirm({ callerUid: 'x', callerRoles: only(role), proposerUid: 'y' }), false, role);
   }
   assert.equal(canConfirm({ callerUid: 'x', callerRoles: NO_ROLES, proposerUid: 'y' }), false);

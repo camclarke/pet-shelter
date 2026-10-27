@@ -41,8 +41,10 @@ service cloud.firestore {
       return hasRole('su');
     }
 
-    // Responsable del refugio: everything operational. No donation rights:
-    // those are Tesorería's (owner decision 2026-10-23).
+    // Responsable del refugio: everything operational, plus donation details
+    // and the role audit — GCP-Owner-like (plan §12, 2026-10-26). Granting
+    // roles is NOT a rule: claims are written only by the Admin SDK, through
+    // /api/roles/change or scripts/grant-role.mjs.
     function isShelterOwner() {
       return hasRole('owner');
     }
@@ -1324,12 +1326,13 @@ service cloud.firestore {
     }
 
     // ── roleAudit/{entryId} ────────────────────────────────────────────────
-    // One document per grant or revoke, written by scripts/grant-role.mjs
-    // through the Admin SDK, which bypasses these rules. No client writes it,
-    // ever: a log that the people it logs can edit is not a log. Only
-    // Administración general reads it.
+    // One document per grant or revoke, written through the Admin SDK — by
+    // scripts/grant-role.mjs or by /api/roles/change — which bypasses these
+    // rules. No client writes it, ever: a log that the people it logs can edit
+    // is not a log. Read by the people who manage roles: the shelter owner and
+    // Administración general (plan §12). NOT coordination.
     match /roleAudit/{entryId} {
-      allow read: if isSuper();
+      allow read: if isShelterOwner() || isSuper();
       allow write: if false;
     }
 
@@ -1342,19 +1345,20 @@ service cloud.firestore {
     //
     // `current`: the confirmed details, public — the /donate page shows them
     // to anyone. It carries no uid. `pending` and `history`: proposals and the
-    // audit trail, with who proposed and who confirmed; Tesorería and the
-    // superuser only. NOT coordination, NOT the owner (plan §5, 2026-10-24).
+    // audit trail, with who proposed and who confirmed; Tesorería, the shelter
+    // owner and the superuser (plan §5, 2026-10-24; the owner added by plan
+    // §12, 2026-10-26). NOT coordination.
     match /donationSettings/current {
       allow read: if true;
       allow write: if false;
 
       match /pending/{pendingId} {
-        allow read: if isFinance() || isSuper();
+        allow read: if isFinance() || isShelterOwner() || isSuper();
         allow write: if false;
       }
 
       match /history/{entryId} {
-        allow read: if isFinance() || isSuper();
+        allow read: if isFinance() || isShelterOwner() || isSuper();
         allow write: if false;
       }
     }

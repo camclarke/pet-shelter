@@ -7,7 +7,7 @@ import { donationDeps } from '@/lib/donations-server';
  *   POST  the proposer uploads it: raw `image/jpeg` or `image/png`, ≤ 2 MB,
  *         once per proposal. Re-encoded to PNG server-side (metadata dropped)
  *         and stored at `donations/qr/{pendingId}.png`.
- *   GET   Tesorería or the superuser views it before confirming.
+ *   GET   Tesorería, the shelter owner or the superuser views it before confirming.
  *         `private, no-store`.
  *
  * `[pendingId]` is the bare id — never `….png`: Firebase Hosting's image

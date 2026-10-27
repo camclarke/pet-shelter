@@ -11,7 +11,7 @@
  * `donations/**`. So these handlers ARE the boundary for writes:
  *
  *   1. `guard()` — `requireRole(…, DONATION_ROLES)`, `checkRevoked`, FIRST:
- *      no token 401; not Tesorería or the superuser 403 forbidden.
+ *      no token 401; not Tesorería, the shelter owner or the superuser 403 forbidden.
  *   2. For every WRITE (propose, QR upload, confirm, reject): a sign-in under
  *      `RECENT_SIGN_IN_MAX_AGE_S` (5 min), else 403 requires-recent-login.
  *      A stolen, still-valid token an hour old cannot redirect donations.
@@ -34,7 +34,7 @@
  *
  * ⚠️ `sharp` DECODES the uploaded image, which `jpeg-inspect.ts` avoids for ID
  * photos (libvips advisory 2026-09-11). Accepted here (plan D19): only
- * Tesorería and the superuser can reach the decoder, after a recent sign-in,
+ * Tesorería, the shelter owner and the superuser can reach the decoder, after a recent sign-in,
  * and the route caps the input's pixels. A PNG can carry text chunks a marker
  * walk would have to parse too, and the re-encode is what strips them.
  *

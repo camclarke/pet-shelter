@@ -38,7 +38,7 @@ test('requireRole( appears once, inside guard(), with DONATION_ROLES', () => {
   const guard = HANDLER.slice(HANDLER.indexOf('async function guard('), HANDLER.indexOf('async function readJson('));
   assert.match(guard, /requireRole\(request, deps\.verifyIdToken, DONATION_ROLES\)/);
   assert.match(guard, /if \(write && !signedInRecently\(check\.authTimeS, deps\.nowMs\(\)\)\)/);
-  assert.match(code('src/config/roles.ts'), /export const DONATION_ROLES: readonly RoleKey\[\] = \['finance', 'su'\];/);
+  assert.match(code('src/config/roles.ts'), /export const DONATION_ROLES: readonly RoleKey\[\] = \['finance', 'owner', 'su'\];/);
 });
 
 test('every authenticated handler calls guard() FIRST, before touching the request; writes demand a recent sign-in', () => {

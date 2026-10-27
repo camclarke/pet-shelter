@@ -2,7 +2,7 @@ import { handleDonationPropose } from '@/lib/donations-handler';
 import { donationDeps } from '@/lib/donations-server';
 
 /**
- * POST /api/donations/propose — Tesorería or the superuser proposes new
+ * POST /api/donations/propose — Tesorería, the shelter owner or the superuser proposes new
  * donation details. JSON body: `ProposeRequest` in `donations-protocol.ts`.
  *
  * Everything that decides lives in `src/lib/donations-handler.ts` and is

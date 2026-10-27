@@ -72,15 +72,15 @@ test('Tesorería: isFinance() is hasRole(finance), and is used ONLY inside the d
   assert.doesNotMatch(STORAGE, /finance/);
 });
 
-test('donationSettings: current is public read; pending and history are Tesorería + su; no client writes', () => {
+test('donationSettings: current is public read; pending and history are Tesorería + owner + su; no client writes', () => {
   const donations = block(FIRESTORE, 'match /donationSettings/current {', 'match /{document=**} {');
   const allows = [...donations.matchAll(/allow ([a-z, ]+): if ([^;]+);/g)].map((m) => `${m[1]}: ${m[2]!.trim()}`);
   assert.deepEqual(allows, [
     'read: true',
     'write: false',
-    'read: isFinance() || isSuper()',
+    'read: isFinance() || isShelterOwner() || isSuper()',
     'write: false',
-    'read: isFinance() || isSuper()',
+    'read: isFinance() || isShelterOwner() || isSuper()',
     'write: false',
   ]);
   assert.match(donations, /match \/pending\/\{pendingId\} \{/);
@@ -88,9 +88,10 @@ test('donationSettings: current is public read; pending and history are Tesorer�
   assert.doesNotMatch(donations, DOCUMENT_READ);
 });
 
-test('roleAudit: read by the superuser, written by no client', () => {
+test('roleAudit: read by the owner and the superuser — never isAdmin() — written by no client', () => {
   const audit = block(FIRESTORE, 'match /roleAudit/{entryId} {', '}');
-  assert.match(audit, /allow read: if isSuper\(\);/);
+  assert.match(audit, /allow read: if isShelterOwner\(\) \|\| isSuper\(\);/);
+  assert.doesNotMatch(audit, /isAdmin\(\)|hasRole\('admin'\)|isFinance\(\)/);
   assert.match(audit, /allow write: if false;/);
   assert.equal((audit.match(/allow /g) ?? []).length, 2);
 });
