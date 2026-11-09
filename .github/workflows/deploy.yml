@@ -26,28 +26,35 @@
 name: Deploy
 
 on:
-  push:
-    branches: [master]
-    # An allow-list of what can change the IMAGE, replacing the old ignore-list.
-    # An ignore-list deploys for every new folder by accident; this one deploys
-    # only for files the Dockerfile's build actually reads. Rules, Terraform,
-    # docs, scripts and design assets do not rebuild the container, and
-    # infrastructure is applied deliberately, by a human.
-    #
-    # ⚠️ A merge that touches none of these does NOT deploy, and a deploy that
-    # fails is no longer "repaired" by the next docs merge. Re-run it from the
-    # Actions tab, or start it by hand (`workflow_dispatch` below).
-    paths:
-      - 'src/**'
-      - 'public/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'next.config.ts'
-      - 'Dockerfile'
-      - '.dockerignore'
-      - '.github/workflows/deploy.yml'
-      - '.github/workflows/ci.yml'
+  # ⏸ PAUSED 2026-11-09. Billing is unlinked from the `wawitas` project ahead of
+  # the end of its free trial, so Cloud Run and Artifact Registry cannot take a
+  # deploy and every push to master would end in a failed run. The push
+  # trigger is commented out, not deleted: to resume, re-link billing (or point
+  # PROJECT_ID at the new project) and uncomment the block below unchanged.
+  # Manual runs stay possible from the Actions tab.
+  #
+  # push:
+  #   branches: [master]
+  #   # An allow-list of what can change the IMAGE, replacing the old ignore-list.
+  #   # An ignore-list deploys for every new folder by accident; this one deploys
+  #   # only for files the Dockerfile's build actually reads. Rules, Terraform,
+  #   # docs, scripts and design assets do not rebuild the container, and
+  #   # infrastructure is applied deliberately, by a human.
+  #   #
+  #   # ⚠️ A merge that touches none of these does NOT deploy, and a deploy that
+  #   # fails is no longer "repaired" by the next docs merge. Re-run it from the
+  #   # Actions tab, or start it by hand (`workflow_dispatch` below).
+  #   paths:
+  #     - 'src/**'
+  #     - 'public/**'
+  #     - 'package.json'
+  #     - 'package-lock.json'
+  #     - 'tsconfig.json'
+  #     - 'next.config.ts'
+  #     - 'Dockerfile'
+  #     - '.dockerignore'
+  #     - '.github/workflows/deploy.yml'
+  #     - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 # One deploy at a time. Two overlapping runs would race on the same service and
